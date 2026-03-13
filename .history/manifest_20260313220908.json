@@ -3,8 +3,8 @@
 	"name": "SVault Coach",
 	"version": "0.0.1",
 	"minAppVersion": "1.5.0",
-	"description": "Local knowledge Q&A and interview practice from your vault using Ollama.",
-	"author": "Wanjin5508",
+	"description": "Demonstrates some of the capabilities of the Obsidian API.",
+	"author": "Obsidian",
 	"authorUrl": "https://obsidian.md",
 	"fundingUrl": "https://obsidian.md/pricing",
 	"isDesktopOnly": false
