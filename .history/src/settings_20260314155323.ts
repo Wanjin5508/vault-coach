@@ -9,7 +9,7 @@ export const DEFAULT_SETTINGS: CoachSettings = {
 	mySetting: 'default'
 }
 
-export class CoachSettingTab extends PluginSettingTab {
+export class SampleSettingTab extends PluginSettingTab {
 	plugin: MyPlugin;
 
 	constructor(app: App, plugin: MyPlugin) {

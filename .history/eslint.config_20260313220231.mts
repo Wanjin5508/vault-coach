@@ -30,6 +30,5 @@ export default tseslint.config(
 		"version-bump.mjs",
 		"versions.json",
 		"main.js",
-		".history/**",
 	]),
 );

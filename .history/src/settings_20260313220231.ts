@@ -1,15 +1,15 @@
 import {App, PluginSettingTab, Setting} from "obsidian";
 import MyPlugin from "./main";
 
-export interface CoachSettings {
+export interface MyPluginSettings {
 	mySetting: string;
 }
 
-export const DEFAULT_SETTINGS: CoachSettings = {
+export const DEFAULT_SETTINGS: MyPluginSettings = {
 	mySetting: 'default'
 }
 
-export class CoachSettingTab extends PluginSettingTab {
+export class SampleSettingTab extends PluginSettingTab {
 	plugin: MyPlugin;
 
 	constructor(app: App, plugin: MyPlugin) {
