@@ -1,7 +1,7 @@
-import {App, PluginSettingTab, Setting, Vault} from "obsidian";
-import  VaultCoach from "./main"; // 默认导出，不使用花括号
+import {App, PluginSettingTab, Setting} from "obsidian";
+import MyPlugin from "./main";
 
-// 该文件负责设置类型和设置面板 UI 以及持久化入口
+// 该文件
 
 export interface CoachSettings {
 	mySetting: string;
@@ -12,9 +12,9 @@ export const DEFAULT_SETTINGS: CoachSettings = {
 }
 
 export class CoachSettingTab extends PluginSettingTab {
-	plugin: VaultCoach;
+	plugin: MyPlugin;
 
-	constructor(app: App, plugin: VaultCoach) {
+	constructor(app: App, plugin: MyPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}

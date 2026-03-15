@@ -1,7 +1,7 @@
 import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
 import {DEFAULT_SETTINGS, CoachSettings, CoachSettingTab} from "./settings";
 
-// 该文件负责插件声明周期和注册能力
+// 该文件负责
 
 export default class VaultCoach extends Plugin {
 	settings: CoachSettings;

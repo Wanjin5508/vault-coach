@@ -14,7 +14,7 @@ export const DEFAULT_SETTINGS: CoachSettings = {
 export class CoachSettingTab extends PluginSettingTab {
 	plugin: VaultCoach;
 
-	constructor(app: App, plugin: VaultCoach) {
+	constructor(app: App, plugin: Vault) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
