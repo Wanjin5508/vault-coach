@@ -2,6 +2,15 @@
 
 A local RAG-style study and interview practice plugin for your vault, powered by Ollama.
 
+Project structure:
+src/
+  main.ts
+  settings.ts
+  view.ts
+  types.ts
+  constants.ts
+styles.css
+
 ---
 
 # Obsidian Sample Plugin

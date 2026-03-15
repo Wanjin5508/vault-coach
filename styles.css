@@ -6,3 +6,113 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+.vault-coach-view {
+	height: 100%;
+}
+
+.vault-coach-root {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 12px;
+	box-sizing: border-box;
+	gap: 12px;
+}
+
+.vault-coach-header {
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding-bottom: 8px;
+}
+
+.vault-coach-header h3 {
+	margin: 0 0 6px 0;
+	font-size: 18px;
+}
+
+.vault-coach-header p {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.vault-coach-message-list {
+	flex: 1;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding-right: 4px;
+}
+
+.vault-coach-empty-state {
+	color: var(--text-muted);
+	font-size: 13px;
+	text-align: center;
+	margin-top: 20px;
+}
+
+.vault-coach-message-wrapper {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.vault-coach-message-wrapper.user {
+	align-items: flex-end;
+}
+
+.vault-coach-message-wrapper.assistant {
+	align-items: flex-start;
+}
+
+.vault-coach-message-meta {
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+.vault-coach-message-bubble {
+	max-width: 90%;
+	padding: 10px 12px;
+	border-radius: 12px;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.vault-coach-message-bubble.user {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.vault-coach-message-bubble.assistant {
+	background-color: var(--background-secondary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+}
+
+.vault-coach-input-area {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: 10px;
+}
+
+.vault-coach-input {
+	width: 100%;
+	min-height: 90px;
+	resize: vertical;
+	box-sizing: border-box;
+	padding: 8px;
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.vault-coach-button-row {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+}

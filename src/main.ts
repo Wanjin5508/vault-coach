@@ -1,99 +1,199 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, CoachSettings, CoachSettingTab} from "./settings";
+import { Notice, Plugin, WorkspaceLeaf } from 'obsidian';
+import { VIEW_TYPE_VAULT_COACH } from './constants';
+import { DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
+import type { ChatMessage, VaultCoachSettings } from "./types";
+import { VaultCoachView } from "./view";
 
-// 该文件负责插件声明周期和注册能力
 
+/**
+ *  VaultCoach 插件主类， 
+ * 所有插件都会从这个类开始
+ */
 export default class VaultCoach extends Plugin {
-	settings: CoachSettings;
+	// 插件设置
+	settings: VaultCoachSettings = DEFAULT_SETTINGS;
 
-	async onload() {
+	/**
+	 * 当前运行时的对话消息列表
+	 * ! 注意: 这里先只保存在内存中，重启 Obsidian 后会重置
+	 * TODO 后续可以把它保存在 data.json 中
+	 */
+	private messages: ChatMessage[] = [];
+
+	// 插件加载时调用
+	async onload(): Promise<void> {
+		// 1. 先加载设置
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Coach', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('Hi, you are clicking on the local coach!');
+		// 2. 初始化会话
+		this.resetConversation();
+
+		// 3. 注册自定义视图
+		this.registerView(
+			VIEW_TYPE_VAULT_COACH,
+			(leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this)
+		);
+
+		// 4. 注册命令：打开右侧边栏中的 VaultCoach
+		this.addCommand({
+			// id: "open-vault-coach-view",
+			id: "open-view",
+			name: "打开 VaultCoach 右侧边栏",
+			callback: async () => {
+				await this.activateView();
+			},
 		});
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
+		// 5。 注册命令，重置对话
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
+			id: "reset-vault-coach-conversation",
+			name: "重置 VaultCoach 对话",
 			callback: () => {
-				new CoachModal(this.app).open();
-			}
+				this.resetConversation();
+				this.refreshAllViews();
+				new Notice("VaultCoach 对话已重置。");
+			},
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new CoachModal(this.app).open();
-					}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
+		// 6. 左侧 Ribbon 图标，点击可以快速打开右侧边栏视图
+		this.addRibbonIcon("message-square", "Open VaultCoach", () => {
+			void this.activateView();
+		});
+
+		// 7. 注册设置页
+		this.addSettingTab(new VaultCoachSettingTab(this.app, this));
+
+		// 8. 如果设置为启动时自动打开，则在布局准备完成后打开右侧视图
+		this.app.workspace.onLayoutReady(() => {
+			if (this.settings.openInRightSidebarOnStartup) {
+				void this.activateView();
 			}
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new CoachSettingTab(this.app, this));
+	}
 
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		// this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+	// 插件卸载时调用
+	onunload(): void {
+		// 移除所有同类型的视图
+		this.app.workspace.detachLeavesOfType(VIEW_TYPE_VAULT_COACH);
 
 	}
 
-	onunload() {
+	// 加载设置
+	async loadSettings(): Promise<void> {
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			(await this.loadData()) as Partial<VaultCoachSettings>
+		);
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<CoachSettings>);
-	}
-
-	async saveSettings() {
+	// 保存设置
+	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 	}
+
+	// * 打开右侧边栏中的 VaultCoach 视图，这是实现“显示在右侧边栏同时在右上标签区域可切换的关键方法“
+	async activateView(): Promise<void> {
+		const { workspace } = this.app;
+
+		// 先检查当前是否已经打开了这个视图
+		let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH)[0] ?? null;
+
+		// 如果没有，就在右侧边栏新建一个
+		if (!leaf) {
+			leaf = workspace.getRightLeaf(false);
+
+			if (!leaf) {
+				new Notice("无法在右侧边栏中打开 VaultCoach。");
+				return;
+			}
+
+			await leaf.setViewState({
+				type: VIEW_TYPE_VAULT_COACH,
+				active: true,
+			});
+		}
+
+		// 让这个叶子节点显示出来
+		workspace.revealLeaf(leaf);
+	}
+
+	// 获取当前全部消息，提供给视图层使用
+	getMessages(): ChatMessage[] {
+		return this.messages;
+	}
+
+	// 添加用户消息
+	addUserMessage(text: string): void {
+		this.messages.push({
+			role: "user",
+			text, 
+			createdAt: Date.now(),
+		})
+	};
+
+	// 添加助手消息
+	addAssistantMessage(text: string): void {
+		this.messages.push({
+			role: "assistant",
+			text, 
+			createdAt: Date.now(),
+		});
+	}
+
+	// 重置当前会话，清空旧的消息，并重新放入一条默认欢迎语
+	resetConversation(): void {
+		this.messages = [
+			{
+				role: "assistant",
+				text: this.settings.defaultGreeting || `你好，我是 ${this.settings.assistantName}。`,
+				createdAt: Date.now(),
+			},
+		];
+	}
+
+	// 刷新所有已经打开的 VaultCoach 视图。比如修改设置、清空对话后都可以调用它
+	refreshAllViews(): void {
+		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH);
+
+		for (const leaf of leaves) {
+			const view = leaf.view;
+			if (view instanceof VaultCoachView) {
+				view.refresh();
+			}
+		}
+	}
+
+	/**  当前版本只是一个 demo，后续需要在这里接入
+	 * - 本地 LLM
+	 * - Ollama
+	 * - RAG 检索
+	 * - 当前笔记上下文
+	 * -记忆
+	 * 其他模态，例如图像识别、pdf 读取。。。
+	 */
+	async generateDemoReply(userText: string): Promise<string> {
+		// 模拟一点异步延迟，从而加深 async / await的理解
+		await new Promise((resolve) => window.setTimeout(resolve, 300))
+		console.log("这里是异步延迟的模拟")
+
+		return [`我是 ${this.settings.assistantName}。`,
+			"",
+			`你刚刚输入的是：${userText}`,
+			"",
+			"当前这版代码先完成了以下功能：",
+			"1. 在 Obsidian 右侧边栏显示对话界面",
+			"2. 支持输入消息和显示回复",
+			"3. 支持设置页与启动自动打开",
+			"",
+			"下一步你可以把这里替换成真正的本地 LLM / RAG 调用逻辑。",
+		].join("\n");
+
+	}
+
+
 }
 
-class CoachModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
 
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
