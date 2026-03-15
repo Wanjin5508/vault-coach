@@ -38,7 +38,7 @@ export default class VaultCoach extends Plugin {
 		this.addCommand({
 			// id: "open-vault-coach-view",
 			id: "open-view",
-			name: "打开 VaultCoach 右侧边栏",
+			name: "Open the sidebar view on the right side",
 			callback: async () => {
 				await this.activateView();
 			},
@@ -46,17 +46,18 @@ export default class VaultCoach extends Plugin {
 
 		// 5。 注册命令，重置对话
 		this.addCommand({
-			id: "reset-vault-coach-conversation",
-			name: "重置 VaultCoach 对话",
+			// id: "reset-vault-coach-conversation",
+			id: "reset-onversation",
+			name: "Reset plugin 对话",
 			callback: () => {
 				this.resetConversation();
 				this.refreshAllViews();
-				new Notice("VaultCoach 对话已重置。");
+				new Notice("Reset successful.");
 			},
 		});
 
 		// 6. 左侧 Ribbon 图标，点击可以快速打开右侧边栏视图
-		this.addRibbonIcon("message-square", "Open VaultCoach", () => {
+		this.addRibbonIcon("message-square", "Open vault coach", () => {
 			void this.activateView();
 		});
 
@@ -75,8 +76,7 @@ export default class VaultCoach extends Plugin {
 	// 插件卸载时调用
 	onunload(): void {
 		// 移除所有同类型的视图
-		this.app.workspace.detachLeavesOfType(VIEW_TYPE_VAULT_COACH);
-
+		// this.app.workspace.detachLeavesOfType(VIEW_TYPE_VAULT_COACH);
 	}
 
 	// 加载设置
@@ -105,7 +105,7 @@ export default class VaultCoach extends Plugin {
 			leaf = workspace.getRightLeaf(false);
 
 			if (!leaf) {
-				new Notice("无法在右侧边栏中打开 VaultCoach。");
+				new Notice("Cannot create a new view");
 				return;
 			}
 
@@ -116,7 +116,7 @@ export default class VaultCoach extends Plugin {
 		}
 
 		// 让这个叶子节点显示出来
-		workspace.revealLeaf(leaf);
+		void workspace.revealLeaf(leaf);
 	}
 
 	// 获取当前全部消息，提供给视图层使用
@@ -176,7 +176,7 @@ export default class VaultCoach extends Plugin {
 	async generateDemoReply(userText: string): Promise<string> {
 		// 模拟一点异步延迟，从而加深 async / await的理解
 		await new Promise((resolve) => window.setTimeout(resolve, 300))
-		console.log("这里是异步延迟的模拟")
+		console.warn("这里是异步延迟的模拟")
 
 		return [`我是 ${this.settings.assistantName}。`,
 			"",

@@ -31,7 +31,10 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		// 设置页标题
-		containerEl.createEl("h2", {text: "VaultCoach 设置"});
+		// containerEl.createEl("h2", {text: "VaultCoach 设置"});
+		new Setting(containerEl)
+			.setHeading()
+			.setName("Settings")
 
 		// 设置 1. 助手名称
 		new Setting(containerEl)
@@ -66,8 +69,8 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 
 		// 设置 3：启动时自动打开右侧边栏
 		new Setting(containerEl)
-		.setName("启动时自动打开 VaultCoach")
-		.setDesc("开启后，Obsidian 启动完成时会自动在右侧边栏打开 VaultCoach。")
+		.setName("Open vaultcoach automatically on startup")
+		.setDesc("Automatically open vaultcoach when Obsidian starts up.")
 		.addToggle((toggle) => 
 			toggle
 			.setValue(this.plugin.settings.openInRightSidebarOnStartup)
