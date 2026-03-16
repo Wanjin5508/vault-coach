@@ -1,4 +1,4 @@
-import { Notice, Plugin, WorkspaceLeaf } from 'obsidian';
+import { Notice, Plugin, WorkspaceLeaf, TAbstractFile } from 'obsidian';
 import { VIEW_TYPE_VAULT_COACH } from './constants';
 import { DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
 import type { ChatMessage, VaultCoachSettings } from "./types";
