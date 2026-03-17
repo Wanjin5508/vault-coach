@@ -305,10 +305,10 @@ export class VaultCoachView extends ItemView {
 
             // 4. 生成助手回复 
             // TODO 目前还只是展示逻辑，后续再接入本地 LLM
-            const assistantReply = await this.plugin.generateDemoReply(userText);
+            const answer = await this.plugin.answerQuestion(userText);
 
             // 5. 把助手回复加入对话
-            this.plugin.addAssistantMessage(assistantReply);
+            this.plugin.addAssistantMessage(answer.text, answer.sources);
 
             // 6. 再次刷新消息区域
             this.renderMessages();
