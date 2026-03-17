@@ -18,6 +18,14 @@ export type ChatRole = "user" | "assistant";
 export type KnowledgeScopeMode = "wholeVault" | "specificFolder";
 
 /**
+ * 检索模式。
+ * - keyword：只使用关键词检索
+ * - vector：只使用向量检索
+ * - hybrid：同时使用关键词 + 向量，并进行结果融合
+ */
+export type RetrievalMode = "keyword" | "vector" | "hybrid";
+
+/**
  * 单条来源信息
  * 当前阶段只精确到 heading 级别，因此这里不保存 block id
  * 并且后续大概率不考虑更精确的来源定位
@@ -37,12 +45,17 @@ export interface AnswerSource {
 }
 
 
-// 单条对话消息数据结构
+/**
+ * 单条对话消息数据结构。
+ * 对于 assistant 消息，sources 是可选的；
+ * 对于 user 消息，通常不会携带 sources。
+ */
 export interface ChatMessage {
     // 消息发送者角色
     role: ChatRole;
 
     // 消息文本内容
+    // * 第二阶段开始，这里保存 Markdown 文本而不是纯文本。
     text: string;
 
     // 消息创建时间戳 ms
@@ -52,7 +65,15 @@ export interface ChatMessage {
     sources?: AnswerSource[];
 }
 
-// 插件设置项的数据结构
+/**
+ * 插件设置项的数据结构。
+ * 第二阶段在第一阶段的基础上加入：
+ * - query rewrite
+ * - 向量检索
+ * - hybrid merge
+ * - rerank
+ * - 本地模型连接参数
+ */
 export interface VaultCoachSettings {
     // 助手名称
     assistantName: string;
@@ -78,11 +99,55 @@ export interface VaultCoachSettings {
     // 关键词检索返回的候选片段数
     keywordSearchTopK: number;
 
+    // 向量检索返回的候选片段数
+    vectorSearchTopK: number;
+
+    // hybrid merge 后保留的候选上限
+    hybridSearchTopK: number;
+
+    // 进入 rerank 阶段的候选数量上限
+    rerankTopK: number;
+
+    // 最终拼接到 prompt 中的 chunk 数量
+    contextTopK: number;
+
     // 在回答下方最多展示多少条来源
     answerSourceLimit: number;
 
     // 来源区域是否默认折叠
     collapseSourcesByDefault: boolean;
+
+    // 默认检索模式，右侧栏启动后会使用这个模式
+    defaultRetrievalMode: RetrievalMode;
+
+    // 是否启用 query rewrite
+    enableQueryRewrite: boolean;
+
+    // 是否启用向量检索
+    enableVectorRetrieval: boolean;
+
+    // 是否启用 rerank
+    enableRerank: boolean;
+
+    // 生成回答时的 temperature
+    generationTemperature: number;
+
+    // 本地模型服务地址，例如 http://127.0.0.1:11434
+    llmBaseUrl: string;
+
+    // 用于生成最终回答和 query rewrite 的聊天模型
+    chatModel: string;
+
+    // 用于向量检索的 embedding 模型
+    embeddingModel: string;
+
+    // 可选：独立 rerank 服务地址。
+    // 如果为空，则自动回退到“本地启发式 rerank”。
+    rerankBaseUrl: string;
+
+    // rerank 服务对应的模型名。
+    // 只有在 rerankBaseUrl 非空时才会真正使用。
+    rerankModel: string;
 }
 
 /**
@@ -116,6 +181,15 @@ export interface IndexedChunk {
 }
 
 /**
+ * 向量索引中的单条向量记录。
+ * ? 稠密索引仍然保存在内存？当 vault 过大，会不会爆内存？
+ */
+export interface ChunkEmbedding {
+    chunkId: string;
+    vector: number[];
+}
+
+/**
  * 关键词检索命中的结果
  */
 export interface KeywordSearchHit {
@@ -127,6 +201,50 @@ export interface KeywordSearchHit {
 
     // 在本次搜索中命中的 token 列表，比啊你后续调试语解释
     matchedTokens: string[];
+}
+
+/**
+ * 向量检索命中的结果。
+ * similarity 是余弦相似度，越大表示越相关。
+ */
+export interface VectorSearchHit {
+    chunk: IndexedChunk;
+    score: number;
+    similarity: number;
+}
+
+/**
+ * hybrid merge 之后统一的候选结构。
+ * 这样后续 rerank 与 prompt 构造就不必区分候选来自哪条通道。
+ */
+export interface RetrievalCandidate {
+    chunk: IndexedChunk;
+    score: number;
+    matchedTokens: string[];
+    retrievalChannels: RetrievalMode[];
+    keywordScore?: number;
+    vectorScore?: number;
+}
+
+/**
+ * rerank 之后的候选结果。
+ * retrievalScore 表示召回阶段的融合分数；
+ * rerankScore 表示重排阶段的分数；
+ * finalScore 是最终排序分数。
+ */
+export interface RerankedCandidate extends RetrievalCandidate {
+    retrievalScore: number;
+    rerankScore: number;
+    finalScore: number;
+}
+
+/**
+ * Query rewrite 的结果，便于后续在 UI 或日志中解释“模型是如何改写问题的”。
+ */
+export interface QueryRewriteResult {
+    originalQuery: string;
+    rewrittenQuery: string;
+    useRewrite: boolean;
 }
 
 /**
@@ -148,12 +266,49 @@ export interface KnowledgeBaseStats {
 }
 
 /**
+ * 向量索引统计信息。
+ */
+export interface VectorIndexStats {
+    // 是否已经建立向量索引
+    ready: boolean;
+
+    // 已建立向量的 chunk 的数量
+    vectorCount: number;
+
+    // 向量维度，尚未建立时为 null
+    dimension: number | null;
+
+    // 最近一次完成的时间
+    lastBuiltAt: number | null;
+}
+
+/**
  * 插件内部统一的“回答结果“结构
  * 这样后续接入 LLM 时，只需要替换 answerQuestion 的内部逻辑，而不需要修改 view 层的渲染代码
+ * 第二阶段在 text + sources 的基础上增加一些调试友好的元数据。
  */
 export interface AssistantAnswer {
     text: string;
     sources: AnswerSource[];
+    retrievalModeUsed:RetrievalMode;
+    queryRewrite: QueryRewriteResult;
+}
+
+/**
+ * 发送给本地聊天模型的消息结构。
+ * 这个类型与 Ollama / OpenAI 风格消息结构兼容度较高。
+ */
+export interface LocalChatMessage {
+    role: "system" | " user" | "assistant";
+    content: string;
+}
+
+/**
+ * /v1/rerank 风格接口中常见的返回元素结构。
+ */
+export interface RerankResultItem {
+    index: number;
+    relevance_score: number;
 }
 
 
