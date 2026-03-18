@@ -299,7 +299,7 @@ export interface AssistantAnswer {
  * 这个类型与 Ollama / OpenAI 风格消息结构兼容度较高。
  */
 export interface LocalChatMessage {
-    role: "system" | " user" | "assistant";
+    role: "system" | "user" | "assistant";
     content: string;
 }
 

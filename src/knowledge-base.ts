@@ -88,7 +88,47 @@ export class VaultKnowledgeBase {
      * 获取只读的索引统计信息。
      */
     getStats(): KnowledgeBaseStats {
-        return { ...this.stats }; // ? 什么用法？
+        return { 
+            ...this.stats 
+        }; // ? 什么用法？
+    }
+
+    /**
+     * 获取全部 chunk。
+     * 第二阶段建立 embedding 时会用到这个方法。
+     */
+    getAllChunks(): IndexedChunk[] {
+        return [...this.chunks];
+    }
+
+    /**
+     * 当前是否已经拥有向量索引。
+     */
+    hasVectorIndex(): boolean {
+        return this.embeddingMap.size > 0;
+    }
+
+    /**
+     * 清空现有的向量索引。
+     * 当文本索引重建后，旧向量已经不再可信，因此应一并清空。
+     */
+    clearVectorIndex(): void {
+        this.embeddingMap.clear();
+    }
+
+    /**
+     * 批量写入 chunk 向量。
+     * 上层 RAG 引擎会在拿到 embedding 结果后调用这个方法。
+     */
+    setEmbeddings(items: ChunkEmbedding[]): void {
+        this.embeddingMap.clear();
+
+        for (const item of items) {
+            const normalizedVector: number[] = this.normalizeVector(item.vector);
+            if (normalizedVector.length > 0) {
+                this.embeddingMap.set(item.chunkId, normalizedVector);
+            }
+        }
     }
 
     /**
@@ -98,6 +138,9 @@ export class VaultKnowledgeBase {
      * 1. 第一阶段先追求结构清晰，便于学习和调试
      * 2. vault 规模通常可控，先用全量方案足够稳定
      * 3. 后续如果需要性能优化，再把它升级为增量索引即可
+     *  * 注意：
+     * - 这里只负责扫描、切块和倒排索引；
+     * - 向量索引由上层额外建立，因为向量索引依赖外部 embedding 模型。
      */
     async rebuildIndex(): Promise<KnowledgeBaseStats> {
         this.clearIndex();
@@ -134,10 +177,10 @@ export class VaultKnowledgeBase {
      * 对外提供的关键词检索接口。
      *
      * 这里不是简单的 “includes 判断”，而是做了一个适合第一阶段使用的轻量级打分：
-     * - token 命中次数（tf）
-     * - token 逆文档频率（idf）
-     * - 完整短语命中加分
-     * - 标题命中加分
+     *   - token 命中次数（tf）
+     *   - token 逆文档频率（idf）
+     * * - 完整短语命中加分
+     * * - 标题命中加分
      */
     search(query: string, limit: number): KeywordSearchHit[] {
         const trimmedQuery: string = query.trim();
@@ -214,6 +257,43 @@ export class VaultKnowledgeBase {
         return hits.slice(0, limit);
 
     }
+
+    /**
+     * 对外提供的向量检索接口。
+     *
+     * 输入要求：
+     * - queryEmbedding 必须已经是“与 chunk embedding 同维度”的向量；
+     * - 如果调用者没有事先归一化，也没有关系，这里会再做一次 L2 归一化。
+     */
+    searchVector(queryEmbedding: number[], limit: number): VectorSearchHit[] {
+        if (this.embeddingMap.size === 0) {
+            return [];
+        }
+
+        const normalizeQueryVector: number[] = this.normalizeVector(queryEmbedding);
+        if (normalizeQueryVector.length === 0) {
+            return [];
+        }
+
+        const hits: VectorSearchHit[] = [];
+
+        for (const [chunkId, chunkVector] of this.embeddingMap.entries()) {
+            const chunk: IndexedChunk | undefined = this.chunkMap.get(chunkId);
+            if (!chunk) {
+                continue;
+            }
+
+            const similarity: number = this.dot(normalizeQueryVector, chunkVector);
+            hits.push({
+                chunk,
+                score: similarity,
+                similarity,
+            });
+        }
+
+        hits.sort((left: VectorSearchHit, right: VectorSearchHit) => right.score - left.score);
+        return hits.slice(0, limit);
+    } 
 
     /**
      * 清空现有索引数据
@@ -374,8 +454,8 @@ export class VaultKnowledgeBase {
             if (headingMatch) {
                 flushBuffer();
 
-                const hashes = headingMatch[1];
-                const rawHeadingText = headingMatch[2];
+                const hashes: string | undefined = headingMatch[1];
+                const rawHeadingText: string | undefined = headingMatch[2];
 
                 // 在开启 noUncheckedIndexedAccess 时，
                 // 即使 headingMatch 不为 null，捕获组也仍然可能被推断为 undefined，
@@ -564,6 +644,50 @@ export class VaultKnowledgeBase {
     }
 
     /**
+     * 对向量做 L2 归一化。
+     *
+     * 归一化后的向量长度为 1，后续计算余弦相似度时可以直接使用点积。
+     * ? 不需要减去均值吗？
+     */
+    private normalizeVector(vector: number[]): number[] {
+        if (vector.length === 0 ){
+            return [];
+        }
+
+        let sumOfSquares = 0;
+        for (const value of vector) {
+            sumOfSquares += value * value;
+        }
+
+        const norm: number = Math.sqrt(sumOfSquares);
+        if (norm === 0) {
+            return [];
+        }
+
+        return vector.map((value:number) => value / norm);
+    }
+
+    /**
+     * 计算两个等长向量的点积。
+     *
+     * 注意：这里假设调用前已经保证维度兼容；
+     * 如果维度不一致，则以较短长度为准，避免运行时崩溃。
+     */
+    private dot(left: number[], right: number[]): number {
+        const length: number = Math.min(left.length, right.length);
+        let score = 0;
+
+        for (let index = 0; index < length; index+=1) {
+            const leftValue: number | undefined = left[index];
+            const rightValue: number | undefined = right[index];
+            if (leftValue != undefined && rightValue != undefined) {
+                score += leftValue * rightValue;
+            }
+        }
+        return score;
+    }
+
+    /**
      * 统一处理目录路径，避免用户输入前后空格或多余斜杠导致判断出错。
      */
     private normalizeFolderPath(folderPath: string): string {
@@ -589,11 +713,6 @@ export class VaultKnowledgeBase {
             ? `目录：${normalizedFolder}`
             : "目录：未指定";
     }
-
-
-
-
-
 }
 
 
