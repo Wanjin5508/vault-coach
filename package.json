@@ -1,6 +1,6 @@
 {
 	"name": "vault-coach",
-	"version": "0.0.1",
+	"version": "0.0.2",
     "description": "Local knowledge Q&A and interview practice from your vault using Ollama.", 
 	"main": "main.js",
 	"type": "module",
@@ -11,7 +11,7 @@
 		"lint": "eslint ."
 	},
 	"keywords": [],
-	"license": "0-BSD",
+	"license": "MIT",
 	"devDependencies": {
 		"@types/node": "^16.11.6",
 		"esbuild": "0.25.5",

@@ -1,8 +1,10 @@
 import { App, TFile, normalizePath } from "obsidian";
 import type {
+    ChunkEmbedding,
     IndexedChunk,
     KeywordSearchHit,
     KnowledgeBaseStats,
+    VectorSearchHit,
     VaultCoachSettings,
 } from "./types";
 
@@ -16,41 +18,57 @@ interface MarkdownSection {
 }
 
 /**
- * VaultKnowledgeBase 负责整个“非 LLM 检索骨架”的核心能力：
+ * VaultKnowledgeBase 负责第一阶段与第二阶段共享的“知识库底座”：
  * 1. 扫描 vault / 指定目录中的 Markdown 文件
- * 2. 按 Markdown 标题结构切分文本
- * 3. 构建倒排索引（inverted index）
- * 4. 提供关键词检索接口
+ * 2. 对 Markdown 文本进行 heading-aware chunking
+ * 3. 建立倒排索引用于关键词检索
+ * 4. 保存向量索引并提供向量检索接口
  *
- * 这样做的好处是：
- * - main.ts 只负责插件生命周期与状态调度
- * - view.ts 只负责界面展示
- * - 检索逻辑集中在一个独立类中，后续接入向量检索时更容易扩展
+ * 设计原则：
+ * - 它不直接关心 LLM 生成回答；
+ * - 它只负责“把 Markdown 变成可检索的数据结构”。
  */
 export class VaultKnowledgeBase {
     private readonly app: App;
     private readonly getSettings: () => VaultCoachSettings;  // ? 这什么类型？
 
-    // 索引后的 chunk 列表
+    /**
+     * 所有 chunk 的顺序数组。
+     * 顺序数组适合做遍历、批量 embedding 和统计。
+     */
     private chunks: IndexedChunk[] = [];
 
-    // 通过 chunkId 快速获取 chunk的映射表
+    /**
+     * chunkId -> chunk 的哈希映射。
+     * 适合在检索结果回填时快速定位 chunk。
+     */
     private readonly chunkMap: Map<string, IndexedChunk> = new Map<string, IndexedChunk>();
 
     /**
-     * 倒排索引：
-     * token -> (chunkId -> tf)
-     *
-     * 其中 tf（term frequency）表示该 token 在某个 chunk 中出现了多少次。
+     * 轻量级倒排索引：token -> (chunkId -> termFrequency)
+     *其中 tf（term frequency）表示该 token 在某个 chunk 中出现了多少次。
+     * 例如：
+     * "rag" -> {
+     *   "fileA::heading::0" => 3,
+     *   "fileB::heading::2" => 1,
+     * }
      */
     private readonly invertedIndex: Map<string, Map<string, number>> = new Map<string, Map<string, number>>();
+
+    /**
+     * 向量索引：chunkId -> L2 归一化后的 embedding 向量。
+     *
+     * 之所以存“归一化后的向量”，是因为这样做余弦相似度时只需要点积，
+     * 可以避免每次查询都重复计算范数。
+     */
+    private readonly embeddingMap: Map<string, number[]> = new Map<string, number[]>();
 
     // 当前索引的统计信息
     private stats: KnowledgeBaseStats = {
         fileCount: 0,
         chunkCount: 0,
         lastIndexedAt: null,
-        scopeDescription: "尚未建立索引。"
+        scopeDescription: "整个 Vault"
     }
 
     constructor(app: App, getSettings: () => VaultCoachSettings) {
@@ -59,10 +77,11 @@ export class VaultKnowledgeBase {
     }
 
     /**
-     * 当前是否已经至少建立过一次索引。
+     * 当前索引是否已经准备好。
+     * 这里的“准备好”只表示文本索引存在，并不强制要求向量索引也已建立。
      */
     isReady(): boolean {
-        return this.stats.lastIndexedAt !== null;
+        return this.stats.lastIndexedAt !== null && this.chunks.length > 0;
     }
 
     /**
