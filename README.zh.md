@@ -5,7 +5,11 @@
 # Vault Coach
 
 一个面向 Obsidian 的本地化 RAG 风格插件，用于 vault 内的知识检索、问答和面试练习，由 Ollama 驱动。
-
+![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
+![Version](https://img.shields.io/badge/version-0.0.1-1E90FF)
+![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
+![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
+[![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 ---
 
 ### 项目简介

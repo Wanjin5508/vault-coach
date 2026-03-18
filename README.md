@@ -2,9 +2,16 @@
   English | <a href="README.zh.md">中文</a>
 </p>
 
+
 # Vault Coach
 
 A local RAG-style Obsidian plugin for vault knowledge retrieval, question answering, and interview practice, powered by Ollama.
+
+![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
+![Version](https://img.shields.io/badge/version-0.0.1-1E90FF)
+![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
+![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
+[![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 
 ---
 
