@@ -1,7 +1,7 @@
 {
 	"id": "vault-coach",
 	"name": "Vault Coach",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"minAppVersion": "1.5.0",
 	"description": "Local knowledge Q&A and interview practice from your vault using Ollama.",
 	"author": "Wanjin5508",

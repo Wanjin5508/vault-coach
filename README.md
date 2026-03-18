@@ -247,3 +247,11 @@ Vault Coach is intended to evolve from:
 * **Ollama-powered generation**
 * **Modular retrieval architecture**
 * **Extensible toward graph and ontology reasoning**
+
+### License
+
+This project is licensed under the MIT License.
+
+Starting from version 0.0.2, Vault Coach is distributed under the MIT License.
+If you are using earlier revisions of the project, please refer to the license that applied to those revisions.
+See the [LICENSE](./LICENSE) file for details.
