@@ -1,15 +1,16 @@
 import { Notice, Plugin, WorkspaceLeaf, TAbstractFile } from 'obsidian';
 import { VIEW_TYPE_VAULT_COACH } from './constants';
 import { VaultKnowledgeBase } from 'knowledge-base';
+import { AdvancedRagEngine } from 'rag-engine';
 import { DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
 import type { 
-	AnswerSource,
-	AssistantAnswer,
-	ChatMessage, 
-	IndexedChunk,
-	KeywordSearchHit,
-	KnowledgeBaseStats,
-	VaultCoachSettings 
+    AnswerSource,
+    AssistantAnswer,
+    ChatMessage,
+    KnowledgeBaseStats,
+    RetrievalMode,
+    VectorIndexStats,
+    VaultCoachSettings,
 } from "./types";
 import { VaultCoachView } from "./view";
 
@@ -17,6 +18,12 @@ import { VaultCoachView } from "./view";
 /**
  *  VaultCoach 插件主类， 
  * 所有插件都会从这个类开始
+ * 
+ *  * 职责拆分：
+ * - main.ts：插件入口、全局状态、命令注册、视图注册、索引重建调度
+ * - knowledge-base.ts：扫描、切块、关键词索引、向量索引容器
+ * - rag-engine.ts：第二阶段的 Advanced RAG 流程
+ * - view.ts：右侧边栏 UI
  */
 export default class VaultCoach extends Plugin {
 	// 插件设置
@@ -30,10 +37,16 @@ export default class VaultCoach extends Plugin {
 	private messages: ChatMessage[] = [];
 
 	/**
+	 * 第一阶段建立的知识库基础设施。
 	 * 非 LLM 阶段的知识库核心对象
 	 * 该对象负责扫描用户指定的目录下的 md 文件，并进行切块、索引构建以及关键词检索
 	 */
 	private knowledgeBase!: VaultKnowledgeBase;
+
+	/**
+	 * 第二阶段新增的 Advanced RAG 引擎。
+	 */
+	private ragEngine: AdvancedRagEngine;
 
 	/**
      * dirty 标记表示“当前索引可能已经过期，需要重建”。
@@ -42,7 +55,16 @@ export default class VaultCoach extends Plugin {
      * - 用户修改了设置中的知识库目录
      * - vault 中有 Markdown 文件被创建/修改/删除/重命名
      */
-	private knowledgeBaseDirty:boolean = true;
+	private knowledgeBaseDirty: boolean = true;
+
+	/**
+     * 当前运行时生效的检索模式。
+     *
+     * 为什么不直接只用 settings.defaultRetrievalMode：
+     * - default 更像“初始值”；
+     * - runtimeMode 则允许用户在当前会话里随时切换，而不一定要改设置页。
+     */
+	private runtimeRetrievalMode: RetrievalMode = DEFAULT_SETTINGS.defaultRetrievalMode;
 
 	// 插件加载时调用
 	async onload(): Promise<void> {
@@ -50,7 +72,13 @@ export default class VaultCoach extends Plugin {
 		await this.loadSettings();
 
 		// 2. 初始化知识库对象
+		this.runtimeRetrievalMode = this.settings.defaultRetrievalMode;
 		this.knowledgeBase = new VaultKnowledgeBase(this.app, () => this.settings);
+		this.ragEngine = new AdvancedRagEngine(
+			this.knowledgeBase,
+			() => this.settings,
+			() => this.runtimeRetrievalMode,
+		)
 
 		// 3. 初始化会话
 		this.resetConversation();
@@ -93,6 +121,7 @@ export default class VaultCoach extends Plugin {
 		});
 
 		// 8. 左侧 Ribbon 图标，点击可以快速打开右侧边栏视图
+		// TODO 考虑前端美化，使用更好看的图标，往上有资源
 		this.addRibbonIcon("message-square", "Open vault coach", () => {
 			void this.activateView();
 		});
@@ -160,6 +189,10 @@ export default class VaultCoach extends Plugin {
 		return this.knowledgeBase.getStats();
 	}
 
+	getVectorIndexStats(): VectorIndexStats {
+        return this.ragEngine.getVectorIndexStats();
+    }
+
 	/**
      * 获取当前索引范围的人类可读描述。
      */
@@ -168,17 +201,45 @@ export default class VaultCoach extends Plugin {
 		return stats.scopeDescription;
 	}
 
+	getRuntimeRetrievalMode(): RetrievalMode {
+        return this.runtimeRetrievalMode;
+    }
+
+    setRuntimeRetrievalMode(mode: RetrievalMode): void {
+        this.runtimeRetrievalMode = mode;
+        this.refreshAllViews();
+    }
+
 	/**
      * 手动触发一次知识库重建。
+	 * 
+	 *  * 第二阶段的重建现在包含两部分：
+     * 1. 文本索引（扫描 / 切块 / 倒排索引）
+     * 2. 向量索引（embedding）
      */
 	async rebuildKnowledgeBase(showNotice: boolean): Promise<void> {
 		try {
-			const stats: KnowledgeBaseStats = await this.knowledgeBase.rebuildIndex();
+			const textStats: KnowledgeBaseStats = await this.knowledgeBase.rebuildIndex();
+			let vectorStats: VectorIndexStats = this.ragEngine.getVectorIndexStats();
+            let vectorBuildWarning = "";
+
+			try {
+                vectorStats = await this.ragEngine.rebuildVectorIndex();
+            } catch (vectorError: unknown) {
+                console.error("[VaultCoach] 向量索引建立失败，将回退到关键词检索。", vectorError);
+                vectorBuildWarning = "向量索引建立失败，已自动回退到关键词检索。";
+            }
+
 			this.knowledgeBaseDirty = false;
 			this.refreshAllViews();
 
 			if (showNotice) {
-				new Notice(`索引完成：${stats.fileCount} 个文件，${stats.chunkCount} 个片段。`);
+				const vectorInfo: string = this.settings.enableVectorRetrieval
+                    ? `，向量数 ${vectorStats.vectorCount}`
+                    : "";
+                const message: string = `索引完成：${textStats.fileCount} 个文件，${textStats.chunkCount} 个片段${vectorInfo}。`;
+
+                new Notice(vectorBuildWarning.length > 0 ? `${message} ${vectorBuildWarning}` : message);
 			}
 		} catch (error: unknown) {
 			console.error("[VaultCoach] 重建索引失败", error);
@@ -261,12 +322,15 @@ export default class VaultCoach extends Plugin {
 
 	/**
      * 重置当前会话，清空旧消息，并重新放入一条默认欢迎语。
+	 * 
+	 * 第二阶段开始，默认欢迎语允许使用 Markdown，
+     * 因此这里直接把 setting 中的字符串原样作为消息正文保存。
      */
 	resetConversation(): void {
 		this.messages = [
 			{
 				role: "assistant",
-				text: this.settings.defaultGreeting || `你好，我是 ${this.settings.assistantName}。`,
+				text: this.settings.defaultGreeting || `# 你好\n\n我是 ${this.settings.assistantName}。`,
 				createdAt: Date.now(),
 			},
 		];
@@ -288,134 +352,27 @@ export default class VaultCoach extends Plugin {
 	}
 
 	/**
-     * 当前第一阶段的“回答逻辑”。
+     * 第二阶段的回答逻辑。
      *
-     * 注意：这不是 LLM 生成，而是：
+     * 处理流程：
      * 1. 确保索引可用
-     * 2. 执行关键词检索
-     * 3. 把命中的相关片段组织成一个可读回复
-     *
-     * 这样做的意义是：先把 RAG 的“检索骨架”走通，
-     * 等下一阶段接入本地 LLM 时，只需要替换这里的内部实现即可。
+     * 2. query rewrite
+     * 3. 根据当前 retrieval mode 做召回
+     * 4. hybrid merge
+     * 5. rerank
+     * 6. 构造 prompt 与上下文
+     * 7. 调用本地模型生成 Markdown 答案
      */
 	async answerQuestion(userText: string): Promise<AssistantAnswer> {
 		await this.ensureKnowledgeBaseReady();
 
-		const hits: KeywordSearchHit[] = this.knowledgeBase.search(
-			userText,
-			this.settings.keywordSearchTopK,
-		);
-
-		if (hits.length === 0) {
-			return {
-				text: [
-                    `我在当前知识库范围（${this.getKnowledgeScopeDescription()}）内没有找到明显相关的 Markdown 片段。`,
-                    "",
-                    "你可以尝试以下办法：",
-                    "1. 换一个更具体的关键词；",
-                    "2. 检查设置中的知识库范围是否正确；",
-                    "3. 点击“重建索引”后重新提问。",
-                ].join("\n"),
-                sources: [],
-			};
-		}
-
-		const previewHits: KeywordSearchHit[] = hits.slice(0, 3);
-		const answerLines: string[] = [
-			`我在当前知识库范围（${this.getKnowledgeScopeDescription()}）内检索到了 ${hits.length} 个相关片段。`,
-            "",
-            "下面先给出基于关键词检索的整理结果：",
-		];
-
-		for (let index = 0; index < previewHits.length; index += 1) {
-			// if (previewHits[index] === undefined) {
-			// 	continue;
-			// }
-
-			const hit = previewHits[index];
-			if (!hit) {
-				continue;
-			}
-
-            // const hit: KeywordSearchHit = previewHits[index];
-            const locationLabel: string = hit.chunk.primaryHeading
-                ? `${hit.chunk.fileName} > ${hit.chunk.primaryHeading}`
-                : hit.chunk.fileName;
-            const excerpt: string = this.createExcerpt(hit.chunk.text, 140);
-            const matchedTokens: string = hit.matchedTokens.slice(0, 8).join("、");
-
-            answerLines.push(`${index + 1}. ${locationLabel}`);
-            answerLines.push(`   ${excerpt}`);
-            if (matchedTokens.length > 0) {
-                answerLines.push(`   命中的关键词：${matchedTokens}`);
-            }
-            answerLines.push("");
-        }
-
-        answerLines.push("说明：当前阶段还没有接入 LLM，因此这里返回的是“检索到的相关片段整理结果”，而不是生成式总结。\n下一阶段你可以在此基础上接入问题改写、向量检索和重排序。 ");
-
-        return {
-            text: answerLines.join("\n"),
-            sources: this.buildAnswerSources(hits),
-        };
+		return this.ragEngine.answerQuestion(
+			userText, 
+			this.messages,
+			this.getKnowledgeScopeDescription(),
+		)
 	}
 
-	/**
-     * 根据检索命中结果构建可展示的来源列表。
-     *
-     * 这里会做一个轻量去重：
-     * - 如果多个 chunk 来自同一个文件的同一个 heading，则只展示一次来源
-     */
-	private buildAnswerSources(hits: KeywordSearchHit[]): AnswerSource[] {
-		const uniqueSources: AnswerSource[] = []
-		const seenKeys: Set<string> = new Set<string>();
-
-		for (const hit of hits) {
-			const source: AnswerSource = this.convertHitToSource(hit.chunk);
-			const uniqueKey: string = `${source.filePath}::${source.heading ?? "__root__"}`;
-
-			if (seenKeys.has(uniqueKey)) {
-				continue;
-			}
-
-			uniqueSources.push(source);
-			seenKeys.add(uniqueKey);
-
-			if (uniqueSources.length >= this.settings.answerSourceLimit) {
-				break;
-			}
-		}
-		return uniqueSources;
-	}
-
-	/**
-     * 将单个 chunk 转换为 AnswerSource。
-     */
-	private convertHitToSource(chunk: IndexedChunk): AnswerSource {
-		const displayLink: string = chunk.primaryHeading
-			? `[[${chunk.filePath}#${chunk.primaryHeading}]]`
-			: `[[${chunk.filePath}]]`;
-
-		return {
-			filePath: chunk.filePath,
-			heading: chunk.primaryHeading,
-			displayLink,
-			excerpt: this.createExcerpt(chunk.text, 180),
-
-		};
-	}
-
-	/**
-     * 生成简短摘录，用于消息正文与来源折叠区展示。
-     */
-	private createExcerpt(text: string, maxLength: number): string {
-		const normalizedText: string = text.replace(/\s+/g, "").trim();
-		if (normalizedText.length <= maxLength) {
-			return normalizedText;
-		}
-
-		return `${normalizedText.slice(0, maxLength)}...`;
-	}
 
 	/**
      * 点击来源后的跳转逻辑。
@@ -445,6 +402,7 @@ export default class VaultCoach extends Plugin {
      * - 等用户下一次提问或手动点击“重建索引”时再重建
      */
 	private registerVaultEvents(): void {
+		
 		const markDirtyIfMarkdown = (file: TAbstractFile): void => {
 			if (this.isMarkdownPath(file.path)) {
 				this.markKnowledgeBaseDirty();

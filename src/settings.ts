@@ -16,7 +16,7 @@ import {
     DEFAULT_VECTOR_TOP_K,
 } from "./constants"
 import type VaultCoach from "./main"; // 默认导出，不使用花括号
-import type { VaultCoachSettings, RetrievalMode } from "./types";
+import type { VaultCoachSettings } from "./types";
 
 /**
  * 插件默认设置

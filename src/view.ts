@@ -158,7 +158,7 @@ export class VaultCoachView extends ItemView {
         });
         resetButtonEl.addEventListener("click", () => {
             this.plugin.resetConversation();
-            this.renderMessages();
+            void this.renderMessages();
             this.focusInput();
         });
     }
@@ -174,7 +174,7 @@ export class VaultCoachView extends ItemView {
      */
     private renderMessageArea(rootEl: HTMLDivElement): void {
         this.messageListEl = rootEl.createDiv({cls: "vault-coach-message-list"});
-        this.renderMessages();
+        void this.renderMessages();
     }
 
     /**

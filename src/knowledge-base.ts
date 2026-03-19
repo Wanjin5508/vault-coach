@@ -182,7 +182,7 @@ export class VaultKnowledgeBase {
      * * - 完整短语命中加分
      * * - 标题命中加分
      */
-    search(query: string, limit: number): KeywordSearchHit[] {
+    searchKeyword(query: string, limit: number): KeywordSearchHit[] {
         const trimmedQuery: string = query.trim();
         if (!trimmedQuery) {
             return [];
