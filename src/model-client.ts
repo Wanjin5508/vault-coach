@@ -19,13 +19,13 @@ interface OllamaEmbedResponse {
     error?: string;
 }
 
-interface OllamaStreamChunk {
-    message?: {
-        content?: string;
-    };
-    done?: boolean;
-    error?: string;
-}
+// interface OllamaStreamChunk {
+//     message?: {
+//         content?: string;
+//     };
+//     done?: boolean;
+//     error?: string;
+// }
 
 interface RerankResponse {
     results?: RerankResultItem[];
