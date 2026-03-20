@@ -32,6 +32,11 @@ export class VaultCoachView extends ItemView {
     // 当前是否正等待插件完成检索回复
     private isBusy = false;
 
+    // 新增：回答流式输出期间使用的临时助手气泡。
+    private streamingWrapperEl: HTMLDivElement | null = null;
+    private streamingBubbleEl: HTMLDivElement | null = null;
+    private streamingText = "";
+
     constructor(leaf: WorkspaceLeaf, plugin: VaultCoach) {
         super(leaf);
         this.plugin = plugin;
@@ -95,7 +100,7 @@ export class VaultCoachView extends ItemView {
         const headerEl: HTMLDivElement = rootEl.createDiv({ cls: "vault-coach-header"});
         headerEl.createEl("h3", { text: this.plugin.settings.assistantName});
         headerEl.createEl("p", {
-            text: "Query rewrite + 向量检索 + 混合召回 + rerank + Markdown 回答渲染。"
+            text: "Query rewrite + 向量检索 + 混合召回 + rerank + 长期记忆 + 流式回答。"
         });
 
         const textStats: KnowledgeBaseStats = this.plugin.getKnowledgeBaseStats();
@@ -124,6 +129,10 @@ export class VaultCoachView extends ItemView {
 
         infoListEl.createEl("div", {
             text: `文件数：${textStats.fileCount}, 片段数：${textStats.chunkCount}`,
+        });
+
+        infoListEl.createEl("div", {
+            text: `长期记忆：${this.plugin.getMemoryCount()} 条`,
         });
 
         // infoListEl.createEl("div", {
@@ -173,7 +182,7 @@ export class VaultCoachView extends ItemView {
      * 渲染消息区域
      */
     private renderMessageArea(rootEl: HTMLDivElement): void {
-        this.messageListEl = rootEl.createDiv({cls: "vault-coach-message-list"});
+        this.messageListEl = rootEl.createDiv({ cls: "vault-coach-message-list" });
         void this.renderMessages();
     }
 
@@ -228,6 +237,9 @@ export class VaultCoachView extends ItemView {
      */
     private async renderMessages(): Promise<void> {
         this.messageListEl.empty();
+        this.streamingWrapperEl = null;
+        this.streamingBubbleEl = null;
+        this.streamingText = "";
 
         const messages: ChatMessage[] = this.plugin.getMessages();
 
@@ -246,8 +258,9 @@ export class VaultCoachView extends ItemView {
         }
 
         // 滚动到最底部，方便看到最新消息
-        this.messageListEl.scrollTop = this.messageListEl.scrollHeight; 
+        // this.messageListEl.scrollTop = this.messageListEl.scrollHeight; 
         //* Height 是整个滚动容器的总高度， Top 是滚动条顶部距离容器顶部的距离
+        this.scrollMessagesToBottom();
 
     }
 
@@ -332,6 +345,52 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    // 新增：创建一个纯文本临时气泡，用于边接收 token 边展示。
+    private beginStreamingAssistantBubble(): void {
+        const wrapperEl: HTMLDivElement = this.messageListEl.createDiv({
+            cls: "vault-coach-message-wrapper assistant",
+        });
+
+        const metaEl: HTMLDivElement = wrapperEl.createDiv({
+            cls: "vault-coach-message-meta",
+        });
+        metaEl.setText(`${this.plugin.settings.assistantName} · ${this.formatTime(Date.now())}`);
+
+        const bubbleEl: HTMLDivElement = wrapperEl.createDiv({
+            cls: "vault-coach-message-bubble assistant vault-coach-streaming-bubble", // 三个类，类似 html 的写法
+        });
+
+        // bubbleEl.style.whiteSpace = "pre-wrap";
+        bubbleEl.setText("");
+
+        this.streamingWrapperEl = wrapperEl;
+        this.streamingBubbleEl = bubbleEl;
+        this.streamingText = "";
+        this.scrollMessagesToBottom();
+    }
+
+    // 新增：将新 token 追加到临时气泡中，降低 UI 感知延迟。
+    private appendStreamingToken(token: string): void {
+        if (!this.streamingBubbleEl) {
+            this.beginStreamingAssistantBubble();
+        }
+
+        this.streamingText += token;
+
+        if (this.streamingBubbleEl) {
+            this.streamingBubbleEl.setText(this.streamingText);
+        }
+
+        this.scrollMessagesToBottom();
+    }
+
+    private clearStreamingAssistantBubble(): void {
+        this.streamingWrapperEl?.remove();
+        this.streamingWrapperEl = null;
+        this.streamingBubbleEl = null;
+        this.streamingText = "";
+    }
+
 
     // 处理发送逻辑
     private async handleSend(): Promise<void> {
@@ -349,20 +408,31 @@ export class VaultCoachView extends ItemView {
 
         try {
             // 1. 将用户消息加入对话
-            this.plugin.addUserMessage(userText);
+            // this.plugin.addUserMessage(userText);
 
             // 2.  清空输入框
             this.inputEl.value = "";
+            await this.plugin.appendUserMessage(userText);
 
             // 3. 立刻刷新消息区域，让用户先看到自己的消息
             await this.renderMessages();
 
+            this.beginStreamingAssistantBubble();
+
             // 4. 生成助手回复 
             // TODO 目前还只是展示逻辑，后续再接入本地 LLM
-            const answer = await this.plugin.answerQuestion(userText);
+            // const answer = await this.plugin.answerQuestion(userText);
 
             // 5. 把助手回复加入对话
-            this.plugin.addAssistantMessage(answer.text, answer.sources);
+            // this.plugin.addAssistantMessage(answer.text, answer.sources);
+
+            await this.plugin.streamAssistantTurn(userText, {
+                onToken: (token: string) => {
+                    this.appendStreamingToken(token);
+                },
+            });
+
+            this.clearStreamingAssistantBubble();
 
             // 6. 再次刷新消息区域
             await this.renderMessages();
@@ -409,10 +479,12 @@ export class VaultCoachView extends ItemView {
         this.inputEl.focus();
     }
 
+    private scrollMessagesToBottom(): void {
+        this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
+    }
+
     /**
      * 格式化时间
-     * @param timestamp 
-     * @returns 
      */
     private formatTime(timestamp: number): string {
         return new Date(timestamp).toLocaleTimeString([], {

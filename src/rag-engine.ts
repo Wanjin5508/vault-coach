@@ -7,6 +7,7 @@ import type {
     ChatMessage,
     ChunkEmbedding,
     IndexedChunk,
+    KnowledgeBaseSyncResult,
     KeywordSearchHit,
     LocalChatMessage,
     QueryRewriteResult,
@@ -14,23 +15,22 @@ import type {
     RetrievalCandidate,
     RetrievalMode,
     RerankResultItem,
+    StreamHandlers,
     VectorIndexStats,
     VectorSearchHit,
     VaultCoachSettings,
 } from "./types";
 
-/**
- * AdvancedRagEngine 负责第二阶段新增的能力：
- * 1. query rewrite
- * 2. 向量检索
- * 3. hybrid merge
- * 4. rerank
- * 5. prompt 与上下文构造
- *
- * 它建立在第一阶段的 VaultKnowledgeBase 之上：
- * - 知识库负责“把 Markdown 变成可检索数据”；
- * - RAG 引擎负责“如何用这些数据组织一次更智能的回答”。
- */
+interface PreparedAnswer {
+    promptMessages: LocalChatMessage[];
+    sources: AnswerSource[];
+    rerankedCandidates: RerankedCandidate[];
+    retrievalModeUsed: RetrievalMode;
+    rewriteResult: QueryRewriteResult;
+    originalUserText: string;
+    noCandidates: boolean;
+}
+
 export class AdvancedRagEngine {
     private readonly knowledgeBase: VaultKnowledgeBase;
     private readonly getSettings: () => VaultCoachSettings;
@@ -55,23 +55,27 @@ export class AdvancedRagEngine {
         this.client = new LocalModelClient(getSettings);
     }
 
-    /**
-     * 获取当前向量索引统计信息，供 UI 展示。
-     */
     getVectorIndexStats(): VectorIndexStats {
-        return {
-            ...this.vectorStats,
-        };
+        return { ...this.vectorStats };
     }
 
-    /**
-     * 重建向量索引。
-     *
-     * 实现策略：
-     * - 先从知识库拿到所有 chunk；
-     * - 按批次调用 embedding 接口；
-     * - 最终把 embedding 回写到 knowledgeBase 中。
-     */
+    // 新增：从磁盘恢复向量索引状态。
+    hydrateVectorStats(vectorStats: VectorIndexStats): void {
+        this.vectorStats = { ...vectorStats };
+    }
+
+    // 新增：根据当前知识库中的向量快照重新计算统计信息。
+    refreshVectorStatsFromKnowledgeBase(): VectorIndexStats {
+        const embeddings: ChunkEmbedding[] = this.knowledgeBase.getEmbeddingSnapshot();
+        this.vectorStats = {
+            ready: embeddings.length > 0,
+            vectorCount: embeddings.length,
+            dimension: embeddings[0]?.vector.length ?? null,
+            lastBuiltAt: embeddings.length > 0 ? Date.now() : null,
+        };
+        return this.getVectorIndexStats();
+    }
+
     async rebuildVectorIndex(): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
         this.knowledgeBase.clearVectorIndex();
@@ -91,27 +95,7 @@ export class AdvancedRagEngine {
             return this.getVectorIndexStats();
         }
 
-        const batchSize = 16;
-        const items: ChunkEmbedding[] = [];
-
-        for (let start = 0; start < chunks.length; start += batchSize) {
-            const batchChunks: IndexedChunk[] = chunks.slice(start, start + batchSize);
-            const batchTexts: string[] = batchChunks.map((chunk: IndexedChunk) => chunk.searchableText);
-            const embeddings: number[][] = await this.client.embedTexts(batchTexts);
-
-            const pairCount: number = Math.min(batchChunks.length, embeddings.length);
-            for (let index = 0; index < pairCount; index += 1) {
-                const chunk: IndexedChunk | undefined = batchChunks[index];
-                const vector: number[] | undefined = embeddings[index];
-                if (chunk && vector) {
-                    items.push({
-                        chunkId: chunk.id,
-                        vector,
-                    });
-                }
-            }
-        }
-
+        const items: ChunkEmbedding[] = await this.buildChunkEmbeddings(chunks);
         this.knowledgeBase.setEmbeddings(items);
         this.vectorStats = {
             ready: items.length > 0,
@@ -123,10 +107,197 @@ export class AdvancedRagEngine {
         return this.getVectorIndexStats();
     }
 
-    /**
-     * 对外暴露的“高级回答”入口。
-     */
-    async answerQuestion(userText: string, messages: ChatMessage[], scopeDescription: string): Promise<AssistantAnswer> {
+    // 新增：增量同步时只为发生变化的 chunk 重算 embedding。
+    async syncVectorIndex(syncResult: KnowledgeBaseSyncResult): Promise<VectorIndexStats> {
+        const settings: VaultCoachSettings = this.getSettings();
+
+        if (!settings.enableVectorRetrieval || settings.embeddingModel.trim().length === 0) {
+            this.knowledgeBase.clearVectorIndex();
+            this.vectorStats = {
+                ready: false,
+                vectorCount: 0,
+                dimension: null,
+                lastBuiltAt: null,
+            };
+            return this.getVectorIndexStats();
+        }
+
+        if (syncResult.removedChunkIds.length > 0) {
+            this.knowledgeBase.removeEmbeddings(syncResult.removedChunkIds);
+        }
+
+        if (syncResult.changedChunks.length > 0) {
+            const items: ChunkEmbedding[] = await this.buildChunkEmbeddings(syncResult.changedChunks);
+            this.knowledgeBase.upsertEmbeddings(items);
+        }
+
+        const embeddings: ChunkEmbedding[] = this.knowledgeBase.getEmbeddingSnapshot();
+        this.vectorStats = {
+            ready: embeddings.length > 0,
+            vectorCount: embeddings.length,
+            dimension: embeddings[0]?.vector.length ?? null,
+            lastBuiltAt: Date.now(),
+        };
+
+        return this.getVectorIndexStats();
+    }
+
+    async answerQuestion(
+        userText: string,
+        messages: ChatMessage[],
+        scopeDescription: string,
+        memoryContext: string,
+    ): Promise<AssistantAnswer> {
+        const prepared: PreparedAnswer = await this.prepareAnswer(
+            userText,
+            messages,
+            scopeDescription,
+            memoryContext,
+        );
+
+        if (prepared.noCandidates) {
+            return {
+                text: this.buildFallbackMarkdownAnswer(
+                    prepared.originalUserText,
+                    prepared.rewriteResult,
+                    prepared.retrievalModeUsed,
+                    prepared.rerankedCandidates,
+                ),
+                sources: [],
+                retrievalModeUsed: prepared.retrievalModeUsed,
+                queryRewrite: prepared.rewriteResult,
+            };
+        }
+
+        try {
+            const markdownAnswer: string = await this.client.generateMarkdownAnswer(
+                prepared.promptMessages,
+                this.getSettings().generationTemperature,
+            );
+
+            return {
+                text: markdownAnswer,
+                sources: prepared.sources,
+                retrievalModeUsed: prepared.retrievalModeUsed,
+                queryRewrite: prepared.rewriteResult,
+            };
+        } catch (error: unknown) {
+            console.error("[VaultCoach] 生成回答失败，将回退到检索结果摘要。", error);
+
+            return {
+                text: this.buildFallbackMarkdownAnswer(
+                    prepared.originalUserText,
+                    prepared.rewriteResult,
+                    prepared.retrievalModeUsed,
+                    prepared.rerankedCandidates,
+                ),
+                sources: prepared.sources,
+                retrievalModeUsed: prepared.retrievalModeUsed,
+                queryRewrite: prepared.rewriteResult,
+            };
+        }
+    }
+
+    // 新增：最终回答使用流式输出，完成后仍返回完整 AssistantAnswer。
+    async streamAnswerQuestion(
+        userText: string,
+        messages: ChatMessage[],
+        scopeDescription: string,
+        memoryContext: string,
+        handlers?: StreamHandlers,
+    ): Promise<AssistantAnswer> {
+        const prepared: PreparedAnswer = await this.prepareAnswer(
+            userText,
+            messages,
+            scopeDescription,
+            memoryContext,
+        );
+
+        if (prepared.noCandidates) {
+            return {
+                text: this.buildFallbackMarkdownAnswer(
+                    prepared.originalUserText,
+                    prepared.rewriteResult,
+                    prepared.retrievalModeUsed,
+                    prepared.rerankedCandidates,
+                ),
+                sources: [],
+                retrievalModeUsed: prepared.retrievalModeUsed,
+                queryRewrite: prepared.rewriteResult,
+            };
+        }
+
+        try {
+            const markdownAnswer: string = await this.client.streamMarkdownAnswer(
+                prepared.promptMessages,
+                this.getSettings().generationTemperature,
+                handlers,
+            );
+
+            return {
+                text: markdownAnswer,
+                sources: prepared.sources,
+                retrievalModeUsed: prepared.retrievalModeUsed,
+                queryRewrite: prepared.rewriteResult,
+            };
+        } catch (streamError: unknown) {
+            console.error("[VaultCoach] 流式回答失败，将回退到非流式回答。", streamError);
+
+            try {
+                const markdownAnswer: string = await this.client.generateMarkdownAnswer(
+                    prepared.promptMessages,
+                    this.getSettings().generationTemperature,
+                );
+
+                if (markdownAnswer.length > 0) {
+                    handlers?.onToken?.(markdownAnswer);
+                }
+                handlers?.onDone?.();
+
+                return {
+                    text: markdownAnswer,
+                    sources: prepared.sources,
+                    retrievalModeUsed: prepared.retrievalModeUsed,
+                    queryRewrite: prepared.rewriteResult,
+                };
+            } catch (error: unknown) {
+                console.error("[VaultCoach] 非流式回退也失败，将回退到检索结果摘要。", error);
+                handlers?.onError?.(error);
+
+                return {
+                    text: this.buildFallbackMarkdownAnswer(
+                        prepared.originalUserText,
+                        prepared.rewriteResult,
+                        prepared.retrievalModeUsed,
+                        prepared.rerankedCandidates,
+                    ),
+                    sources: prepared.sources,
+                    retrievalModeUsed: prepared.retrievalModeUsed,
+                    queryRewrite: prepared.rewriteResult,
+                };
+            }
+        }
+    }
+
+    // 新增：对外暴露长期记忆抽取入口，由主插件负责持久化与去重。
+    async extractMemoryStatements(
+        userText: string,
+        assistantText: string,
+        messages: ChatMessage[],
+    ): Promise<string[]> {
+        return this.client.extractMemoryStatements(
+            this.buildConversationContext(messages),
+            userText,
+            assistantText,
+        );
+    }
+
+    private async prepareAnswer(
+        userText: string,
+        messages: ChatMessage[],
+        scopeDescription: string,
+        memoryContext: string,
+    ): Promise<PreparedAnswer> {
         const settings: VaultCoachSettings = this.getSettings();
         const rewriteResult: QueryRewriteResult = await this.client.rewriteQuery(
             userText,
@@ -140,72 +311,39 @@ export class AdvancedRagEngine {
 
         if (candidates.length === 0) {
             return {
-                text: [
-                    "## 未检索到相关内容",
-                    "",
-                    `当前检索模式：\`${retrievalModeUsed}\`。`,
-                    `当前知识库范围：${scopeDescription}。`,
-                    "",
-                    "你可以尝试：",
-                    "- 换一个更具体的关键词；",
-                    "- 检查设置中的知识库范围是否正确；",
-                    "- 重建索引后再次提问；",
-                    "- 如果启用了 query rewrite，也可以尝试直接给出更短、更精确的术语。",
-                ].join("\n"),
+                promptMessages: [],
                 sources: [],
+                rerankedCandidates: [],
                 retrievalModeUsed,
-                queryRewrite: rewriteResult,
+                rewriteResult,
+                originalUserText: userText,
+                noCandidates: true,
             };
         }
 
         const rerankedCandidates: RerankedCandidate[] = await this.rerankCandidates(retrievalQuery, candidates);
         const finalContextCandidates: RerankedCandidate[] = rerankedCandidates.slice(0, settings.contextTopK);
         const sources: AnswerSource[] = this.buildAnswerSources(rerankedCandidates);
+        const promptMessages: LocalChatMessage[] = this.buildAnswerMessages(
+            userText,
+            rewriteResult,
+            messages,
+            finalContextCandidates,
+            scopeDescription,
+            memoryContext,
+        );
 
-        try {
-            const promptMessages: LocalChatMessage[] = this.buildAnswerMessages(
-                userText,
-                rewriteResult,
-                messages,
-                finalContextCandidates,
-                scopeDescription,
-            );
-
-            const markdownAnswer: string = await this.client.generateMarkdownAnswer(
-                promptMessages,
-                settings.generationTemperature,
-            );
-
-            return {
-                text: markdownAnswer,
-                sources,
-                retrievalModeUsed,
-                queryRewrite: rewriteResult,
-            };
-        } catch (error: unknown) {
-            console.error("[VaultCoach] 生成回答失败，将回退到检索结果摘要。", error);
-
-            return {
-                text: this.buildFallbackMarkdownAnswer(
-                    userText,
-                    rewriteResult,
-                    retrievalModeUsed,
-                    finalContextCandidates,
-                ),
-                sources,
-                retrievalModeUsed,
-                queryRewrite: rewriteResult,
-            };
-        }
+        return {
+            promptMessages,
+            sources,
+            rerankedCandidates,
+            retrievalModeUsed,
+            rewriteResult,
+            originalUserText: userText,
+            noCandidates: false,
+        };
     }
 
-    /**
-     * 解析本轮真正可用的检索模式。
-     *
-     * 例如：
-     * - 用户选择了 vector，但向量索引尚未建立 -> 回退到 keyword
-     * - 用户选择了 hybrid，但 embedding 模型未配置 -> 回退到 keyword
-     */
     private resolveEffectiveRetrievalMode(): RetrievalMode {
         const runtimeMode: RetrievalMode = this.getRuntimeRetrievalMode();
         const settings: VaultCoachSettings = this.getSettings();
@@ -221,9 +359,6 @@ export class AdvancedRagEngine {
         return runtimeMode;
     }
 
-    /**
-     * 根据检索模式执行召回。
-     */
     private async retrieveCandidates(query: string, mode: RetrievalMode): Promise<RetrievalCandidate[]> {
         if (mode === "keyword") {
             return this.buildCandidatesFromKeywordHits(
@@ -241,9 +376,6 @@ export class AdvancedRagEngine {
         return this.mergeHybrid(keywordHits, vectorHits, this.getSettings().hybridSearchTopK);
     }
 
-    /**
-     * 使用 embedding + 余弦相似度进行向量检索。
-     */
     private async searchVector(query: string): Promise<VectorSearchHit[]> {
         const queryEmbeddings: number[][] = await this.client.embedTexts([query]);
         const queryEmbedding: number[] | undefined = queryEmbeddings[0];
@@ -254,9 +386,6 @@ export class AdvancedRagEngine {
         return this.knowledgeBase.searchVector(queryEmbedding, this.getSettings().vectorSearchTopK);
     }
 
-    /**
-     * 把关键词检索结果转换成统一候选结构。
-     */
     private buildCandidatesFromKeywordHits(hits: KeywordSearchHit[]): RetrievalCandidate[] {
         return hits.map((hit: KeywordSearchHit) => ({
             chunk: hit.chunk,
@@ -267,9 +396,6 @@ export class AdvancedRagEngine {
         }));
     }
 
-    /**
-     * 把向量检索结果转换成统一候选结构。
-     */
     private buildCandidatesFromVectorHits(hits: VectorSearchHit[]): RetrievalCandidate[] {
         return hits.map((hit: VectorSearchHit) => ({
             chunk: hit.chunk,
@@ -280,14 +406,6 @@ export class AdvancedRagEngine {
         }));
     }
 
-    /**
-     * hybrid merge：使用 RRF（Reciprocal Rank Fusion）融合关键词与向量结果。
-     *
-     * 为什么这里选 RRF：
-     * - 它不要求两条通道的原始分数处在同一个量纲；
-     * - 对工程实现比较稳健；
-     * - 在“关键词 + 向量”混合召回场景中很常见。
-     */
     private mergeHybrid(
         keywordHits: KeywordSearchHit[],
         vectorHits: VectorSearchHit[],
@@ -355,13 +473,6 @@ export class AdvancedRagEngine {
         return mergedCandidates.slice(0, limit);
     }
 
-    /**
-     * rerank 阶段。
-     *
-     * 优先级：
-     * 1. 如果配置了独立 rerank 服务，则优先走服务端重排；
-     * 2. 否则使用本地启发式 rerank。
-     */
     private async rerankCandidates(query: string, candidates: RetrievalCandidate[]): Promise<RerankedCandidate[]> {
         const settings: VaultCoachSettings = this.getSettings();
         const limitedCandidates: RetrievalCandidate[] = candidates.slice(0, settings.rerankTopK);
@@ -386,9 +497,6 @@ export class AdvancedRagEngine {
         return this.heuristicRerank(query, limitedCandidates);
     }
 
-    /**
-     * 使用独立 rerank 服务进行重排。
-     */
     private async remoteRerank(query: string, candidates: RetrievalCandidate[]): Promise<RerankedCandidate[]> {
         const documents: string[] = candidates.map((candidate: RetrievalCandidate) => this.buildRerankDocument(candidate.chunk));
         const results: RerankResultItem[] = await this.client.rerankDocuments(query, documents);
@@ -418,12 +526,6 @@ export class AdvancedRagEngine {
         return reranked;
     }
 
-    /**
-     * 启发式 rerank。
-     *
-     * 这不是严格意义上的 cross-encoder，但在没有独立 rerank 服务时，
-     * 可以作为一个“比原始召回排序更细致”的过渡方案。
-     */
     private heuristicRerank(query: string, candidates: RetrievalCandidate[]): RerankedCandidate[] {
         const normalizedQuery: string = this.normalizeForPhraseMatch(query);
         const queryTokens: string[] = Array.from(new Set(this.tokenize(query)));
@@ -471,19 +573,13 @@ export class AdvancedRagEngine {
         return reranked;
     }
 
-    /**
-     * 构造最终回答使用的对话消息。
-     *
-     * 这里对 prompt 的设计重点有两个：
-     * 1. 明确告诉模型：只能依据给定上下文回答；
-     * 2. 强制输出 Markdown，方便在插件侧使用 MarkdownRenderer 渲染。
-     */
     private buildAnswerMessages(
         userText: string,
         rewriteResult: QueryRewriteResult,
         conversationMessages: ChatMessage[],
         contextCandidates: RerankedCandidate[],
         scopeDescription: string,
+        memoryContext: string,
     ): LocalChatMessage[] {
         const systemPrompt: string = [
             "你是一个运行在 Obsidian 中的本地知识库助手。",
@@ -502,6 +598,9 @@ export class AdvancedRagEngine {
             `原始问题：${userText}`,
             `检索查询：${rewriteResult.rewrittenQuery}`,
             "",
+            "长期记忆（只保留与当前问题相关的少量内容）：",
+            memoryContext || "（无相关长期记忆）",
+            "",
             "最近对话（只保留少量上下文，帮助你理解指代关系）：",
             this.buildConversationContext(conversationMessages) || "（无）",
             "",
@@ -517,16 +616,6 @@ export class AdvancedRagEngine {
         ];
     }
 
-    /**
-     * 把最终上下文 chunk 拼成模型可读的文本块。
-     *
-     * 这里保留：
-     * - 文件路径
-     * - heading 路径
-     * - chunk 正文
-     *
-     * 这样模型既能理解正文，也能利用笔记结构信息辅助作答。
-     */
     private buildContextBlock(contextCandidates: RerankedCandidate[]): string {
         const blocks: string[] = [];
 
@@ -554,12 +643,6 @@ export class AdvancedRagEngine {
         return blocks.join("\n\n");
     }
 
-    /**
-     * 生成来源列表。
-     *
-     * 会做轻量去重：
-     * - 同一文件下同一 heading 只展示一次。
-     */
     private buildAnswerSources(candidates: RerankedCandidate[]): AnswerSource[] {
         const uniqueSources: AnswerSource[] = [];
         const seenKeys: Set<string> = new Set<string>();
@@ -584,15 +667,23 @@ export class AdvancedRagEngine {
         return uniqueSources;
     }
 
-    /**
-     * 当本地聊天模型不可用时，回退到纯检索结果的 Markdown 摘要。
-     */
     private buildFallbackMarkdownAnswer(
         userText: string,
         rewriteResult: QueryRewriteResult,
         retrievalModeUsed: RetrievalMode,
         candidates: RerankedCandidate[],
     ): string {
+        if (candidates.length === 0) {
+            return [
+                "## 未检索到相关内容",
+                "",
+                `当前检索模式：\`${retrievalModeUsed}\`。`,
+                `检索查询：${rewriteResult.rewrittenQuery}`,
+                "",
+                "你可以尝试换更具体的关键词，或先手动重建索引。",
+            ].join("\n");
+        }
+
         const lines: string[] = [
             "## 检索结果摘要",
             "",
@@ -620,13 +711,10 @@ export class AdvancedRagEngine {
             lines.push("");
         }
 
-        lines.push("你可以检查本地聊天模型地址、模型名称，或先使用当前检索结果继续定位相关笔记。 ");
+        lines.push("你可以检查本地聊天模型地址、模型名称，或先使用当前检索结果继续定位相关笔记。");
         return lines.join("\n");
     }
 
-    /**
-     * 把单个 chunk 转成可展示来源。
-     */
     private convertChunkToSource(chunk: IndexedChunk): AnswerSource {
         const displayLink: string = chunk.primaryHeading
             ? `[[${chunk.filePath}#${chunk.primaryHeading}]]`
@@ -640,12 +728,6 @@ export class AdvancedRagEngine {
         };
     }
 
-    /**
-     * 给远程 rerank 服务构造 document。
-     *
-     * 这里不仅传正文，也传标题与文件名，因为很多笔记类问答的相关性
-     * 往往强依赖“标题路径”和“文件名称”本身。
-     */
     private buildRerankDocument(chunk: IndexedChunk): string {
         return [
             `文件：${chunk.filePath}`,
@@ -655,13 +737,6 @@ export class AdvancedRagEngine {
         ].join("\n");
     }
 
-    /**
-     * 构造最近几轮对话上下文。
-     *
-     * 只取少量历史，主要用于：
-     * - query rewrite 的指代补全
-     * - 最终回答时保留多轮对话语义
-     */
     private buildConversationContext(messages: ChatMessage[]): string {
         const recentMessages: ChatMessage[] = messages.slice(-6);
         const lines: string[] = [];
@@ -674,9 +749,6 @@ export class AdvancedRagEngine {
         return lines.join("\n");
     }
 
-    /**
-     * 生成简短摘录。
-     */
     private createExcerpt(text: string, maxLength: number): string {
         const normalizedText: string = text.replace(/\s+/g, " ").trim();
         if (normalizedText.length <= maxLength) {
@@ -686,12 +758,6 @@ export class AdvancedRagEngine {
         return `${normalizedText.slice(0, maxLength)}…`;
     }
 
-    /**
-     * 轻量 tokenizer。
-     *
-     * 这里不直接复用知识库内部的私有 tokenize，
-     * 是为了保持模块边界清晰：RAG 引擎只需要一个轻量版本即可。
-     */
     private tokenize(text: string): string[] {
         const normalizedText: string = text.toLowerCase();
         const tokens: string[] = [];
@@ -711,6 +777,7 @@ export class AdvancedRagEngine {
                 for (const char of sequence) {
                     tokens.push(char);
                 }
+
                 for (let index = 0; index < sequence.length - 1; index += 1) {
                     tokens.push(sequence.slice(index, index + 2));
                 }
@@ -720,10 +787,33 @@ export class AdvancedRagEngine {
         return tokens;
     }
 
-    /**
-     * 用于短语匹配的归一化。
-     */
     private normalizeForPhraseMatch(text: string): string {
         return text.toLowerCase().replace(/\s+/g, " ").trim();
+    }
+
+    private async buildChunkEmbeddings(chunks: IndexedChunk[]): Promise<ChunkEmbedding[]> {
+        const batchSize = 16;
+        const items: ChunkEmbedding[] = [];
+
+        for (let start = 0; start < chunks.length; start += batchSize) {
+            const batchChunks: IndexedChunk[] = chunks.slice(start, start + batchSize);
+            const batchTexts: string[] = batchChunks.map((chunk: IndexedChunk) => chunk.searchableText);
+            const embeddings: number[][] = await this.client.embedTexts(batchTexts);
+
+            const pairCount: number = Math.min(batchChunks.length, embeddings.length);
+            for (let index = 0; index < pairCount; index += 1) {
+                const chunk: IndexedChunk | undefined = batchChunks[index];
+                const vector: number[] | undefined = embeddings[index];
+
+                if (chunk && vector) {
+                    items.push({
+                        chunkId: chunk.id,
+                        vector,
+                    });
+                }
+            }
+        }
+
+        return items;
     }
 }

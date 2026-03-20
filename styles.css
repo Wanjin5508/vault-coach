@@ -146,3 +146,8 @@
     flex-wrap: wrap;
     gap: 8px;
 }
+
+/* 新增：流式输出阶段的临时气泡 */
+.vault-coach-streaming-bubble {
+    white-space: pre-wrap;
+}

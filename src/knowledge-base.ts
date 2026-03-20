@@ -2,8 +2,11 @@ import { App, TFile, normalizePath } from "obsidian";
 import type {
     ChunkEmbedding,
     IndexedChunk,
-    KeywordSearchHit,
+    KnowledgeBaseFileRecord,
+    KnowledgeBaseSnapshot,
     KnowledgeBaseStats,
+    KnowledgeBaseSyncResult,
+    KeywordSearchHit,
     VectorSearchHit,
     VaultCoachSettings,
 } from "./types";
@@ -63,6 +66,9 @@ export class VaultKnowledgeBase {
      */
     private readonly embeddingMap: Map<string, number[]> = new Map<string, number[]>();
 
+    private readonly fileChunkIds: Map<string, string[]> = new Map<string, string[]>();
+    private readonly fileHashes: Map<string, string> = new Map<string, string>();
+
     // 当前索引的统计信息
     private stats: KnowledgeBaseStats = {
         fileCount: 0,
@@ -101,6 +107,32 @@ export class VaultKnowledgeBase {
         return [...this.chunks];
     }
 
+    getEmbeddingSnapshot(): ChunkEmbedding[] {
+        return Array.from(this.embeddingMap.entries()).map(([chunkId, vector]) => ({
+            chunkId,
+            vector: [...vector],
+        }));
+    }
+
+    getFileRecords(): KnowledgeBaseFileRecord[] {
+        return Array.from(this.fileChunkIds.entries()).map(([filePath, chunkIds]) => ({
+            filePath,
+            contentHash: this.fileHashes.get(filePath) ?? "",
+            chunkIds: [...chunkIds],
+            indexedAt: this.stats.lastIndexedAt ?? Date.now(),
+        }));
+    }
+
+    getSettingsSignature(): string {
+        const settings: VaultCoachSettings = this.getSettings();
+        return JSON.stringify({
+            knowledgeScopeMode: settings.knowledgeScopeMode,
+            knowledgeFolder: this.normalizeFolderPath(settings.knowledgeFolder),
+            chunkSize: settings.chunkSize,
+            chunkOverlap: settings.chunkOverlap,
+        });
+    }
+
     /**
      * 当前是否已经拥有向量索引。
      */
@@ -123,12 +155,45 @@ export class VaultKnowledgeBase {
     setEmbeddings(items: ChunkEmbedding[]): void {
         this.embeddingMap.clear();
 
+        this.upsertEmbeddings(items);
+    }
+
+    upsertEmbeddings(items: ChunkEmbedding[]): void {
         for (const item of items) {
             const normalizedVector: number[] = this.normalizeVector(item.vector);
             if (normalizedVector.length > 0) {
                 this.embeddingMap.set(item.chunkId, normalizedVector);
             }
         }
+    }
+
+    removeEmbeddings(chunkIds: string[]): void {
+        for (const chunkId of chunkIds) {
+            this.embeddingMap.delete(chunkId);
+        }
+    }
+
+    /**
+     * 从磁盘快照恢复文本索引、文件级元数据与向量索引
+     */
+    loadFromSnapshot(snapshot: Pick<KnowledgeBaseSnapshot, "stats" | "chunks" | "files" | "embeddings">): void {
+        this.clearIndex();
+
+        for (const record of snapshot.files) {
+            this.fileChunkIds.set(record.filePath, [...record.chunkIds]);
+            this.fileHashes.set(record.filePath, record.contentHash);
+        }
+
+        for (const chunk of snapshot.chunks) {
+            this.addChunkToIndex(chunk);
+        }
+
+        this.upsertEmbeddings(snapshot.embeddings);
+        this.stats = {
+            ...snapshot.stats,
+            scopeDescription: this.describeCurrentScope(),
+        };
+        this.rebuildChunkArray();
     }
 
     /**
@@ -143,13 +208,21 @@ export class VaultKnowledgeBase {
      * - 向量索引由上层额外建立，因为向量索引依赖外部 embedding 模型。
      */
     async rebuildIndex(): Promise<KnowledgeBaseStats> {
+        const result: KnowledgeBaseSyncResult = await this.rebuildIndexDetailed();
+        return result.stats;
+    }
+
+    // 新增：全量重建时返回详细变更结果，供向量层同步。
+    async rebuildIndexDetailed(): Promise<KnowledgeBaseSyncResult> {
         this.clearIndex();
 
         const targetFiles: TFile[] = this.resolveTargetMarkdownFiles();
         const settings: VaultCoachSettings = this.getSettings();
+        const changedChunks: IndexedChunk[] = [];
 
         for (const file of targetFiles) {
             const fileContent: string = await this.app.vault.cachedRead(file);
+            const contentHash: string = this.hashContent(fileContent);
             const fileChunks: IndexedChunk[] = this.chunkMarkdownFile(
                 file,
                 fileContent,
@@ -157,20 +230,94 @@ export class VaultKnowledgeBase {
                 settings.chunkOverlap,
             );
 
+            this.fileChunkIds.set(file.path, fileChunks.map((chunk: IndexedChunk) => chunk.id));
+            this.fileHashes.set(file.path, contentHash);
+
             for (const chunk of fileChunks) {
                 this.addChunkToIndex(chunk);
+                changedChunks.push(chunk);
             }
-
         }
 
-        this.stats = {
-            fileCount: targetFiles.length,
-            chunkCount: this.chunks.length,
-            lastIndexedAt: Date.now(),
-            scopeDescription: this.describeCurrentScope(),
+        this.updateStats(targetFiles.length);
+        return {
+            stats: this.getStats(),
+            changedChunks,
+            removedChunkIds: [],
+            affectedFiles: targetFiles.map((file: TFile) => file.path),
         };
+    }
 
-        return this.getStats()
+    // 新增：只同步发生改动的 Markdown 文件。
+    async syncChangedFiles(filePaths: string[]): Promise<KnowledgeBaseSyncResult> {
+        const dedupedPaths: string[] = Array.from(
+            new Set(
+                filePaths
+                    .map((path: string) => path.trim())
+                    .filter((path: string) => path.length > 0 && this.isMarkdownPath(path)),
+            ),
+        );
+
+        if (dedupedPaths.length === 0) {
+            return {
+                stats: this.getStats(),
+                changedChunks: [],
+                removedChunkIds: [],
+                affectedFiles: [],
+            };
+        }
+
+        const settings: VaultCoachSettings = this.getSettings();
+        const currentFiles: Map<string, TFile> = new Map<string, TFile>();
+        const targetFiles: TFile[] = this.resolveTargetMarkdownFiles();
+        for (const file of targetFiles) {
+            currentFiles.set(file.path, file);
+        }
+
+        const changedChunks: IndexedChunk[] = [];
+        const removedChunkIds: string[] = [];
+
+        for (const filePath of dedupedPaths) {
+            const existingFile: TFile | undefined = currentFiles.get(filePath);
+
+            if (!existingFile) {
+                removedChunkIds.push(...this.removeFileFromIndex(filePath));
+                continue;
+            }
+
+            const fileContent: string = await this.app.vault.cachedRead(existingFile);
+            const contentHash: string = this.hashContent(fileContent);
+            const previousHash: string | undefined = this.fileHashes.get(filePath);
+
+            if (previousHash === contentHash) {
+                continue;
+            }
+
+            removedChunkIds.push(...this.removeFileFromIndex(filePath));
+
+            const fileChunks: IndexedChunk[] = this.chunkMarkdownFile(
+                existingFile,
+                fileContent,
+                settings.chunkSize,
+                settings.chunkOverlap,
+            );
+
+            this.fileChunkIds.set(existingFile.path, fileChunks.map((chunk: IndexedChunk) => chunk.id));
+            this.fileHashes.set(existingFile.path, contentHash);
+
+            for (const chunk of fileChunks) {
+                this.addChunkToIndex(chunk);
+                changedChunks.push(chunk);
+            }
+        }
+
+        this.updateStats(targetFiles.length);
+        return {
+            stats: this.getStats(),
+            changedChunks,
+            removedChunkIds,
+            affectedFiles: dedupedPaths,
+        };
     }
 
     /**
@@ -299,11 +446,13 @@ export class VaultKnowledgeBase {
      * 清空现有索引数据
      * 
      */
-    // TODO 现在的索引都是保存在内存中，需要进行压力测试，看 vault 容量和内存用量的关联 》》 需要保存到硬盘
     private clearIndex(): void {
         this.chunks = [];
         this.chunkMap.clear();
         this.invertedIndex.clear();
+        this.embeddingMap.clear();
+        this.fileChunkIds.clear();
+        this.fileHashes.clear();
         this.stats = {
             fileCount: 0,
             chunkCount: 0,
@@ -311,6 +460,54 @@ export class VaultKnowledgeBase {
             scopeDescription: this.describeCurrentScope(),
         };
 
+    }
+
+    private updateStats(fileCount: number): void {
+        this.rebuildChunkArray();
+        this.stats = {
+            fileCount,
+            chunkCount: this.chunks.length,
+            lastIndexedAt: Date.now(),
+            scopeDescription: this.describeCurrentScope(),
+        };
+    }
+
+    private removeFileFromIndex(filePath: string): string[] {
+        const chunkIds: string[] = this.fileChunkIds.get(filePath) ?? [];
+        for (const chunkId of chunkIds) {
+            const chunk: IndexedChunk | undefined = this.chunkMap.get(chunkId);
+            if (!chunk) {
+                continue;
+            }
+
+            const tokens: string[] = Array.from(new Set(this.tokenize(chunk.searchableText)));
+            for (const token of tokens) {
+                const postingList: Map<string, number> | undefined = this.invertedIndex.get(token);
+                if (!postingList) {
+                    continue;
+                }
+
+                postingList.delete(chunkId);
+                if (postingList.size === 0) {
+                    this.invertedIndex.delete(token);
+                }
+            }
+
+            this.chunkMap.delete(chunkId);
+            this.embeddingMap.delete(chunkId);
+        }
+
+        this.fileChunkIds.delete(filePath);
+        this.fileHashes.delete(filePath);
+        this.rebuildChunkArray();
+        return chunkIds;
+    }
+
+    private rebuildChunkArray(): void {
+        this.chunks = Array.from(this.chunkMap.values()).sort((left: IndexedChunk, right: IndexedChunk) => {
+            const fileOrder: number = left.filePath.localeCompare(right.filePath);
+            return fileOrder !== 0 ? fileOrder : left.id.localeCompare(right.id);
+        });
     }
 
     /**
@@ -401,7 +598,7 @@ export class VaultKnowledgeBase {
      * 将 chunk 写入倒排索引
      */
     private addChunkToIndex(chunk: IndexedChunk): void {
-        this.chunks.push(chunk);
+        // this.chunks.push(chunk);
         this.chunkMap.set(chunk.id, chunk);
 
         const tokens: string[] = this.tokenize(chunk.searchableText);
@@ -470,7 +667,7 @@ export class VaultKnowledgeBase {
 
                 // headingLevel 为 1 表示一级标题，因此要保留 0 个旧层级；
                 // headingLevel 为 2 表示二级标题，因此要保留 1 个旧层级，以此类推。
-                currentHeadingPath = currentHeadingPath.slice(0, Math.max(headingLevel - 1));
+                currentHeadingPath = currentHeadingPath.slice(0, Math.max(headingLevel - 1, 0));
                 currentHeadingPath[headingLevel - 1] = headingText;
                 continue;
             }
@@ -712,6 +909,21 @@ export class VaultKnowledgeBase {
         return normalizedFolder.length > 0
             ? `目录：${normalizedFolder}`
             : "目录：未指定";
+    }
+
+    private hashContent(content: string): string {
+        let hash = 2166136261;
+
+        for (let index = 0; index < content.length; index += 1) {
+            hash ^= content.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+
+        return `${content.length}:${(hash >>> 0).toString(16)}`;
+    }
+
+    private isMarkdownPath(path: string): boolean {
+        return path.toLowerCase().endsWith(".md");
     }
 }
 

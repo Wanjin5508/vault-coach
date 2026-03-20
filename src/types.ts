@@ -148,6 +148,18 @@ export interface VaultCoachSettings {
     // rerank 服务对应的模型名。
     // 只有在 rerankBaseUrl 非空时才会真正使用。
     rerankModel: string;
+
+    // 长期记忆相关设置项
+    enableLongTermMemory: boolean;
+    memoryTopK: number;
+    memoryMaxItems: number;
+    maxConversationMessages: number;
+
+    // 索引持久化存储与自动增量更新相关设置
+    enableAutoIndexSync: boolean;
+    autoIndexDebounceMs: number;
+    autoIndexMaxWaitMs: number;
+    autoIndexFileThreshold: number;
 }
 
 /**
@@ -182,7 +194,6 @@ export interface IndexedChunk {
 
 /**
  * 向量索引中的单条向量记录。
- * ? 稠密索引仍然保存在内存？当 vault 过大，会不会爆内存？
  */
 export interface ChunkEmbedding {
     chunkId: string;
@@ -311,6 +322,77 @@ export interface RerankResultItem {
     relevance_score: number;
 }
 
+/**
+ * 文件级索引元数据，用于增量同步与本地持久化
+ */
+export interface KnowledgeBaseFileRecord {
+    filePath: string;
+    contentHash: string;
+    chunkIds: string[];
+    indexedAt: number;
+}
+
+/**
+ * 一次增量同步的结果，供主插件与向量索引层联动
+ */
+export interface KnowledgeBaseSyncResult {
+    stats: KnowledgeBaseStats;
+    changedChunks: IndexedChunk[];
+    removedChunkIds: string[];
+    affectedFiles: string[];
+}
+
+/**
+ * 持久化到磁盘的知识库快照
+ */
+export interface KnowledgeBaseSnapshot {
+    version: number;
+    settingsSignature: string;
+    embeddingModel: string | null;
+    stats: KnowledgeBaseStats;
+    vectorStats: VectorIndexStats;
+    chunks: IndexedChunk[];
+    embeddings: ChunkEmbedding[];
+    files: KnowledgeBaseFileRecord[];
+}
+
+/**
+ * 长期记忆条目
+ */
+export interface MemoryItem {
+    id: string;
+    text: string;
+    createdAt: number;
+    updatedAt: number;
+    lastAccessedAt: number;
+}
+
+/**
+ * 记忆检索中命中结果
+ */
+export interface MemorySearchHit {
+    item: MemoryItem;
+    score:number;
+    matchedTokens:string[];
+}
+
+/**
+ * 运行时持久化状态
+ */
+export interface PersistedPluginState {
+    messages: ChatMessage[];
+    memories: MemoryItem[];
+    lastAutoIndexAt: number | null;
+}
+
+/**
+ * 流式输出回调
+ */
+export interface StreamHandlers {
+    onToken?: (token: string) => void;
+    onDone?: () => void;
+    onError?: (error: unknown) => void;
+}
 
 
 

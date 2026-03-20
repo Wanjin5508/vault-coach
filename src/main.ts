@@ -1,207 +1,157 @@
-import { Notice, Plugin, WorkspaceLeaf, TAbstractFile } from 'obsidian';
-import { VIEW_TYPE_VAULT_COACH } from './constants';
-import { VaultKnowledgeBase } from 'knowledge-base';
-import { AdvancedRagEngine } from 'rag-engine';
+import { Notice, Plugin, TAbstractFile, WorkspaceLeaf } from "obsidian";
+import { VIEW_TYPE_VAULT_COACH } from "./constants";
+import { VaultKnowledgeBase } from "./knowledge-base";
+import { VaultCoachPersistentStore } from "./persistent-store";
+import { AdvancedRagEngine } from "./rag-engine";
 import { DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
-import type { 
+import type {
     AnswerSource,
     AssistantAnswer,
     ChatMessage,
+    KnowledgeBaseSnapshot,
     KnowledgeBaseStats,
+    KnowledgeBaseSyncResult,
+    MemoryItem,
+    MemorySearchHit,
+    PersistedPluginState,
     RetrievalMode,
+    StreamHandlers,
     VectorIndexStats,
     VaultCoachSettings,
 } from "./types";
 import { VaultCoachView } from "./view";
 
-
-/**
- *  VaultCoach 插件主类， 
- * 所有插件都会从这个类开始
- * 
- *  * 职责拆分：
- * - main.ts：插件入口、全局状态、命令注册、视图注册、索引重建调度
- * - knowledge-base.ts：扫描、切块、关键词索引、向量索引容器
- * - rag-engine.ts：第二阶段的 Advanced RAG 流程
- * - view.ts：右侧边栏 UI
- */
 export default class VaultCoach extends Plugin {
-	// 插件设置
-	settings: VaultCoachSettings = DEFAULT_SETTINGS;
+    settings: VaultCoachSettings = DEFAULT_SETTINGS;
 
-	/**
-	 * 当前运行时的对话消息列表
-	 * ! 注意: 这里先只保存在内存中，重启 Obsidian 后会重置
-	 * TODO 后续可以把它保存在 data.json 中
-	 */
-	private messages: ChatMessage[] = [];
+    private messages: ChatMessage[] = [];
+    private memories: MemoryItem[] = [];
 
-	/**
-	 * 第一阶段建立的知识库基础设施。
-	 * 非 LLM 阶段的知识库核心对象
-	 * 该对象负责扫描用户指定的目录下的 md 文件，并进行切块、索引构建以及关键词检索
-	 */
-	private knowledgeBase!: VaultKnowledgeBase;
+    private knowledgeBase!: VaultKnowledgeBase;
+    private ragEngine!: AdvancedRagEngine;
+    private persistentStore!: VaultCoachPersistentStore;
 
-	/**
-	 * 第二阶段新增的 Advanced RAG 引擎。
-	 */
-	private ragEngine: AdvancedRagEngine;
+    private knowledgeBaseDirty = true;
+    private vectorIndexDirty = true;
+    private runtimeRetrievalMode: RetrievalMode = DEFAULT_SETTINGS.defaultRetrievalMode;
 
-	/**
-     * dirty 标记表示“当前索引可能已经过期，需要重建”。
-     *
-     * 典型触发场景：
-     * - 用户修改了设置中的知识库目录
-     * - vault 中有 Markdown 文件被创建/修改/删除/重命名
-     */
-	private knowledgeBaseDirty: boolean = true;
+    // 新增：自动增量同步所需的队列与计时器。
+    private readonly pendingChangedMarkdownPaths: Set<string> = new Set<string>();
+    private autoIndexDebounceTimer: number | null = null;
+    private autoIndexMaxWaitTimer: number | null = null;
+    private isSyncingKnowledgeBase = false;
+    private lastAutoIndexAt: number | null = null;
 
-	/**
-     * 当前运行时生效的检索模式。
-     *
-     * 为什么不直接只用 settings.defaultRetrievalMode：
-     * - default 更像“初始值”；
-     * - runtimeMode 则允许用户在当前会话里随时切换，而不一定要改设置页。
-     */
-	private runtimeRetrievalMode: RetrievalMode = DEFAULT_SETTINGS.defaultRetrievalMode;
+    async onload(): Promise<void> {
+        await this.loadSettings();
 
-	// 插件加载时调用
-	async onload(): Promise<void> {
-		// 1. 先加载设置
-		await this.loadSettings();
+        this.runtimeRetrievalMode = this.settings.defaultRetrievalMode;
+        this.knowledgeBase = new VaultKnowledgeBase(this.app, () => this.settings);
+        this.ragEngine = new AdvancedRagEngine(
+            this.knowledgeBase,
+            () => this.settings,
+            () => this.runtimeRetrievalMode,
+        );
+        this.persistentStore = new VaultCoachPersistentStore(this.app, this.manifest.id);
 
-		// 2. 初始化知识库对象
-		this.runtimeRetrievalMode = this.settings.defaultRetrievalMode;
-		this.knowledgeBase = new VaultKnowledgeBase(this.app, () => this.settings);
-		this.ragEngine = new AdvancedRagEngine(
-			this.knowledgeBase,
-			() => this.settings,
-			() => this.runtimeRetrievalMode,
-		)
+        await this.restorePersistentState();
+        await this.restoreKnowledgeBaseSnapshot();
 
-		// 3. 初始化会话
-		this.resetConversation();
+        if (this.messages.length === 0) {
+            this.resetConversation();
+        }
 
-		// 4. 注册自定义视图
-		this.registerView(
-			VIEW_TYPE_VAULT_COACH,
-			(leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this)
-		);
+        this.registerView(
+            VIEW_TYPE_VAULT_COACH,
+            (leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this),
+        );
 
-		// 5. 注册命令：打开右侧边栏中的 VaultCoach
-		this.addCommand({
-			// id: "open-vault-coach-view",
-			id: "open-view",
-			name: "Open the sidebar view on the right side",
-			callback: async () => {
-				await this.activateView();
-			},
-		});
+        this.addCommand({
+            id: "open-view",
+            name: "Open the sidebar view on the right side",
+            callback: async () => {
+                await this.activateView();
+            },
+        });
 
-		// 6。 注册命令，重置对话
-		this.addCommand({
-			// id: "reset-vault-coach-conversation",
-			id: "reset-onversation",
-			name: "Reset plugin conversation",
-			callback: () => {
-				this.resetConversation();
-				this.refreshAllViews();
-				new Notice("Reset successful.");
-			},
-		});
+        this.addCommand({
+            id: "reset-conversation",
+            name: "Reset plugin conversation",
+            callback: () => {
+                this.resetConversation();
+                this.refreshAllViews();
+                new Notice("Reset successful.");
+            },
+        });
 
-		// 7. 注册命令：手动重建知识库索引
-		this.addCommand({
-			id: "rebuild-knowledge-index",
-			name: "Rebuild Markdown knowledge index.",
-			callback: async () => {
-				await this.rebuildKnowledgeBase(true);
-			},
-		});
+        this.addCommand({
+            id: "rebuild-knowledge-index",
+            name: "Rebuild Markdown knowledge index",
+            callback: async () => {
+                await this.rebuildKnowledgeBase(true);
+            },
+        });
 
-		// 8. 左侧 Ribbon 图标，点击可以快速打开右侧边栏视图
-		// TODO 考虑前端美化，使用更好看的图标，往上有资源
-		this.addRibbonIcon("message-square", "Open vault coach", () => {
-			void this.activateView();
-		});
+        this.addRibbonIcon("message-square", "Open vault coach", () => {
+            void this.activateView();
+        });
 
-		// 9. 注册设置页
-		this.addSettingTab(new VaultCoachSettingTab(this.app, this));
+        this.addSettingTab(new VaultCoachSettingTab(this.app, this));
+        this.registerVaultEvents();
 
-		// 10. 监听 vault 变化，让索引状态保持可解释
-		this.registerVaultEvents();
+        if (!this.knowledgeBase.isReady()) {
+            await this.rebuildKnowledgeBase(false);
+        } else if (this.vectorIndexDirty && this.settings.enableVectorRetrieval) {
+            await this.rebuildVectorIndexOnly(false);
+        }
 
-		// 11. 启动时先建立一次索引
-		await this.rebuildKnowledgeBase(false);
+        this.app.workspace.onLayoutReady(() => {
+            if (this.settings.openInRightSidebarOnStartup) {
+                void this.activateView();
+            }
+        });
+    }
 
-		// 12. 如果设置为启动时自动打开，则在布局准备完成后打开右侧视图
-		this.app.workspace.onLayoutReady(() => {
-			if (this.settings.openInRightSidebarOnStartup) {
-				void this.activateView();
-			}
-		});
+    onunload(): void {
+        this.clearAutoIndexTimers();
+    }
 
-	}
+    async loadSettings(): Promise<void> {
+        this.settings = Object.assign(
+            {},
+            DEFAULT_SETTINGS,
+            (await this.loadData()) as Partial<VaultCoachSettings>,
+        );
+    }
 
-	// 插件卸载时调用
-	onunload(): void {
-		// 移除所有同类型的视图
-		// this.app.workspace.detachLeavesOfType(VIEW_TYPE_VAULT_COACH);
-	}
+    async saveSettings(): Promise<void> {
+        await this.saveData(this.settings);
+    }
 
-	// 加载设置
-	async loadSettings(): Promise<void> {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<VaultCoachSettings>
-		);
-	}
+    markKnowledgeBaseDirty(): void {
+        this.knowledgeBaseDirty = true;
+        this.vectorIndexDirty = true;
+        this.refreshAllViews();
+    }
 
-	/**
-     * 当设置项影响到知识库范围或索引行为时，调用这个方法。
-     *
-     * 它不会立刻强制重建索引，而是先把索引标记为 dirty，
-     * 然后由用户点击“重建索引”或在下一次提问时自动重建。
-     */
-	markKnowledgeBaseDirty(): void {
-		this.knowledgeBaseDirty = true;
-		this.refreshAllViews();
-	}
+    isKnowledgeBaseDirty(): boolean {
+        return this.knowledgeBaseDirty || this.vectorIndexDirty;
+    }
 
-	/**
-     * 获取当前索引状态是否需要重建。
-     */
-	isKnowledgeBaseDirty(): boolean {
-		return this.knowledgeBaseDirty;
-	}
+    getKnowledgeBaseStats(): KnowledgeBaseStats {
+        return this.knowledgeBase.getStats();
+    }
 
-	// 保存设置
-	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
-	}
-
-	/**
-     * 获取知识库统计信息，供 view 层展示。
-     */
-	getKnowledgeBaseStats(): KnowledgeBaseStats {
-		return this.knowledgeBase.getStats();
-	}
-
-	getVectorIndexStats(): VectorIndexStats {
+    getVectorIndexStats(): VectorIndexStats {
         return this.ragEngine.getVectorIndexStats();
     }
 
-	/**
-     * 获取当前索引范围的人类可读描述。
-     */
-	getKnowledgeScopeDescription(): string {
-		const stats: KnowledgeBaseStats = this.getKnowledgeBaseStats();
-		return stats.scopeDescription;
-	}
+    getKnowledgeScopeDescription(): string {
+        const stats: KnowledgeBaseStats = this.getKnowledgeBaseStats();
+        return stats.scopeDescription;
+    }
 
-	getRuntimeRetrievalMode(): RetrievalMode {
+    getRuntimeRetrievalMode(): RetrievalMode {
         return this.runtimeRetrievalMode;
     }
 
@@ -210,232 +160,541 @@ export default class VaultCoach extends Plugin {
         this.refreshAllViews();
     }
 
-	/**
-     * 手动触发一次知识库重建。
-	 * 
-	 *  * 第二阶段的重建现在包含两部分：
-     * 1. 文本索引（扫描 / 切块 / 倒排索引）
-     * 2. 向量索引（embedding）
-     */
-	async rebuildKnowledgeBase(showNotice: boolean): Promise<void> {
-		try {
-			const textStats: KnowledgeBaseStats = await this.knowledgeBase.rebuildIndex();
-			let vectorStats: VectorIndexStats = this.ragEngine.getVectorIndexStats();
+    getMessages(): ChatMessage[] {
+        return this.messages;
+    }
+
+    // 新增：供视图头部展示当前长期记忆数量。
+    getMemoryCount(): number {
+        return this.memories.length;
+    }
+
+    // 新增：发送前先持久化用户消息，确保异常中断时对话不会丢。
+    async appendUserMessage(text: string): Promise<void> {
+        this.messages.push({
+            role: "user",
+            text,
+            createdAt: Date.now(),
+        });
+        this.trimMessages();
+        await this.persistRuntimeState();
+    }
+
+    addAssistantMessage(text: string, sources: AnswerSource[]): void {
+        this.messages.push({
+            role: "assistant",
+            text,
+            createdAt: Date.now(),
+            sources,
+        });
+        this.trimMessages();
+    }
+
+    resetConversation(): void {
+        this.messages = [
+            {
+                role: "assistant",
+                text: this.settings.defaultGreeting || `# 你好\n\n我是 ${this.settings.assistantName}。`,
+                createdAt: Date.now(),
+            },
+        ];
+        void this.persistRuntimeState();
+    }
+
+    refreshAllViews(): void {
+        const leaves: WorkspaceLeaf[] = this.app.workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH);
+        for (const leaf of leaves) {
+            const view = leaf.view;
+            if (view instanceof VaultCoachView) {
+                view.refresh();
+            }
+        }
+    }
+
+    async rebuildKnowledgeBase(showNotice: boolean): Promise<void> {
+        try {
+            const textSyncResult: KnowledgeBaseSyncResult = await this.knowledgeBase.rebuildIndexDetailed();
+            const textStats: KnowledgeBaseStats = textSyncResult.stats;
+
+            let vectorStats: VectorIndexStats = this.ragEngine.getVectorIndexStats();
             let vectorBuildWarning = "";
 
-			try {
+            try {
                 vectorStats = await this.ragEngine.rebuildVectorIndex();
+                this.vectorIndexDirty = false;
             } catch (vectorError: unknown) {
                 console.error("[VaultCoach] 向量索引建立失败，将回退到关键词检索。", vectorError);
                 vectorBuildWarning = "向量索引建立失败，已自动回退到关键词检索。";
+                this.vectorIndexDirty = true;
             }
 
-			this.knowledgeBaseDirty = false;
-			this.refreshAllViews();
+            this.knowledgeBaseDirty = false;
+            await this.persistKnowledgeBaseSnapshot();
+            this.refreshAllViews();
 
-			if (showNotice) {
-				const vectorInfo: string = this.settings.enableVectorRetrieval
+            if (showNotice) {
+                const vectorInfo: string = this.settings.enableVectorRetrieval
                     ? `，向量数 ${vectorStats.vectorCount}`
                     : "";
                 const message: string = `索引完成：${textStats.fileCount} 个文件，${textStats.chunkCount} 个片段${vectorInfo}。`;
-
                 new Notice(vectorBuildWarning.length > 0 ? `${message} ${vectorBuildWarning}` : message);
-			}
-		} catch (error: unknown) {
-			console.error("[VaultCoach] 重建索引失败", error);
-			if (showNotice) {
-				new Notice("重建索引失败，请打开开发者控制台查看错误信息。");
-			}
-		}
-	}
+            }
+        } catch (error: unknown) {
+            console.error("[VaultCoach] 重建索引失败", error);
+            if (showNotice) {
+                new Notice("重建索引失败，请打开开发者控制台查看错误信息。");
+            }
+        }
+    }
 
-	/**
-     * 如果索引尚未建立，或者已经被标记为 dirty，则先自动重建。
-	 * ? 编程时如何确定一个方法/函数是否应该写成异步？
-     */
-	async ensureKnowledgeBaseReady(): Promise<void> {
-		if (!this.knowledgeBase.isReady() || this.knowledgeBaseDirty) {
-			await this.rebuildKnowledgeBase(false)
-		}
-	}
+    async ensureKnowledgeBaseReady(): Promise<void> {
+        if (!this.knowledgeBase.isReady() || this.knowledgeBaseDirty) {
+            await this.rebuildKnowledgeBase(false);
+            return;
+        }
 
-	/**
-     * 打开右侧边栏中的 VaultCoach 视图。
-     *
-     * 这是实现“显示在右侧边栏，同时在右上标签区域可切换”的关键方法。
-     */
-	async activateView(): Promise<void> {
-		const { workspace } = this.app;
+        if (this.vectorIndexDirty && this.settings.enableVectorRetrieval) {
+            await this.rebuildVectorIndexOnly(false);
+        }
+    }
 
-		// 先检查当前是否已经打开了这个视图
-		let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH)[0] ?? null;
+    async activateView(): Promise<void> {
+        const { workspace } = this.app;
+        let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH)[0] ?? null;
 
-		// 如果没有，就在右侧边栏新建一个
-		if (!leaf) {
-			leaf = workspace.getRightLeaf(false);
+        if (!leaf) {
+            leaf = workspace.getRightLeaf(false);
+            if (!leaf) {
+                new Notice("Cannot create a new view");
+                return;
+            }
 
-			if (!leaf) {
-				new Notice("Cannot create a new view");
-				return;
-			}
+            await leaf.setViewState({
+                type: VIEW_TYPE_VAULT_COACH,
+                active: true,
+            });
+        }
 
-			await leaf.setViewState({
-				type: VIEW_TYPE_VAULT_COACH,
-				active: true,
-			});
-		}
+        await workspace.revealLeaf(leaf);
+    }
 
-		// 让这个叶子节点显示出来
-		// void workspace.revealLeaf(leaf);
-		await workspace.revealLeaf(leaf);
-	}
+    // 新增：视图发送消息时调用，内部负责流式生成、记忆更新与持久化。
+    async streamAssistantTurn(userText: string, handlers?: StreamHandlers): Promise<AssistantAnswer> {
+        await this.ensureKnowledgeBaseReady();
 
-	/**
-     * 获取当前全部消息，提供给视图层使用。
-     */
-	getMessages(): ChatMessage[] {
-		return this.messages;
-	}
+        const memoryContext: string = this.buildMemoryContext(userText);
+        const answer: AssistantAnswer = await this.ragEngine.streamAnswerQuestion(
+            userText,
+            this.messages,
+            this.getKnowledgeScopeDescription(),
+            memoryContext,
+            handlers,
+        );
 
-	/**
-     * 添加用户消息。
-     */
-	addUserMessage(text: string): void {
-		this.messages.push({
-			role: "user",
-			text, 
-			createdAt: Date.now(),
-		})
-	};
+        this.addAssistantMessage(answer.text, answer.sources);
+        await this.updateLongTermMemory(userText, answer.text);
+        await this.persistRuntimeState();
 
-	/**
-     * 添加助手消息。
-     */
-	addAssistantMessage(text: string, sources: AnswerSource[]): void {
-		this.messages.push({
-			role: "assistant",
-			text, 
-			createdAt: Date.now(),
-			sources,
-		});
-	}
+        return answer;
+    }
 
-	/**
-     * 重置当前会话，清空旧消息，并重新放入一条默认欢迎语。
-	 * 
-	 * 第二阶段开始，默认欢迎语允许使用 Markdown，
-     * 因此这里直接把 setting 中的字符串原样作为消息正文保存。
-     */
-	resetConversation(): void {
-		this.messages = [
-			{
-				role: "assistant",
-				text: this.settings.defaultGreeting || `# 你好\n\n我是 ${this.settings.assistantName}。`,
-				createdAt: Date.now(),
-			},
-		];
-	}
+    async openSource(source: AnswerSource): Promise<void> {
+        const activeFilePath: string = this.app.workspace.getActiveFile()?.path ?? "";
+        const linkTarget: string = source.heading
+            ? `${source.filePath}#${source.heading}`
+            : source.filePath;
 
-	/**
-     * 刷新所有已经打开的 VaultCoach 视图。
-     * 比如修改设置、清空对话、重建索引后都可以调用它。
-     */
-	refreshAllViews(): void {
-		const leaves: WorkspaceLeaf[] = this.app.workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH);
+        await this.app.workspace.openLinkText(linkTarget, activeFilePath, false);
+    }
 
-		for (const leaf of leaves) {
-			const view = leaf.view;
-			if (view instanceof VaultCoachView) {
-				view.refresh();
-			}
-		}
-	}
+    private registerVaultEvents(): void {
+        const queuePath = (path: string): void => {
+            if (!this.isMarkdownPath(path)) {
+                return;
+            }
 
-	/**
-     * 第二阶段的回答逻辑。
-     *
-     * 处理流程：
-     * 1. 确保索引可用
-     * 2. query rewrite
-     * 3. 根据当前 retrieval mode 做召回
-     * 4. hybrid merge
-     * 5. rerank
-     * 6. 构造 prompt 与上下文
-     * 7. 调用本地模型生成 Markdown 答案
-     */
-	async answerQuestion(userText: string): Promise<AssistantAnswer> {
-		await this.ensureKnowledgeBaseReady();
+            this.pendingChangedMarkdownPaths.add(path);
+            this.knowledgeBaseDirty = true;
+            this.vectorIndexDirty = true;
+            this.refreshAllViews();
+            this.scheduleAutoIndexSync();
+        };
 
-		return this.ragEngine.answerQuestion(
-			userText, 
-			this.messages,
-			this.getKnowledgeScopeDescription(),
-		)
-	}
-
-
-	/**
-     * 点击来源后的跳转逻辑。
-     *
-     * 当前阶段只要求精确到 heading 级别，因此这里直接使用：
-     * - 文件路径
-     * - 或 文件路径#Heading
-     *
-     * 然后交给 Obsidian 内部的 openLinkText 处理。
-     */
-	async openSource(source: AnswerSource): Promise<void> {
-		const activeFilePath: string = this.app.workspace.getActiveFile()?.path ?? "";
-		const linkTarget: string = source.heading
-			? `${source.filePath}#${source.heading}`
-			: source.filePath;
-		
-		await this.app.workspace.openLinkText(linkTarget, activeFilePath, false);
-	}
-
-
-	/**
-     * 注册 vault 事件监听。
-     *
-     * 第一阶段不直接做自动增量更新，而是：
-     * - 监听文件变化
-     * - 把索引标记为 dirty
-     * - 等用户下一次提问或手动点击“重建索引”时再重建
-     */
-	private registerVaultEvents(): void {
-		
-		const markDirtyIfMarkdown = (file: TAbstractFile): void => {
-			if (this.isMarkdownPath(file.path)) {
-				this.markKnowledgeBaseDirty();
-			}
-		};
-
-		this.registerEvent(this.app.vault.on("create", (file: TAbstractFile) => {
-			markDirtyIfMarkdown(file);
-		}));
-
-		this.registerEvent(this.app.vault.on("modify", (file: TAbstractFile) => {
-			markDirtyIfMarkdown(file);
-		}));
-
-		this.registerEvent(this.app.vault.on("delete", (file: TAbstractFile) => {
-            markDirtyIfMarkdown(file);
+        this.registerEvent(this.app.vault.on("create", (file: TAbstractFile) => {
+            queuePath(file.path);
         }));
 
-        this.registerEvent(this.app.vault.on("rename", (file: TAbstractFile) => {
-            markDirtyIfMarkdown(file);
+        this.registerEvent(this.app.vault.on("modify", (file: TAbstractFile) => {
+            queuePath(file.path);
         }));
-	}
 
-	/**
-     * 判断某个路径是否是 Markdown 文件。
-     */
-	private isMarkdownPath(path:string) {
-		return path.toLowerCase().endsWith(".md");
-	}
-	
+        this.registerEvent(this.app.vault.on("delete", (file: TAbstractFile) => {
+            queuePath(file.path);
+        }));
 
+        this.registerEvent(this.app.vault.on("rename", (file: TAbstractFile, oldPath: string) => {
+            queuePath(oldPath);
+            queuePath(file.path);
+        }));
+    }
 
+    // 新增：当累计变更达到阈值或等待时间到达上限时自动触发增量同步。
+    private scheduleAutoIndexSync(): void {
+        if (!this.settings.enableAutoIndexSync) {
+            return;
+        }
+
+        if (this.pendingChangedMarkdownPaths.size >= this.settings.autoIndexFileThreshold) {
+            void this.flushPendingKnowledgeBaseSync(false);
+            return;
+        }
+
+        if (this.autoIndexDebounceTimer !== null) {
+            window.clearTimeout(this.autoIndexDebounceTimer);
+        }
+
+        this.autoIndexDebounceTimer = window.setTimeout(() => {
+            void this.flushPendingKnowledgeBaseSync(false);
+        }, this.settings.autoIndexDebounceMs);
+
+        if (this.autoIndexMaxWaitTimer === null) {
+            this.autoIndexMaxWaitTimer = window.setTimeout(() => {
+                void this.flushPendingKnowledgeBaseSync(false);
+            }, this.settings.autoIndexMaxWaitMs);
+        }
+    }
+
+    // 新增：对 pending 文件执行真正的增量同步，并只重算变更 chunk 的 embedding。
+    private async flushPendingKnowledgeBaseSync(showNotice: boolean): Promise<void> {
+        if (this.isSyncingKnowledgeBase) {
+            return;
+        }
+
+        const filePaths: string[] = Array.from(this.pendingChangedMarkdownPaths);
+        if (filePaths.length === 0) {
+            return;
+        }
+
+        this.isSyncingKnowledgeBase = true;
+        this.pendingChangedMarkdownPaths.clear();
+        this.clearAutoIndexTimers();
+
+        try {
+            if (!this.knowledgeBase.isReady()) {
+                await this.rebuildKnowledgeBase(showNotice);
+                return;
+            }
+
+            const syncResult: KnowledgeBaseSyncResult = await this.knowledgeBase.syncChangedFiles(filePaths);
+            await this.ragEngine.syncVectorIndex(syncResult);
+
+            this.lastAutoIndexAt = Date.now();
+            this.knowledgeBaseDirty = false;
+            this.vectorIndexDirty = false;
+
+            await this.persistKnowledgeBaseSnapshot();
+            await this.persistRuntimeState();
+            this.refreshAllViews();
+
+            if (showNotice) {
+                new Notice(`增量同步完成：${syncResult.affectedFiles.length} 个文件变更已处理。`);
+            }
+        } catch (error: unknown) {
+            console.error("[VaultCoach] 自动增量同步失败", error);
+            this.knowledgeBaseDirty = true;
+            this.vectorIndexDirty = true;
+        } finally {
+            this.isSyncingKnowledgeBase = false;
+        }
+    }
+
+    private async rebuildVectorIndexOnly(showNotice: boolean): Promise<void> {
+        try {
+            const vectorStats: VectorIndexStats = await this.ragEngine.rebuildVectorIndex();
+            this.vectorIndexDirty = false;
+            this.knowledgeBaseDirty = false;
+            await this.persistKnowledgeBaseSnapshot();
+            this.refreshAllViews();
+
+            if (showNotice) {
+                new Notice(`向量索引完成：${vectorStats.vectorCount} 条向量。`);
+            }
+        } catch (error: unknown) {
+            console.error("[VaultCoach] 向量索引重建失败", error);
+            this.vectorIndexDirty = true;
+            if (showNotice) {
+                new Notice("向量索引重建失败，请打开开发者控制台查看错误信息。");
+            }
+        }
+    }
+
+    private async restorePersistentState(): Promise<void> {
+        const state: PersistedPluginState | null = await this.persistentStore.loadRuntimeState();
+        if (!state) {
+            return;
+        }
+
+        this.messages = state.messages ?? [];
+        this.memories = state.memories ?? [];
+        this.lastAutoIndexAt = state.lastAutoIndexAt ?? null;
+        this.trimMessages();
+        this.trimMemories();
+    }
+
+    private async restoreKnowledgeBaseSnapshot(): Promise<void> {
+        const snapshot: KnowledgeBaseSnapshot | null = await this.persistentStore.loadKnowledgeBaseSnapshot();
+        if (!snapshot) {
+            return;
+        }
+
+        const textSignatureMatches: boolean = snapshot.settingsSignature === this.knowledgeBase.getSettingsSignature();
+        if (!textSignatureMatches) {
+            this.knowledgeBaseDirty = true;
+            this.vectorIndexDirty = true;
+            return;
+        }
+
+        this.knowledgeBase.loadFromSnapshot(snapshot);
+        this.ragEngine.hydrateVectorStats(snapshot.vectorStats);
+        this.knowledgeBaseDirty = false;
+
+        const currentEmbeddingModel: string | null = this.settings.enableVectorRetrieval
+            ? this.settings.embeddingModel.trim()
+            : null;
+
+        if (snapshot.embeddingModel !== currentEmbeddingModel) {
+            this.knowledgeBase.clearVectorIndex();
+            this.ragEngine.hydrateVectorStats({
+                ready: false,
+                vectorCount: 0,
+                dimension: null,
+                lastBuiltAt: null,
+            });
+            this.vectorIndexDirty = this.settings.enableVectorRetrieval;
+        } else {
+            this.vectorIndexDirty = false;
+        }
+    }
+
+    private async persistRuntimeState(): Promise<void> {
+        const state: PersistedPluginState = {
+            messages: [...this.messages],
+            memories: [...this.memories],
+            lastAutoIndexAt: this.lastAutoIndexAt,
+        };
+        await this.persistentStore.saveRuntimeState(state);
+    }
+
+    private async persistKnowledgeBaseSnapshot(): Promise<void> {
+        const snapshot: KnowledgeBaseSnapshot = {
+            version: 1,
+            settingsSignature: this.knowledgeBase.getSettingsSignature(),
+            embeddingModel: this.settings.enableVectorRetrieval
+                ? this.settings.embeddingModel.trim()
+                : null,
+            stats: this.knowledgeBase.getStats(),
+            vectorStats: this.ragEngine.getVectorIndexStats(),
+            chunks: this.knowledgeBase.getAllChunks(),
+            embeddings: this.knowledgeBase.getEmbeddingSnapshot(),
+            files: this.knowledgeBase.getFileRecords(),
+        };
+        await this.persistentStore.saveKnowledgeBaseSnapshot(snapshot);
+    }
+
+    // 新增：从本地长期记忆中检索与当前问题最相关的条目，并注入到 prompt。
+    private buildMemoryContext(query: string): string {
+        if (!this.settings.enableLongTermMemory || this.memories.length === 0) {
+            return "";
+        }
+
+        const hits: MemorySearchHit[] = this.searchMemories(query, this.settings.memoryTopK);
+        if (hits.length === 0) {
+            return "";
+        }
+
+        const now: number = Date.now();
+        for (const hit of hits) {
+            hit.item.lastAccessedAt = now;
+        }
+
+        return hits
+            .map((hit: MemorySearchHit, index: number) => `${index + 1}. ${hit.item.text}`)
+            .join("\n");
+    }
+
+    // 新增：回答结束后抽取长期记忆并做本地去重、更新和裁剪。
+    private async updateLongTermMemory(userText: string, assistantText: string): Promise<void> {
+        if (!this.settings.enableLongTermMemory) {
+            return;
+        }
+
+        const memoryStatements: string[] = await this.ragEngine.extractMemoryStatements(
+            userText,
+            assistantText,
+            this.messages,
+        );
+
+        if (memoryStatements.length === 0) {
+            return;
+        }
+
+        const now: number = Date.now();
+        for (const statement of memoryStatements) {
+            const normalizedStatement: string = this.normalizeMemoryText(statement);
+            if (normalizedStatement.length === 0) {
+                continue;
+            }
+
+            const existing: MemoryItem | undefined = this.memories.find((item: MemoryItem) => {
+                return this.normalizeMemoryText(item.text) === normalizedStatement;
+            });
+
+            if (existing) {
+                existing.text = statement.trim();
+                existing.updatedAt = now;
+                existing.lastAccessedAt = now;
+                continue;
+            }
+
+            this.memories.unshift({
+                id: this.createMemoryId(normalizedStatement),
+                text: statement.trim(),
+                createdAt: now,
+                updatedAt: now,
+                lastAccessedAt: now,
+            });
+        }
+
+        this.trimMemories();
+    }
+
+    private searchMemories(query: string, limit: number): MemorySearchHit[] {
+        const normalizedQuery: string = this.normalizeMemoryText(query);
+        const queryTokens: string[] = Array.from(new Set(this.tokenize(query)));
+        const hits: MemorySearchHit[] = [];
+
+        for (const item of this.memories) {
+            const normalizedText: string = this.normalizeMemoryText(item.text);
+            const memoryTokens: Set<string> = new Set(this.tokenize(item.text));
+
+            let score = 0;
+            let overlapCount = 0;
+
+            if (normalizedQuery.length > 0 && normalizedText.includes(normalizedQuery)) {
+                score += 3;
+            }
+
+            for (const token of queryTokens) {
+                if (memoryTokens.has(token)) {
+                    overlapCount += 1;
+                }
+            }
+
+            if (overlapCount === 0 && score === 0) {
+                continue;
+            }
+
+            score += overlapCount * 0.6;
+            score += Math.max(0, (item.updatedAt - (Date.now() - 1000 * 60 * 60 * 24 * 30)) / (1000 * 60 * 60 * 24 * 30));
+
+            hits.push({
+                item,
+                score,
+                matchedTokens: queryTokens.filter((token: string) => memoryTokens.has(token)),
+            });
+        }
+
+        hits.sort((left: MemorySearchHit, right: MemorySearchHit) => right.score - left.score);
+        return hits.slice(0, limit);
+    }
+
+    private trimMessages(): void {
+        const maxMessages: number = Math.max(1, this.settings.maxConversationMessages);
+        if (this.messages.length <= maxMessages) {
+            return;
+        }
+
+        const greeting: ChatMessage | undefined = this.messages.find((message: ChatMessage) => message.role === "assistant");
+        const tail: ChatMessage[] = this.messages.slice(-maxMessages);
+
+        if (greeting && !tail.includes(greeting)) {
+            this.messages = [greeting, ...tail.slice(1)];
+            return;
+        }
+
+        this.messages = tail;
+    }
+
+    private trimMemories(): void {
+        const maxItems: number = Math.max(1, this.settings.memoryMaxItems);
+        if (this.memories.length <= maxItems) {
+            return;
+        }
+
+        this.memories.sort((left: MemoryItem, right: MemoryItem) => {
+            const rightKey: number = Math.max(right.updatedAt, right.lastAccessedAt);
+            const leftKey: number = Math.max(left.updatedAt, left.lastAccessedAt);
+            return rightKey - leftKey;
+        });
+
+        this.memories = this.memories.slice(0, maxItems);
+    }
+
+    private clearAutoIndexTimers(): void {
+        if (this.autoIndexDebounceTimer !== null) {
+            window.clearTimeout(this.autoIndexDebounceTimer);
+            this.autoIndexDebounceTimer = null;
+        }
+
+        if (this.autoIndexMaxWaitTimer !== null) {
+            window.clearTimeout(this.autoIndexMaxWaitTimer);
+            this.autoIndexMaxWaitTimer = null;
+        }
+    }
+
+    private normalizeMemoryText(text: string): string {
+        return text.toLowerCase().replace(/\s+/g, " ").trim();
+    }
+
+    private tokenize(text: string): string[] {
+        const normalizedText: string = text.toLowerCase();
+        const tokens: string[] = [];
+
+        const latinMatches: RegExpMatchArray | null = normalizedText.match(/[a-z0-9_./-]+/g);
+        if (latinMatches) {
+            for (const token of latinMatches) {
+                if (token.trim().length > 0) {
+                    tokens.push(token.trim());
+                }
+            }
+        }
+
+        const chineseSequences: RegExpMatchArray | null = normalizedText.match(/[\u4e00-\u9fff]+/g);
+        if (chineseSequences) {
+            for (const sequence of chineseSequences) {
+                for (const char of sequence) {
+                    tokens.push(char);
+                }
+
+                for (let index = 0; index < sequence.length - 1; index += 1) {
+                    tokens.push(sequence.slice(index, index + 2));
+                }
+            }
+        }
+
+        return tokens;
+    }
+
+    private createMemoryId(text: string): string {
+        let hash = 2166136261;
+        for (let index = 0; index < text.length; index += 1) {
+            hash ^= text.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+        return `mem_${(hash >>> 0).toString(16)}`;
+    }
+
+    private isMarkdownPath(path: string): boolean {
+        return path.toLowerCase().endsWith(".md");
+    }
 }
-
-
-

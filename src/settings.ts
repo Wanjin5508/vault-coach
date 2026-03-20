@@ -2,14 +2,22 @@
 
 import {App, DropdownComponent, PluginSettingTab, Setting, normalizePath} from "obsidian";
 import {
-	DEFAULT_CHAT_MODEL,
+	DEFAULT_AUTO_INDEX_DEBOUNCE_MS,
+    DEFAULT_AUTO_INDEX_FILE_THRESHOLD,
+    DEFAULT_AUTO_INDEX_MAX_WAIT_MS,
+    DEFAULT_CHAT_MODEL,
     DEFAULT_CHUNK_OVERLAP,
     DEFAULT_CHUNK_SIZE,
     DEFAULT_CONTEXT_TOP_K,
     DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_ENABLE_AUTO_INDEX_SYNC,
+    DEFAULT_ENABLE_LONG_TERM_MEMORY,
     DEFAULT_GENERATION_TEMPERATURE,
     DEFAULT_HYBRID_TOP_K,
     DEFAULT_KEYWORD_TOP_K,
+    DEFAULT_MAX_CONVERSATION_MESSAGES,
+    DEFAULT_MEMORY_MAX_ITEMS,
+    DEFAULT_MEMORY_TOP_K,
     DEFAULT_OLLAMA_BASE_URL,
     DEFAULT_RERANK_TOP_K,
     DEFAULT_SOURCE_LIMIT,
@@ -34,7 +42,10 @@ export const DEFAULT_SETTINGS: VaultCoachSettings = {
         "- Embedding / 向量检索；",
         "- Hybrid merge；",
         "- Rerank；",
-        "- Markdown 格式回答渲染。",
+        "- Markdown 格式回答渲染；",
+        "- 对话持久化；",
+        "- 本地长期记忆；",
+        "- 自动增量索引同步。",
     ].join("\n"),
     openInRightSidebarOnStartup: true,
     knowledgeScopeMode: "wholeVault",
@@ -58,6 +69,14 @@ export const DEFAULT_SETTINGS: VaultCoachSettings = {
     embeddingModel: DEFAULT_EMBEDDING_MODEL,
     rerankBaseUrl: "",
     rerankModel: "",
+    enableLongTermMemory: DEFAULT_ENABLE_LONG_TERM_MEMORY,
+    memoryTopK: DEFAULT_MEMORY_TOP_K,
+    memoryMaxItems: DEFAULT_MEMORY_MAX_ITEMS,
+    maxConversationMessages: DEFAULT_MAX_CONVERSATION_MESSAGES,
+    enableAutoIndexSync: DEFAULT_ENABLE_AUTO_INDEX_SYNC,
+    autoIndexDebounceMs: DEFAULT_AUTO_INDEX_DEBOUNCE_MS,
+    autoIndexMaxWaitMs: DEFAULT_AUTO_INDEX_MAX_WAIT_MS,
+    autoIndexFileThreshold: DEFAULT_AUTO_INDEX_FILE_THRESHOLD,
 };
 
 // 插件的设置页类
@@ -83,6 +102,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 
 		this.renderGeneralSection(containerEl);
         this.renderKnowledgeSection(containerEl);
+		this.renderMemorySection(containerEl);
         this.renderAdvancedRagSection(containerEl);
         this.renderLocalModelSection(containerEl);
 	}
@@ -234,6 +254,116 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                         this.plugin.settings.chunkOverlap = parsed;
                         await this.plugin.saveSettings();
                         this.plugin.markKnowledgeBaseDirty();
+                    }),
+            );
+
+			// 新增：自动增量重建相关设置。
+        new Setting(containerEl)
+            .setName("启用自动增量同步")
+            .setDesc("监听 vault 中 Markdown 文件变化，在阈值或时间窗口达到后自动同步索引。")
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.enableAutoIndexSync)
+                    .onChange(async (value: boolean) => {
+                        this.plugin.settings.enableAutoIndexSync = value;
+                        await this.plugin.saveSettings();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("自动同步文件阈值")
+            .setDesc("累计发生改动的 Markdown 文件数达到该阈值时，立即触发一次增量同步。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(String(DEFAULT_AUTO_INDEX_FILE_THRESHOLD))
+                    .setValue(String(this.plugin.settings.autoIndexFileThreshold))
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.autoIndexFileThreshold = this.parsePositiveInteger(value, DEFAULT_AUTO_INDEX_FILE_THRESHOLD);
+                        await this.plugin.saveSettings();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("自动同步防抖时间（毫秒）")
+            .setDesc("最后一次文件变化后等待这么久再同步，避免频繁重建。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(String(DEFAULT_AUTO_INDEX_DEBOUNCE_MS))
+                    .setValue(String(this.plugin.settings.autoIndexDebounceMs))
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.autoIndexDebounceMs = this.parsePositiveInteger(value, DEFAULT_AUTO_INDEX_DEBOUNCE_MS);
+                        await this.plugin.saveSettings();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("自动同步最大等待时间（毫秒）")
+            .setDesc("即使文件变化不断发生，最长也会在该时间后强制执行一次同步。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(String(DEFAULT_AUTO_INDEX_MAX_WAIT_MS))
+                    .setValue(String(this.plugin.settings.autoIndexMaxWaitMs))
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.autoIndexMaxWaitMs = this.parsePositiveInteger(value, DEFAULT_AUTO_INDEX_MAX_WAIT_MS);
+                        await this.plugin.saveSettings();
+                    }),
+            );
+    }
+
+	// 新增：长期记忆与对话持久化设置分区。
+    private renderMemorySection(containerEl: HTMLElement): void {
+        new Setting(containerEl)
+            .setHeading()
+            .setName("长期记忆");
+
+        new Setting(containerEl)
+            .setName("启用长期记忆")
+            .setDesc("在每轮问答结束后抽取可长期保留的事实，并在后续相关问题中注入。")
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.enableLongTermMemory)
+                    .onChange(async (value: boolean) => {
+                        this.plugin.settings.enableLongTermMemory = value;
+                        await this.plugin.saveSettings();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("记忆注入数量")
+            .setDesc("每次回答最多注入多少条与当前问题最相关的长期记忆。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(String(DEFAULT_MEMORY_TOP_K))
+                    .setValue(String(this.plugin.settings.memoryTopK))
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.memoryTopK = this.parsePositiveInteger(value, DEFAULT_MEMORY_TOP_K);
+                        await this.plugin.saveSettings();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("最大记忆条数")
+            .setDesc("超过上限后会优先保留最近更新或最近命中的记忆。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(String(DEFAULT_MEMORY_MAX_ITEMS))
+                    .setValue(String(this.plugin.settings.memoryMaxItems))
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.memoryMaxItems = this.parsePositiveInteger(value, DEFAULT_MEMORY_MAX_ITEMS);
+                        await this.plugin.saveSettings();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("最大持久化消息数")
+            .setDesc("对话历史会持久化到本地，但只保留最近若干条，避免状态文件无限膨胀。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(String(DEFAULT_MAX_CONVERSATION_MESSAGES))
+                    .setValue(String(this.plugin.settings.maxConversationMessages))
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.maxConversationMessages = this.parsePositiveInteger(value, DEFAULT_MAX_CONVERSATION_MESSAGES);
+                        await this.plugin.saveSettings();
                     }),
             );
     }

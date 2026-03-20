@@ -3,19 +3,27 @@ import type {
     LocalChatMessage,
     QueryRewriteResult,
     RerankResultItem,
-    VaultCoachSettings
+    StreamHandlers,
+    VaultCoachSettings,
 } from "./types"
 
 interface OllamaChatResponse {
     message?: {
         content?: string;
     }
-
     error?: string;
 }
 
 interface OllamaEmbedResponse {
     embeddings?: number[][];
+    error?: string;
+}
+
+interface OllamaStreamChunk {
+    message?: {
+        content?: string;
+    };
+    done?: boolean;
     error?: string;
 }
 
@@ -126,6 +134,67 @@ export class LocalModelClient {
         };
     }
 
+    // 新增：使用同一个聊天模型抽取可长期保存的记忆事实。
+    async extractMemoryStatements(
+        conversationContext: string,
+        latestUserText: string,
+        latestAssistantText: string,
+    ): Promise<string[]> {
+        const settings: VaultCoachSettings = this.getSettings();
+
+        if (!settings.enableLongTermMemory || settings.chatModel.trim().length === 0) {
+            return [];
+        }
+
+        const systemPrompt: string = [
+            "你是一个长期记忆抽取器。",
+            "你的目标是从对话中提炼对未来仍有用、且适合长期保存的用户信息。",
+            "只保留稳定偏好、长期项目、明确目标、持续约束、反复出现的事实。",
+            "不要保留一次性问题、临时闲聊、即时状态、模糊猜测。",
+            "输出严格 JSON，格式为 {\"memories\": [\"...\", \"...\"]}。",
+            "如果没有值得长期记住的信息，返回空数组。",
+        ].join("\n");
+
+        const userPrompt: string = [
+            "最近对话上下文：",
+            conversationContext || "（无）",
+            "",
+            `本轮用户输入：${latestUserText}`,
+            `本轮助手回复：${latestAssistantText}`,
+            "",
+            "请只输出 JSON。",
+        ].join("\n");
+
+        try {
+            const content: string = await this.chat({
+                model: settings.chatModel,
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt },
+                ],
+                temperature: 0,
+                format: "json",
+            });
+
+            const parsed: unknown = JSON.parse(content);
+            if (
+                parsed &&
+                typeof parsed === "object" &&
+                "memories" in parsed &&
+                Array.isArray(parsed.memories)
+            ) {
+                return parsed.memories
+                    .filter((value: unknown): value is string => typeof value === "string")
+                    .map((value: string) => value.trim())
+                    .filter((value: string) => value.length > 0);
+            }
+        } catch (error: unknown) {
+            console.error("[VaultCoach] 记忆抽取失败", error);
+        }
+
+        return [];
+    }
+
     /**
      * 调用本地聊天模型生成最终回答。
      *
@@ -139,6 +208,81 @@ export class LocalModelClient {
             temperature,
         });
     }
+
+    // 新增：最终回答使用流式输出，rewrite 仍保持非流式。
+    // 替换streamMarkdownAnswer方法的实现
+async streamMarkdownAnswer(
+    messages: LocalChatMessage[],
+    temperature: number,
+    handlers?: StreamHandlers,
+): Promise<string> {
+    const settings: VaultCoachSettings = this.getSettings();
+    const targetUrl: string = this.joinUrl(settings.llmBaseUrl, "/api/chat");
+    
+    // 使用requestUrl替代fetch
+    const response = await requestUrl({
+        url: targetUrl,
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            model: settings.chatModel,
+            messages,
+            stream: true,
+            options: {
+                temperature,
+            },
+        }),
+    });
+
+    // 由于requestUrl不直接支持流式处理，我们需要处理完整响应
+    // 注意：requestUrl返回的是完整的响应，无法真正实现流式处理
+    // 这里模拟流式处理行为
+    
+    let finalText = "";
+    
+    try {
+        // 将完整响应文本按行分割来模拟流式处理
+        const responseText = response.text;
+        const lines = responseText.split('\n');
+        
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.length === 0) {
+                continue;
+            }
+            
+            try {
+                const parsed: OllamaStreamChunk = JSON.parse(trimmedLine) as OllamaStreamChunk;
+                
+                if (parsed.error) {
+                    throw new Error(parsed.error);
+                }
+
+                const token: string = parsed.message?.content ?? "";
+                if (token.length > 0) {
+                    finalText += token;
+                    handlers?.onToken?.(token);
+                }
+
+                if (parsed.done) {
+                    handlers?.onDone?.();
+                    return finalText;
+                }
+            } catch (parseError) {
+                // 忽略解析错误，继续处理下一行
+                continue;
+            }
+        }
+        
+        handlers?.onDone?.();
+        return finalText;
+    } catch (error: unknown) {
+        handlers?.onError?.(error);
+        throw error;
+    }
+}
 
     /**
      * 批量生成 embedding。
