@@ -124,10 +124,14 @@ This design keeps the system modular and allows each retrieval component to evol
 ```text
 src/
   main.ts
+  knowledge-base.ts
+  rag-engine.ts
+  model-client.ts
   settings.ts
   view.ts
   types.ts
   constants.ts
+  persistent-store.ts
 styles.css
 ```
 
@@ -194,7 +198,6 @@ Then use them for:
 * multi-hop candidate completion
 * path-based explanation
 
-At this stage, a strict ontology is still unnecessary.
 
 ### Layer 3: Optional ontology overlay
 

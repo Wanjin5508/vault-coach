@@ -44,7 +44,7 @@
 * 图增强检索
 * 轻量知识图谱探索
 * 面向专业领域 vault 的本体层
-* 面试模式编排
+* 面试模式(插件提问，用户回答)编排
 
 ---
 
@@ -137,10 +137,14 @@
 ```text
 src/
   main.ts
+  knowledge-base.ts
+  rag-engine.ts
+  model-client.ts
   settings.ts
   view.ts
   types.ts
   constants.ts
+  persistent-store.ts
 styles.css
 ```
 
@@ -206,7 +210,6 @@ styles.css
 * 多跳候选补全
 * 路径解释
 
-在这一层，还不需要正式引入 ontology。
 
 ### 第 3 层：可选本体覆盖层
 
