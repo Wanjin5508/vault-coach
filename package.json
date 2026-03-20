@@ -1,6 +1,6 @@
 {
 	"name": "vault-coach",
-	"version": "0.0.2",
+	"version": "1.0.0",
     "description": "Local knowledge Q&A and interview practice from your vault using Ollama.", 
 	"main": "main.js",
 	"type": "module",
