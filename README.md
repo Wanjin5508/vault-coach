@@ -1,11 +1,8 @@
-<p align="right">
-  English | <a href="README.zh.md">中文</a>
-</p>
-
-
 # Vault Coach
 
-A local RAG-style Obsidian plugin for vault knowledge retrieval, question answering, and interview practice, powered by Ollama.
+> 🌐 Language: English | [中文](./README_CN.md)
+
+An [Obsidian](https://obsidian.md) plugin for intelligent local knowledge base Q&A, powered by Advanced RAG (Retrieval-Augmented Generation) and a locally-running [Ollama](https://ollama.com) service. **Your data never leaves your machine.**
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
 ![Version](https://img.shields.io/badge/version-0.0.2-1E90FF)
@@ -15,246 +12,187 @@ A local RAG-style Obsidian plugin for vault knowledge retrieval, question answer
 
 ---
 
-### Overview
+## Table of Contents
 
-**Vault Coach** is a local-first Obsidian plugin designed for knowledge retrieval and interactive Q&A inside your vault.
-
-It starts from a lightweight non-LLM retrieval backbone and gradually evolves into an advanced local RAG pipeline with:
-
-- query rewrite
-- vector retrieval
-- hybrid retrieval
-- reranking
-- prompt/context optimization
-
-The long-term goal is to turn your vault into a **local knowledge assistant and interview practice environment** without relying on external cloud services.
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Roadmap](#roadmap)
+- [Architecture](#architecture)
+- [Known Issues](#known-issues)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-### Current Status
+## Features
 
-The project is currently planned and documented in **4 stages**.
+### ✅ Phase 1 (Current — v0.0.2)
 
-**Implemented up to Stage 2:**
-- non-LLM retrieval backbone
-- advanced local RAG pipeline
-- markdown-formatted assistant responses
-
-**Planned next:**
-- graph-enhanced retrieval
-- lightweight knowledge graph exploration
-- optional ontology layer for domain vaults
-- interview mode orchestration
-
----
-
-### Key Features
-
-#### Implemented Features (up to Stage 2)
-
-- **Extended settings panel**
-  - configure plugin behavior and local model-related options
-  - define retrieval scope and response preferences
-
-- **Right sidebar chat view**
-  - interactive assistant panel inside Obsidian
-  - supports local Q&A workflow in the vault
-
-- **Vault / folder scope scanning**
-  - scan notes from the whole vault or selected folders
-  - limit retrieval to user-defined ranges
-
-- **Markdown chunking**
-  - split notes into retrieval-friendly chunks
-  - preserve source-note relationships for traceability
-
-- **Keyword retrieval**
-  - lightweight lexical retrieval without vector dependency
-  - provides a usable local knowledge Q&A baseline
-
-- **Source folding and jump-to-note**
-  - show answer sources in collapsible form
-  - jump back to the original note / section
-
-- **Query rewrite**
-  - optimize the user query before retrieval
-  - improve recall for shorthand, vague, or noisy questions
-
-- **Embedding / vector retrieval**
-  - use embeddings for semantic search
-  - retrieve relevant chunks beyond literal keyword overlap
-
-- **Hybrid merge**
-  - combine keyword retrieval and vector retrieval results
-  - balance precision and semantic recall
-
-- **Rerank**
-  - rerank retrieved candidates before generation
-  - improve final context quality for the LLM
-
-- **Prompt and context construction optimization**
-  - assemble cleaner, better-structured context
-  - reduce noise and improve answer grounding
-
-- **Markdown-formatted assistant output**
-  - render answers as Markdown instead of plain text
-  - better readability for lists, code blocks, headings, and references
+| Feature | Description |
+|---------|-------------|
+| 🔍 Hybrid Retrieval | TF-IDF keyword search + semantic vector search + RRF fusion |
+| ✏️ Query Rewrite | Local LLM auto-rewrites queries to improve retrieval quality |
+| 📊 Rerank | Optional external rerank service, falls back to heuristic rerank |
+| 🧠 Long-term Memory | Cross-session extraction and injection of user preferences |
+| 🔄 Incremental Index Sync | Watches vault file changes and updates the index automatically |
+| 🌊 Streaming Output | Pseudo-streaming response rendering with low perceived latency |
+| 💾 Conversation Persistence | Chat history saved locally and restored after restart |
+| 🔒 100% Local | Powered by Ollama REST API — no data leaves your device |
 
 ---
 
-### Retrieval Pipeline
+## Quick Start
 
-Current pipeline (up to Stage 2):
+### Prerequisites
 
-`User Query`
-→ `Query Rewrite`
-→ `Keyword Retrieval + Vector Retrieval`
-→ `Hybrid Merge`
-→ `Rerank`
-→ `Prompt / Context Builder`
-→ `Local LLM Generation`
-→ `Markdown Answer + Source Display`
+- [Obsidian](https://obsidian.md) v1.5.0+
+- [Ollama](https://ollama.com) running locally
+- At least one chat model (e.g. `gemma3:4b`) and one embedding model pulled
 
-This design keeps the system modular and allows each retrieval component to evolve independently.
+### Installation (Development Build)
 
----
+```bash
+# 1. Clone into your vault's plugin directory
+cd <your-vault>/.obsidian/plugins
+git clone https://github.com/Wanjin5508/vault-coach vault-coach
 
-### Project Structure
+# 2. Install dependencies and build
+cd vault-coach
+npm install
+npm run build
 
-```text
-src/
-  main.ts
-  knowledge-base.ts
-  rag-engine.ts
-  model-client.ts
-  settings.ts
-  view.ts
-  types.ts
-  constants.ts
-  persistent-store.ts
-styles.css
+# 3. Enable Vault Coach in Obsidian Settings > Community Plugins
 ```
 
----
+### Basic Setup
 
-### Development Roadmap
-
-## Stage 1: Build the non-LLM backbone first
-
-* [x] Extend settings
-* [x] Implement right sidebar view
-* [x] Implement vault/folder scope scanning
-* [x] Implement markdown chunking
-* [x] Implement keyword retrieval
-* [x] Implement source folding and jump
-
-At this point, the plugin already becomes a **working local knowledge Q&A plugin without vector search**.
+1. Open **Settings → Vault Coach**
+2. Set your Ollama base URL (default: `http://127.0.0.1:11434`)
+3. Enter your chat model name (e.g. `gemma3:4b`) and embedding model name
+4. Click **Rebuild Index** or wait for auto-sync to complete
+5. Click the 💬 ribbon icon to start chatting
 
 ---
 
-## Stage 2: Add Advanced RAG
+## Configuration
 
-* [x] Add query rewrite
-* [x] Add embedding / vector retrieval
-* [x] Add hybrid merge
-* [x] Add rerank
-* [x] Optimize prompt and context construction
-* [x] Improve assistant output rendering with Markdown
+### General
 
-This stage upgrades the plugin from a lexical retriever into a more complete **local advanced RAG assistant**.
+| Setting | Description |
+|---------|-------------|
+| Assistant Name | Name shown in the sidebar header |
+| Default Greeting | First message shown after conversation reset (Markdown supported) |
+| Open on Startup | Auto-open Vault Coach when Obsidian loads |
+| Default Retrieval Mode | keyword / vector / hybrid (hybrid recommended) |
+| Collapse Sources | Whether to collapse the sources section by default |
 
----
+### Knowledge Base
 
-## Stage 3: Explore more fine-grained retrieval modes
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Scope | Whole Vault | Or limit to a specific folder |
+| Chunk Size | 600 chars | Maximum characters per chunk |
+| Chunk Overlap | 120 chars | Overlap between adjacent chunks |
+| Auto Sync | ✅ | Watch file changes and update index automatically |
+| Debounce Delay | 15,000 ms | Wait time after last file change before syncing |
+| Max Wait Time | 120,000 ms | Force sync after this duration regardless |
+| File Threshold | 8 files | Trigger immediate sync when this many files change |
 
-### Layer 1: Weak graph enhancement
+### Advanced RAG
 
-Leverage the existing vault structure directly:
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Query Rewrite | ✅ | LLM rewrites the query before retrieval |
+| Vector Retrieval | ✅ | Generate embeddings during index build |
+| Rerank | ✅ | Rerank retrieved candidates |
+| Keyword top-k | 10 | Keyword retrieval candidate count |
+| Vector top-k | 10 | Vector retrieval candidate count |
+| Hybrid limit | 12 | Max candidates after fusion |
+| Rerank top-k | 8 | Candidates entering rerank stage |
+| Context chunks | 8 | Final chunks injected into the prompt |
+| Source limit | 5 | Max sources shown per answer |
+| Temperature | 0.2 | Generation temperature (keep low for RAG) |
 
-* note ↔ wikilink note
-* note ↔ heading
-* note ↔ tag
-* note ↔ folder / topic
-* chunk ↔ source note
+### Local Model
 
-Then apply **graph-aware expansion / rerank** after retrieval.
+| Setting | Description |
+|---------|-------------|
+| LLM Base URL | Ollama address, default `http://127.0.0.1:11434` |
+| Chat Model | Used for query rewrite and answer generation |
+| Embedding Model | Used for vector retrieval; rebuild index after changing |
+| Rerank Service URL | Optional; leave empty to use heuristic rerank |
+| Rerank Model | Used when a rerank service URL is configured |
 
-This layer has the highest cost-performance ratio.
+### Long-term Memory
 
-### Layer 2: Lightweight knowledge graph
-
-Extract chunk-level signals such as:
-
-* entities
-* synonyms
-* co-occurrence relations
-* citation / reference relations
-* topic communities
-
-Then use them for:
-
-* query expansion
-* neighborhood expansion recall
-* multi-hop candidate completion
-* path-based explanation
-
-
-### Layer 3: Optional ontology overlay
-
-Enable only for specialized vaults, such as:
-
-* high-voltage test equipment manuals
-* technical specifications
-* experimental procedures
-* regulations / contracts
-* medical knowledge bases
-
-Then define:
-
-* concept hierarchies
-* relation schema
-* synonym normalization
-* alias mapping
-* rule-based reasoning
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Enable Memory | ✅ | Extract and store useful facts after each turn |
+| Memory Top-k | 4 | Max memories injected per answer |
+| Max Memory Items | 150 | Oldest/least-accessed items are evicted when exceeded |
+| Max Persisted Messages | 60 | Max conversation messages kept in local storage |
 
 ---
 
-## Stage 4: Interview Mode
+## Roadmap
 
-* [ ] Question generation
-* [ ] Conversation state machine
-* [ ] User answer evaluation
-* [ ] Next question / finish interview / review summary
+See [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the full three-phase development plan.
 
-**Why this comes last:**
-Interview mode is not infrastructure.
-It is a higher-level orchestration layer built on top of retrieval, ranking, grounding, and generation.
+### Phase Overview
 
----
-
-### Long-Term Vision
-
-Vault Coach is intended to evolve from:
-
-**local note retrieval tool**
-→ **advanced local RAG assistant**
-→ **graph-enhanced knowledge navigator**
-→ **interactive interview and study coach**
+| Phase | Name | Status | Key Goal |
+|-------|------|--------|----------|
+| Phase 1 | Advanced RAG Q&A | ✅ **Complete** | Hybrid retrieval + Rerank + Long-term memory + Incremental index |
+| Phase 2 | Knowledge Graph Enhancement | 🔜 Planned | Entity extraction + Graph construction + Smart query routing |
+| Phase 3 | Agentic Interview Assistant | 🔜 Planned | Multi-role agents + Interview simulation + Skill diagnosis |
+| Phase 4 | Standalone Application | 🔜 Vision | Independent frontend/backend + Voice + Avatar |
 
 ---
 
-### Tech Direction
+## Architecture
 
-* **Local-first**
-* **Obsidian-native workflow**
-* **Ollama-powered generation**
-* **Modular retrieval architecture**
-* **Extensible toward graph and ontology reasoning**
+```
+┌─────────────────────────────────────────────────┐
+│                   view.ts (UI)                    │
+│         Obsidian ItemView · Right Sidebar         │
+└────────────────────┬────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────┐
+│                   main.ts                         │
+│   Plugin Entry · State Management · Vault Events  │
+└──────┬─────────────┬──────────────┬─────────────┘
+       │             │              │
+┌──────▼──────┐ ┌────▼─────┐ ┌────▼──────────────┐
+│  rag-engine │ │knowledge │ │ persistent-store   │
+│  Advanced   │ │  -base   │ │ runtime-state.json │
+│  RAG Flow   │ │Index/Ret.│ │ index-snapshot.json│
+└──────┬──────┘ └──────────┘ └───────────────────┘
+       │
+┌──────▼──────────────────────────────────────────┐
+│                model-client.ts                    │
+│     Ollama REST API · /api/chat · /api/embed      │
+└─────────────────────────────────────────────────┘
+```
 
-### License
+For detailed technical documentation, see [TECHNICAL_DOC.docx](./TECHNICAL_DOC.docx).
 
-This project is licensed under the MIT License.
+---
 
-Starting from version 0.0.2, Vault Coach is distributed under the MIT License.
-If you are using earlier revisions of the project, please refer to the license that applied to those revisions.
-See the [LICENSE](./LICENSE) file for details.
+## Known Issues
+
+- **Non-true streaming**: `requestUrl` returns the full response at once; true token-level streaming will require a `fetch` + `ReadableStream` migration
+- **Memory search lacks semantic similarity**: Currently uses keyword matching only; embedding-based memory search is planned for Phase 2
+- **VIEW_TYPE typo**: The constant value in `constants.ts` says `value-coach-view` instead of `vault-coach-view` (non-breaking, will be fixed in next release)
+
+---
+
+## Contributing
+
+Issues and PRs are welcome! Please check [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the current development direction before opening a PR.
+
+---
+
+## License
+
+[MIT License](./LICENSE)
