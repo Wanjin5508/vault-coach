@@ -211,77 +211,165 @@ export class LocalModelClient {
 
     // 新增：最终回答使用流式输出，rewrite 仍保持非流式。
     // 替换streamMarkdownAnswer方法的实现
+// async streamMarkdownAnswer(
+//     messages: LocalChatMessage[],
+//     temperature: number,
+//     handlers?: StreamHandlers,
+// ): Promise<string> {
+//     const settings: VaultCoachSettings = this.getSettings();
+//     const targetUrl: string = this.joinUrl(settings.llmBaseUrl, "/api/chat");
+    
+//     // 使用requestUrl替代fetch
+//     const response = await requestUrl({
+//         url: targetUrl,
+//         method: "POST",
+//         headers: {
+//             "Content-Type": "application/json",
+//         },
+//         body: JSON.stringify({
+//             model: settings.chatModel,
+//             messages,
+//             stream: true,
+//             options: {
+//                 temperature,
+//             },
+//         }),
+//     });
+
+//     // 由于requestUrl不直接支持流式处理，我们需要处理完整响应
+//     // 注意：requestUrl返回的是完整的响应，无法真正实现流式处理
+//     // 这里模拟流式处理行为
+    
+//     let finalText = "";
+    
+//     try {
+//         // 将完整响应文本按行分割来模拟流式处理
+//         const responseText = response.text;
+//         const lines = responseText.split('\n');
+        
+//         for (const line of lines) {
+//             const trimmedLine = line.trim();
+//             if (trimmedLine.length === 0) {
+//                 continue;
+//             }
+            
+//             try {
+//                 const parsed: OllamaStreamChunk = JSON.parse(trimmedLine) as OllamaStreamChunk;
+                
+//                 if (parsed.error) {
+//                     throw new Error(parsed.error);
+//                 }
+
+//                 const token: string = parsed.message?.content ?? "";
+//                 if (token.length > 0) {
+//                     finalText += token;
+//                     handlers?.onToken?.(token);
+//                 }
+
+//                 if (parsed.done) {
+//                     handlers?.onDone?.();
+//                     return finalText;
+//                 }
+//             } catch (parseError) {
+//                 // 忽略解析错误，继续处理下一行
+//                 continue;
+//             }
+//         }
+        
+//         handlers?.onDone?.();
+//         return finalText;
+//     } catch (error: unknown) {
+//         handlers?.onError?.(error);
+//         throw error;
+//     }
+// }
 async streamMarkdownAnswer(
     messages: LocalChatMessage[],
     temperature: number,
     handlers?: StreamHandlers,
 ): Promise<string> {
-    const settings: VaultCoachSettings = this.getSettings();
-    const targetUrl: string = this.joinUrl(settings.llmBaseUrl, "/api/chat");
+    const settings = this.getSettings();
+    const targetUrl = this.joinUrl(settings.llmBaseUrl, "/api/chat");
+
+    // 用 globalThis 绕过 TS 类型检查，运行时完全正常
+    // const nativeFetch = (globalThis as any).fetch as typeof window.fetch;
+    // 改成这样，完全不碰 any
+    const nativeFetch = globalThis.fetch.bind(globalThis) as (
+        input: string,
+        init?: RequestInit
+    ) => Promise<Response>;
     
-    // 使用requestUrl替代fetch
-    const response = await requestUrl({
-        url: targetUrl,
+    const response = await nativeFetch(targetUrl, {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             model: settings.chatModel,
             messages,
             stream: true,
-            options: {
-                temperature,
-            },
+            options: { temperature },
         }),
     });
 
-    // 由于requestUrl不直接支持流式处理，我们需要处理完整响应
-    // 注意：requestUrl返回的是完整的响应，无法真正实现流式处理
-    // 这里模拟流式处理行为
-    
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    // 真正的流式读取
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
     let finalText = "";
-    
+    let buffer = "";
+
     try {
-        // 将完整响应文本按行分割来模拟流式处理
-        const responseText = response.text;
-        const lines = responseText.split('\n');
-        
-        for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (trimmedLine.length === 0) {
-                continue;
-            }
+        while (true) {
+            const { done, value } = await reader.read();
             
-            try {
-                const parsed: OllamaStreamChunk = JSON.parse(trimmedLine) as OllamaStreamChunk;
+            if (done) break;
+            
+            // value 是 Uint8Array，需要解码成字符串
+            buffer += decoder.decode(value, { stream: true });
+            
+            // Ollama 返回的是 NDJSON，按换行符分割处理
+            const lines = buffer.split("\n");
+            
+            // 最后一个元素可能是不完整的行，留到下次处理
+            buffer = lines.pop() ?? "";
+            
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
                 
-                if (parsed.error) {
-                    throw new Error(parsed.error);
+                try {
+                    const chunk = JSON.parse(trimmed) as {
+                        message?: { content?: string };
+                        done?: boolean;
+                        error?: string;
+                    };
+                    
+                    if (chunk.error) throw new Error(chunk.error);
+                    
+                    const token = chunk.message?.content ?? "";
+                    if (token) {
+                        finalText += token;
+                        handlers?.onToken?.(token);
+                    }
+                    
+                    if (chunk.done) {
+                        handlers?.onDone?.();
+                        return finalText;
+                    }
+                } catch {
+                    // 单行解析失败不影响整体
+                    continue;
                 }
-
-                const token: string = parsed.message?.content ?? "";
-                if (token.length > 0) {
-                    finalText += token;
-                    handlers?.onToken?.(token);
-                }
-
-                if (parsed.done) {
-                    handlers?.onDone?.();
-                    return finalText;
-                }
-            } catch (parseError) {
-                // 忽略解析错误，继续处理下一行
-                continue;
             }
         }
-        
-        handlers?.onDone?.();
-        return finalText;
-    } catch (error: unknown) {
-        handlers?.onError?.(error);
-        throw error;
+    } finally {
+        await reader.cancel();
     }
+
+    handlers?.onDone?.();
+    return finalText;
 }
 
     /**
