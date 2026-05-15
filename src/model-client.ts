@@ -283,89 +283,44 @@ export class LocalModelClient {
 //         throw error;
 //     }
 // }
+
 async streamMarkdownAnswer(
     messages: LocalChatMessage[],
     temperature: number,
     handlers?: StreamHandlers,
 ): Promise<string> {
-    const settings = this.getSettings();
-    const targetUrl = this.joinUrl(settings.llmBaseUrl, "/api/chat");
+    const settings: VaultCoachSettings = this.getSettings();
 
-    // 用 globalThis 绕过 TS 类型检查，运行时完全正常
-    // const nativeFetch = (globalThis as any).fetch as typeof window.fetch;
-    // 改成这样，完全不碰 any
-    const nativeFetch = globalThis.fetch.bind(globalThis) as (
-        input: string,
-        init?: RequestInit
-    ) => Promise<Response>;
-    
-    const response = await nativeFetch(targetUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+    const responseText: string = await this.postJson(
+        settings.llmBaseUrl,
+        "/api/chat",
+        {
             model: settings.chatModel,
             messages,
-            stream: true,
-            options: { temperature },
-        }),
-    });
+            stream: false,
+            options: {
+                temperature,
+            },
+        },
+    );
 
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+    const parsed: OllamaChatResponse = JSON.parse(responseText) as OllamaChatResponse;
+
+    if (parsed.error) {
+        const error: Error = new Error(parsed.error);
+        handlers?.onError?.(error);
+        throw error;
     }
 
-    // 真正的流式读取
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let finalText = "";
-    let buffer = "";
+    const finalText: string | undefined = parsed.message?.content;
+    if (finalText === undefined) {
+        const error: Error = new Error("Invalid response from Ollama");
+        handlers?.onError?.(error);
+        throw error;
+    }
 
-    try {
-        while (true) {
-            const { done, value } = await reader.read();
-            
-            if (done) break;
-            
-            // value 是 Uint8Array，需要解码成字符串
-            buffer += decoder.decode(value, { stream: true });
-            
-            // Ollama 返回的是 NDJSON，按换行符分割处理
-            const lines = buffer.split("\n");
-            
-            // 最后一个元素可能是不完整的行，留到下次处理
-            buffer = lines.pop() ?? "";
-            
-            for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed) continue;
-                
-                try {
-                    const chunk = JSON.parse(trimmed) as {
-                        message?: { content?: string };
-                        done?: boolean;
-                        error?: string;
-                    };
-                    
-                    if (chunk.error) throw new Error(chunk.error);
-                    
-                    const token = chunk.message?.content ?? "";
-                    if (token) {
-                        finalText += token;
-                        handlers?.onToken?.(token);
-                    }
-                    
-                    if (chunk.done) {
-                        handlers?.onDone?.();
-                        return finalText;
-                    }
-                } catch {
-                    // 单行解析失败不影响整体
-                    continue;
-                }
-            }
-        }
-    } finally {
-        await reader.cancel();
+    if (finalText.length > 0) {
+        handlers?.onToken?.(finalText);
     }
 
     handlers?.onDone?.();
