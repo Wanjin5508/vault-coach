@@ -275,7 +275,7 @@ export default class VaultCoach extends Plugin {
             });
         }
 
-        await workspace.revealLeaf(leaf);
+        workspace.setActiveLeaf(leaf, { focus: true });
     }
 
     // 新增：视图发送消息时调用，内部负责流式生成、记忆更新与持久化。

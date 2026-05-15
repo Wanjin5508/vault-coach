@@ -110,33 +110,33 @@ export class VaultCoachView extends ItemView {
         const vectorStats: VectorIndexStats = this.plugin.getVectorIndexStats();
         const infoListEl: HTMLDivElement = headerEl.createDiv({cls: "vault-coach-header-info"});
 
-        infoListEl.createEl("div", {
-            text: `Knowledge base scope: ${this.plugin.getKnowledgeScopeDescription()}`
-        });
+        infoListEl.createDiv({
+        text: `Knowledge base scope: ${this.plugin.getKnowledgeScopeDescription()}`
+    });
 
-        const textIndexStatusText: string = this.plugin.isKnowledgeBaseDirty()
-            ? "待重建"
-            : (textStats.lastIndexedAt ? "已就绪" : "尚未建立");
+    const textIndexStatusText: string = this.plugin.isKnowledgeBaseDirty()
+        ? "待重建"
+        : (textStats.lastIndexedAt ? "已就绪" : "尚未建立");
 
-        infoListEl.createEl("div", {
-            text: `文本索引：${textIndexStatusText}`,
-        });
+    infoListEl.createDiv({
+        text: `文本索引：${textIndexStatusText}`,
+    });
 
-        const vectorIndexStatusText: string = vectorStats.ready
-            ? `已就绪（${vectorStats.vectorCount} 条）`
-            : "未建立 / 已回退";
+    const vectorIndexStatusText: string = vectorStats.ready
+        ? `已就绪（${vectorStats.vectorCount} 条）`
+        : "未建立 / 已回退";
 
-        infoListEl.createEl("div", {
-            text: `向量索引：${vectorIndexStatusText}`,
-        });
+    infoListEl.createDiv({
+        text: `向量索引：${vectorIndexStatusText}`,
+    });
 
-        infoListEl.createEl("div", {
-            text: `文件数：${textStats.fileCount}, 片段数：${textStats.chunkCount}`,
-        });
+    infoListEl.createDiv({
+        text: `文件数：${textStats.fileCount}, 片段数：${textStats.chunkCount}`,
+    });
 
-        infoListEl.createEl("div", {
-            text: `长期记忆：${this.plugin.getMemoryCount()} 条`,
-        });
+    infoListEl.createDiv({
+        text: `长期记忆：${this.plugin.getMemoryCount()} 条`,
+    });
 
         // infoListEl.createEl("div", {
         //     text: `检索方式：关键词检索（第一阶段）`,
