@@ -22,6 +22,7 @@ export type KnowledgeScopeMode = "wholeVault" | "specificFolder";
  * - keyword：只使用关键词检索
  * - vector：只使用向量检索
  * - hybrid：同时使用关键词 + 向量，并进行结果融合
+ *  TODO 加入 KG 辅助检索
  */
 export type RetrievalMode = "keyword" | "vector" | "hybrid";
 
