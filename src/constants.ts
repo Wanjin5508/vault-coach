@@ -37,6 +37,11 @@ export const DEFAULT_GENERATION_TEMPERATURE = 0.2;
 // 与 Ollama 本地服务对接时常见的默认地址。
 export const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
+// API 调用云端
+export const DEFAULT_MODEL_PROVIDER = "ollama";
+export const DEFAULT_CLOUD_BASE_URL = "https://api.deepseek.com/"
+export const DEFAULT_CLOUD_CHAT_MODEL = "deepseek-v4-flash";
+
 // 默认模型名只作为“示例默认值”，用户可以在设置中自行改成自己的本地模型。
 export const DEFAULT_CHAT_MODEL = "gemma3:4b";
 export const DEFAULT_EMBEDDING_MODEL = "embeddinggemma";

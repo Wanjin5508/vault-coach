@@ -48,11 +48,12 @@ export class AdvancedRagEngine {
         knowledgeBase: VaultKnowledgeBase,
         getSettings: () => VaultCoachSettings,
         getRuntimeRetrievalMode: () => RetrievalMode,
+        getCloudApiKey: () => string | null,
     ) {
         this.knowledgeBase = knowledgeBase;
         this.getSettings = getSettings;
         this.getRuntimeRetrievalMode = getRuntimeRetrievalMode;
-        this.client = new LocalModelClient(getSettings);
+        this.client = new LocalModelClient(getSettings, getCloudApiKey);
     }
 
     getVectorIndexStats(): VectorIndexStats {

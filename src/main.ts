@@ -51,6 +51,7 @@ export default class VaultCoach extends Plugin {
             this.knowledgeBase,
             () => this.settings,
             () => this.runtimeRetrievalMode,
+            () => this.getCloudApiKey(),
         );
         this.persistentStore = new VaultCoachPersistentStore(this.app, this.manifest.id);
 
@@ -126,6 +127,15 @@ export default class VaultCoach extends Plugin {
 
     async saveSettings(): Promise<void> {
         await this.saveData(this.settings);
+    }
+
+    getCloudApiKey(): string | null {
+        const secretName = this.settings.cloudApiKeySecretName.trim();
+        if (secretName.length === 0) {
+            return null;
+        }
+
+        return this.app.secretStorage.getSecret(secretName);
     }
 
     markKnowledgeBaseDirty(): void {
