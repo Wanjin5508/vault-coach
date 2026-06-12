@@ -2,7 +2,7 @@
 
 > 🌐 语言版本：[English](./README.md) | 中文
 
-一个运行在 [Obsidian](https://obsidian.md) 中的本地智能问答插件，通过 Advanced RAG（检索增强生成）技术，让你在自己的 Markdown 知识库中进行高质量的自然语言问答。完全依赖本地 [Ollama](https://ollama.com) 服务，**数据不出本地**。
+一个运行在 [Obsidian](https://obsidian.md) 中的智能知识库问答插件，通过 Advanced RAG（检索增强生成）技术，让你在自己的 Markdown 知识库中进行高质量的自然语言问答。Vault Coach 默认通过本地 [Ollama](https://ollama.com) 服务运行；后续计划支持可选的云端大模型，但必须由用户显式开启。
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
 ![Version](https://img.shields.io/badge/version-0.0.2-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
@@ -16,6 +16,7 @@
 - [功能特性](#功能特性)
 - [快速开始](#快速开始)
 - [插件设置](#插件设置)
+- [隐私与网络使用](#隐私与网络使用)
 - [项目计划](#项目计划)
 - [技术架构](#技术架构)
 - [已知问题](#已知问题)
@@ -37,7 +38,8 @@
 | 🔄 增量索引同步 | 监听 vault 文件变化，自动增量更新索引 |
 | 🌊 流式输出 | 伪流式渲染回答，降低感知延迟 |
 | 💾 对话持久化 | 会话历史本地持久化，重启后恢复 |
-| 🔒 完全本地 | 通过 Ollama REST API，数据不出本地 |
+| 🔒 默认本地 | 默认通过 Ollama REST API 工作，除非用户显式配置云端模型 |
+| ☁️ 云端模型 | 计划支持可选的 OpenAI-compatible 云端模型链路，API key 保存到 Obsidian SecretStorage |
 
 ---
 
@@ -67,7 +69,7 @@ npm run build
 ### 基础配置
 
 1. 打开 **设置 → Vault Coach**
-2. 填写本地 Ollama 地址（默认 `http://127.0.0.1:11434`）
+2. 选择模型服务。默认模型服务为本地 Ollama。
 3. 填写聊天模型名（如 `gemma3:4b`）和 Embedding 模型名
 4. 点击 **重建索引** 或等待自动索引完成
 5. 点击右侧边栏的 💬 图标开始问答
@@ -123,6 +125,19 @@ npm run build
 | 独立 Rerank 服务地址 | 可选，留空时使用本地启发式 rerank |
 | Rerank 模型 | 配置了 rerank 服务时使用 |
 
+### 云端模型设置（计划）
+
+云端模型支持应当是显式 opt-in 功能。启用后，Vault Coach 会调用用户配置的 OpenAI-compatible chat completion 接口，用于 Query Rewrite、最终回答生成和长期记忆抽取。本地 Ollama 仍然是默认路径。
+
+| 设置项 | 说明 |
+|--------|------|
+| 模型服务 | 默认值为 `ollama`；只有用户显式选择时才使用 `openai-compatible` |
+| 云端服务地址 | 用户选择的 API endpoint |
+| 云端聊天模型 | 用于 Query Rewrite、最终回答和长期记忆抽取的远程模型 |
+| API key secret | 指向 Obsidian SecretStorage 中某个条目的名称；原始 API key 不能保存到 `data.json` |
+
+云端 Embedding 不应默认启用，而应该作为单独的显式选项，因为构建向量索引时可能会向远程服务发送大量 vault chunk。
+
 ### 长期记忆设置
 
 | 设置项 | 默认值 | 说明 |
@@ -131,6 +146,24 @@ npm run build
 | 记忆注入数量 | 4 条 | 每次回答最多注入多少条相关记忆 |
 | 最大记忆条数 | 150 条 | 超出后保留最近更新/访问的记忆 |
 | 最大持久化消息数 | 60 条 | 对话历史保留的最大条数 |
+
+---
+
+## 隐私与网络使用
+
+Vault Coach 优先本地运行。使用默认 Ollama 模型服务时，插件只会向配置的本地 Ollama endpoint 发起请求，通常是 `http://127.0.0.1:11434`。
+
+如果用户启用云端模型服务，Vault Coach 会向用户配置的远程 API endpoint 发送以下数据：
+
+- 用户当前问题。
+- RAG 回答所需的已检索 Markdown 片段。
+- 少量最近对话上下文。
+- 如果启用了长期记忆，则发送与当前问题相关的长期记忆条目。
+- 模型名称、temperature 等模型参数。
+
+Vault Coach 不包含隐藏遥测。云端模型的 API key 必须通过 Obsidian SecretStorage 保存。插件设置文件（`data.json`）只能保存 SecretStorage 条目名称，不能保存原始 API key。
+
+远程服务只在用户选择云端模型时用于生成模型回答。插件无法控制所选服务商如何保存或处理提交的数据；用户启用云端模型前应阅读对应服务商的隐私政策和数据保留政策。
 
 ---
 
@@ -170,7 +203,7 @@ npm run build
        │
 ┌──────▼──────────────────────────────────────────┐
 │                model-client.ts                    │
-│     Ollama REST API · /api/chat · /api/embed      │
+│     Ollama REST API · 可选云端模型服务              │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -181,6 +214,7 @@ npm run build
 ## 已知问题
 
 - **流式输出非真实流式**：requestUrl 一次性返回完整响应，视觉上有延迟
+- **暂不做流式期间实时 Markdown 渲染**：token 到达时先在临时气泡中显示纯文本，生成完成后再使用 Obsidian MarkdownRenderer 渲染完整 Markdown
 - **记忆搜索无语义相似度**：当前仅用关键词匹配，Phase 2 中将引入 Embedding
 - **VIEW_TYPE 存在 typo**：constants.ts 中的 ID 值（非影响性 bug，计划在下一版本修复）
 

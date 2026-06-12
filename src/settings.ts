@@ -1,8 +1,8 @@
 // 默认设置值以及设置页的 UI以及持久化入口
 
-import {App, DropdownComponent, PluginSettingTab, Setting, normalizePath} from "obsidian";
+import { App, DropdownComponent, PluginSettingTab, SecretComponent, Setting, normalizePath } from "obsidian";
 import {
-	DEFAULT_AUTO_INDEX_DEBOUNCE_MS,
+    DEFAULT_AUTO_INDEX_DEBOUNCE_MS,
     DEFAULT_AUTO_INDEX_FILE_THRESHOLD,
     DEFAULT_AUTO_INDEX_MAX_WAIT_MS,
     DEFAULT_CHAT_MODEL,
@@ -15,9 +15,12 @@ import {
     DEFAULT_GENERATION_TEMPERATURE,
     DEFAULT_HYBRID_TOP_K,
     DEFAULT_KEYWORD_TOP_K,
+    DEFAULT_CLOUD_BASE_URL,
+    DEFAULT_CLOUD_CHAT_MODEL,
     DEFAULT_MAX_CONVERSATION_MESSAGES,
     DEFAULT_MEMORY_MAX_ITEMS,
     DEFAULT_MEMORY_TOP_K,
+    DEFAULT_MODEL_PROVIDER,
     DEFAULT_OLLAMA_BASE_URL,
     DEFAULT_RERANK_TOP_K,
     DEFAULT_SOURCE_LIMIT,
@@ -31,21 +34,10 @@ import type { VaultCoachSettings } from "./types";
  * 当用户第一次安装插件、还没有保存过配置时，就会使用这些默认值。
  */
 export const DEFAULT_SETTINGS: VaultCoachSettings = {
-	assistantName: "VaultCoach",
+    assistantName: "VaultCoach",
     defaultGreeting: [
         "# 你好，我是 VaultCoach",
         "",
-        "当前版本已经支持：",
-        "- Markdown 知识库扫描与标题切块；",
-        "- 关键词检索；",
-        "- Query rewrite；",
-        "- Embedding / 向量检索；",
-        "- Hybrid merge；",
-        "- Rerank；",
-        "- Markdown 格式回答渲染；",
-        "- 对话持久化；",
-        "- 本地长期记忆；",
-        "- 自动增量索引同步。",
     ].join("\n"),
     openInRightSidebarOnStartup: true,
     knowledgeScopeMode: "wholeVault",
@@ -64,9 +56,13 @@ export const DEFAULT_SETTINGS: VaultCoachSettings = {
     enableVectorRetrieval: true,
     enableRerank: true,
     generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
+    modelProvider: DEFAULT_MODEL_PROVIDER,
     llmBaseUrl: DEFAULT_OLLAMA_BASE_URL,
     chatModel: DEFAULT_CHAT_MODEL,
     embeddingModel: DEFAULT_EMBEDDING_MODEL,
+    cloudBaseUrl: DEFAULT_CLOUD_BASE_URL,
+    cloudChatModel: DEFAULT_CLOUD_CHAT_MODEL,
+    cloudApiKeySecretName: "",
     rerankBaseUrl: "",
     rerankModel: "",
     enableLongTermMemory: DEFAULT_ENABLE_LONG_TERM_MEMORY,
@@ -82,35 +78,36 @@ export const DEFAULT_SETTINGS: VaultCoachSettings = {
 // 插件的设置页类
 // 设置 -> 社区插件 -> VaultCoach
 export class VaultCoachSettingTab extends PluginSettingTab {
-	plugin: VaultCoach;
+    plugin: VaultCoach;
 
-	constructor(app: App, plugin: VaultCoach){
-		super(app, plugin);
-		this.plugin = plugin;
-	}
+    constructor(app: App, plugin: VaultCoach) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
 
-	// display 用于渲染设置页界面，每次打开设置页的时候，Obsidian 都会调用这个方法
-	display(): void { 
-		const {containerEl} = this;
-		containerEl.empty();
+    // display 用于渲染设置页界面，每次打开设置页的时候，Obsidian 都会调用这个方法
+    display(): void {
+        const { containerEl } = this;
+        containerEl.empty();
 
-		// 设置页标题
-		// containerEl.createEl("h2", {text: "VaultCoach 设置"});
-		new Setting(containerEl)
-			.setHeading()
-			.setName("Vault coach settings")
+        // 设置页标题
+        // containerEl.createEl("h2", {text: "VaultCoach 设置"});
+        new Setting(containerEl)
+            .setHeading()
+            .setName("Vault coach settings")
 
-		this.renderGeneralSection(containerEl);
+        this.renderGeneralSection(containerEl);
         this.renderKnowledgeSection(containerEl);
-		this.renderMemorySection(containerEl);
+        this.renderMemorySection(containerEl);
         this.renderAdvancedRagSection(containerEl);
         this.renderLocalModelSection(containerEl);
-	}
+        this.renderCloudModelSection(containerEl);
+    }
 
-	/**
+    /**
      * 基础显示与行为设置。
      */
-	private renderGeneralSection(containerEl: HTMLElement): void {
+    private renderGeneralSection(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setHeading()
             .setName("基础")
@@ -186,7 +183,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
-	/**
+    /**
      * 知识库索引与 chunk 参数。
      */
     private renderKnowledgeSection(containerEl: HTMLElement): void {
@@ -257,7 +254,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     }),
             );
 
-			// 新增：自动增量重建相关设置。
+        // 新增：自动增量重建相关设置。
         new Setting(containerEl)
             .setName("启用自动增量同步")
             .setDesc("监听 vault 中 Markdown 文件变化，在阈值或时间窗口达到后自动同步索引。")
@@ -310,7 +307,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
-	// 新增：长期记忆与对话持久化设置分区。
+    // 新增：长期记忆与对话持久化设置分区。
     private renderMemorySection(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setHeading()
@@ -582,6 +579,66 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
+    private renderCloudModelSection(containerEl: HTMLElement): void {
+        new Setting(containerEl)
+            .setHeading()
+            .setName("云端模型")
+            .setDesc("可选功能。启用后会向用户配置的远程 API 发送问题、检索上下文和少量对话上下文。");
+
+        new Setting(containerEl)
+            .setName("模型服务")
+            //选择聊天模型的调用来源。ollama 为本地默认路径；openai-compatible 用于 OpenAI / DeepSeek / 其他兼容 Chat Completions 的服务。
+            .addDropdown((dropdown) =>
+                dropdown
+                    .addOption("ollama", "Local ollama")    // TODO 检查，这里可能会重复，因为这是 cloud 模型
+                    .addOption("openai-compatible", "Open AI compatible")
+                    .setValue(this.plugin.settings.modelProvider)
+                    .onChange(async (value: string) => {
+                        if (value !== "ollama" && value !== "openai-compatible") return;
+                        this.plugin.settings.modelProvider = value;
+                        await this.plugin.saveSettings();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("云端服务地址")
+            .setDesc("例如：https://api.deepseek.com")
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_CLOUD_BASE_URL)
+                    .setValue(this.plugin.settings.cloudBaseUrl)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.cloudBaseUrl = value.trim() || DEFAULT_CLOUD_BASE_URL;
+                        await this.plugin.saveSettings();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("云端聊天模型")
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_CLOUD_CHAT_MODEL)
+                    .setValue(this.plugin.settings.cloudChatModel)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.cloudChatModel = value.trim() || DEFAULT_CLOUD_CHAT_MODEL;
+                        await this.plugin.saveSettings();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("API key")
+            // API key 会保存到 Obsidian SecretStorage。插件 data.json 只保存 SecretStorage 条目名称，不保存 API key 原文。
+            .setDesc("保存到 Obsidian-secretStorage")
+            .addComponent((el) =>
+                new SecretComponent(this.app, el)
+                    .setValue(this.plugin.settings.cloudApiKeySecretName)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.cloudApiKeySecretName = value;
+                        await this.plugin.saveSettings();
+                    }),
+            );
+    }
+
     /**
      * 给检索模式下拉框统一添加选项。
      */
@@ -636,4 +693,3 @@ export class VaultCoachSettingTab extends PluginSettingTab {
     }
 
 }
-

@@ -31,6 +31,24 @@ interface RerankResponse {
     results?: RerankResultItem[];
 }
 
+interface ChatOptions {
+    messages: LocalChatMessage[];
+    temperature: number;
+    format?: "json";
+}
+
+interface CloudChatCompletionResponse {
+    choices?: Array<{
+        message?: {
+            content?: string | null;
+        };
+    }>;
+
+    error?: {
+        message?: string;
+    };
+}
+
 /**
  * LocalModelClient 负责和本地模型服务通信。
  *
@@ -44,10 +62,26 @@ interface RerankResponse {
  */
 
 export class LocalModelClient {
+    // 函数类型的成员变量，主要是为了拿到当前最新的设置，
+    // 而不是构造 LocalModelClient 时的一份旧快照。
+    // 是一种常见的依赖注入写法
     private readonly getSettings: () => VaultCoachSettings;
+    private readonly getCloudApiKey: () => string | null;  // 只读，成员变量不能被重新赋值
 
-    constructor(getSettings: () => VaultCoachSettings) {
+    constructor(getSettings: () => VaultCoachSettings, getCloudApiKey: () => string | null) {
         this.getSettings = getSettings;
+        this.getCloudApiKey = getCloudApiKey;
+    }
+
+    // 新增两个 helper 方法：以后判断聊天模型是否存在时，不再只看 settings.chatModel，而是根据当前 provider 判断。
+    private getActiveChatModel(settings: VaultCoachSettings): string {
+        return settings.modelProvider === "openai-compatible"
+            ? settings.cloudChatModel.trim()
+            : settings.chatModel.trim();
+    }
+
+    private shouldUseCloudChat(settings: VaultCoachSettings): boolean {
+        return settings.modelProvider === "openai-compatible"
     }
 
     /**
@@ -65,8 +99,8 @@ export class LocalModelClient {
         scopeDescription: string,
     ): Promise<QueryRewriteResult> {
         const settings: VaultCoachSettings = this.getSettings();
-
-        if (!settings.enableQueryRewrite || settings.chatModel.trim().length === 0) {
+        const activeChatModel: string = this.getActiveChatModel(settings);
+        if (!settings.enableQueryRewrite || activeChatModel.length === 0) {
             return {
                 originalQuery,
                 rewrittenQuery: originalQuery,
@@ -98,12 +132,12 @@ export class LocalModelClient {
 
         try {
             const content: string = await this.chat({
-                model: settings.chatModel,
+                // model: settings.chatModel,
                 messages: [
                     {role: "system", content: systemPrompt},
                     {role: "user", content: userPrompt},
                 ],
-                temperature: 0,
+                temperature: 0, // TODO 即使温度设为 0，输出仍然会有扰动，原因在于 Transformer 架构中的不确定性
                 format: "json",
             });
 
@@ -134,15 +168,16 @@ export class LocalModelClient {
         };
     }
 
-    // 新增：使用同一个聊天模型抽取可长期保存的记忆事实。
+    // 使用同一个聊天模型抽取可长期保存的记忆事实。
     async extractMemoryStatements(
         conversationContext: string,
         latestUserText: string,
         latestAssistantText: string,
     ): Promise<string[]> {
         const settings: VaultCoachSettings = this.getSettings();
+        const activeChatModel: string = this.getActiveChatModel(settings);
 
-        if (!settings.enableLongTermMemory || settings.chatModel.trim().length === 0) {
+        if (!settings.enableLongTermMemory || activeChatModel.length === 0) {
             return [];
         }
 
@@ -167,7 +202,7 @@ export class LocalModelClient {
 
         try {
             const content: string = await this.chat({
-                model: settings.chatModel,
+                // model: settings.chatModel,
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt },
@@ -201,9 +236,9 @@ export class LocalModelClient {
      * 约定：返回值始终为 Markdown 文本。
      */
     async generateMarkdownAnswer(messages: LocalChatMessage[], temperature: number): Promise<string> {
-        const settings: VaultCoachSettings = this.getSettings();
+        // const settings: VaultCoachSettings = this.getSettings();
         return this.chat({
-            model: settings.chatModel,
+            // model: settings.chatModel,
             messages,
             temperature,
         });
@@ -289,42 +324,22 @@ async streamMarkdownAnswer(
     temperature: number,
     handlers?: StreamHandlers,
 ): Promise<string> {
-    const settings: VaultCoachSettings = this.getSettings();
-
-    const responseText: string = await this.postJson(
-        settings.llmBaseUrl,
-        "/api/chat",
-        {
-            model: settings.chatModel,
+    try {
+        const finalText: string = await this.chat({
             messages,
-            stream: false,
-            options: {
-                temperature,
-            },
-        },
-    );
+            temperature,
+        });
 
-    const parsed: OllamaChatResponse = JSON.parse(responseText) as OllamaChatResponse;
+        if (finalText.length > 0) {
+            handlers?.onToken?.(finalText);
+        }
 
-    if (parsed.error) {
-        const error: Error = new Error(parsed.error);
+        handlers?.onDone?.();
+        return finalText;
+    } catch (error: unknown) {
         handlers?.onError?.(error);
         throw error;
     }
-
-    const finalText: string | undefined = parsed.message?.content;
-    if (finalText === undefined) {
-        const error: Error = new Error("Invalid response from Ollama");
-        handlers?.onError?.(error);
-        throw error;
-    }
-
-    if (finalText.length > 0) {
-        handlers?.onToken?.(finalText);
-    }
-
-    handlers?.onDone?.();
-    return finalText;
 }
 
     /**
@@ -402,6 +417,18 @@ async streamMarkdownAnswer(
         return parsed.results ?? [];
     }
 
+    /**
+     * 替换原有的 chat 方法，改为 provider 分发
+     * 
+     */
+    private async chat(options: ChatOptions): Promise<string> {
+        const settings = this.getSettings();
+        if (this.shouldUseCloudChat(settings)) {
+            return this.chatCloud(options);
+        }
+        return this.chatOllama(options);
+    }
+
 
     /**
      * 与 Ollama 风格聊天接口交互。
@@ -411,39 +438,87 @@ async streamMarkdownAnswer(
      * - 更适合 query rewrite 这类短输出；
      * - 也更方便做 MarkdownRenderer 一次性渲染。
      */
-    private async chat(options: {
-        model: string;
-        messages: LocalChatMessage[];
-        temperature: number;
-        format?: "json"
-    }): Promise<string> {
-        const settings: VaultCoachSettings = this.getSettings();
-        const responseText: string = await this.postJson(
-            settings.llmBaseUrl,
-            "/api/chat",
-            {
-                model: options.model,
-                messages: options.messages,
-                stream: false,
-                format: options.format,
-                options: {
-                    temperature: options.temperature,
-                },
+    private async chatOllama(options: ChatOptions): Promise<string> {
+    const settings: VaultCoachSettings = this.getSettings();
+
+    if (settings.chatModel.trim().length === 0) {
+        throw new Error("未配置本地聊天模型。");
+    }
+
+    const responseText: string = await this.postJson(
+        settings.llmBaseUrl,
+        "/api/chat",
+        {
+            model: settings.chatModel,
+            messages: options.messages,
+            stream: false,
+            format: options.format,
+            options: {
+                temperature: options.temperature,
             },
+        },
+    );
+
+    const parsed: OllamaChatResponse = JSON.parse(responseText) as OllamaChatResponse;
+
+    if (parsed.error) {
+        throw new Error(parsed.error);
+    }
+
+    const content: string | undefined = parsed.message?.content;
+    if (content === undefined) {
+        throw new Error("Invalid response from Ollama");
+    }
+
+    return content;
+}
+    private async chatCloud(options: ChatOptions): Promise<string> {
+        const settings: VaultCoachSettings = this.getSettings();
+        const apiKey: string | null = this.getCloudApiKey();
+
+        if (settings.cloudChatModel.trim().length === 0) {
+            throw new Error("未配置云端聊天模型。")
+        }
+
+        if (!apiKey) {
+            throw new Error("未配置云端模型 API key。请先在设置页选择 SecretStorage 条目。");
+        }
+
+        const responseText: string = await this.postJson(
+            settings.cloudBaseUrl,
+            this.getCloudChatCompletionsPath(settings.cloudBaseUrl),
+            {
+                model: settings.cloudChatModel,
+                messages: options.messages,
+                temperature: options.temperature,
+                response_format: options.format === "json" 
+                    ? { type: "json_object" } 
+                    : undefined,
+            },
+            { Authorization: `Bearer ${apiKey}` },
         );
 
-        const parsed: OllamaChatResponse = JSON.parse(responseText) as OllamaChatResponse
-        if (parsed.error) {
-            throw new Error(parsed.error);
-        }
+        const parsed: CloudChatCompletionResponse= JSON.parse(responseText) as CloudChatCompletionResponse;
 
-        const content: string | undefined = parsed.message?.content;
-        if (content === undefined) {
-            throw new Error("Invalid response from Ollama");
-        }
+        if (parsed.error?.message) throw new Error(parsed.error.message);
 
+        const content: string | null | undefined = parsed.choices?.[0]?.message?.content;
+        if (!content) throw new Error("Invalid response from cloud model");
         return content;
+    }
 
+    private getCloudChatCompletionsPath(baseUrl: string): string {
+        const normalizedBase: string = baseUrl.trim().replace(/\/+$/, "");
+
+        if (normalizedBase.endsWith("/chat/completions")){
+            return "";
+        }
+
+        if (normalizedBase.endsWith("/v1")) {
+            return "/chat/completions";
+        }
+
+        return "/v1/chat/completions";
     }
 
     /**
@@ -453,13 +528,21 @@ async streamMarkdownAnswer(
      * - Obsidian 官方插件开发建议优先使用 requestUrl；
      * - 这样可以绕过浏览器侧 CORS 限制，更适合桌面端插件访问本地服务。
      */
-    private async postJson(baseUrl: string, path: string, payload: unknown): Promise<string> {
+    private async postJson(
+        baseUrl: string, 
+        path: string, 
+        payload: unknown,
+        headers: Record<string, string> = {},
+    ): Promise<string> {
         const targetUrl: string = this.joinUrl(baseUrl, path);
         const response = await requestUrl({
             url: targetUrl,
             method: "POST",
             body: JSON.stringify(payload),
-            headers: {"Content-Type": "application/json"},
+            headers: {
+                "Content-Type": "application/json",
+                ...headers,
+            },
         });
 
         return response.text;
@@ -484,5 +567,4 @@ async streamMarkdownAnswer(
     }
 
 }
-
 

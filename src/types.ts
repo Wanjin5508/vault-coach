@@ -26,6 +26,8 @@ export type KnowledgeScopeMode = "wholeVault" | "specificFolder";
  */
 export type RetrievalMode = "keyword" | "vector" | "hybrid";
 
+export type ModelProvider = "ollama" | "openai-compatible"
+
 /**
  * 单条来源信息
  * 当前阶段只精确到 heading 级别，因此这里不保存 block id
@@ -132,6 +134,12 @@ export interface VaultCoachSettings {
 
     // 生成回答时的 temperature
     generationTemperature: number;
+
+    // 新增API链路：选择使用哪个模型提供商
+    modelProvider: ModelProvider;
+    cloudBaseUrl: string; // 云端模型服务地址，例如 https://api.openai.com/v1
+    cloudChatModel: string; // 云端聊天模型，例如 "gpt-4-0613"
+    cloudApiKeySecretName: string; // 在 Obsidian 的 Secret 中存储云端 API Key 的名称
 
     // 本地模型服务地址，例如 http://127.0.0.1:11434
     llmBaseUrl: string;

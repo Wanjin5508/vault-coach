@@ -2,7 +2,7 @@
 
 > 🌐 Language: English | [中文](./README_CN.md)
 
-An [Obsidian](https://obsidian.md) plugin for intelligent local knowledge base Q&A, powered by Advanced RAG (Retrieval-Augmented Generation) and a locally-running [Ollama](https://ollama.com) service. **Your data never leaves your machine.**
+An [Obsidian](https://obsidian.md) plugin for intelligent knowledge base Q&A, powered by Advanced RAG (Retrieval-Augmented Generation). Vault Coach runs locally by default through a locally-running [Ollama](https://ollama.com) service. Optional cloud model support is planned and must be explicitly enabled by the user.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
 ![Version](https://img.shields.io/badge/version-0.0.2-1E90FF)
@@ -17,6 +17,7 @@ An [Obsidian](https://obsidian.md) plugin for intelligent local knowledge base Q
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Privacy and network use](#privacy-and-network-use)
 - [Roadmap](#roadmap)
 - [Architecture](#architecture)
 - [Known Issues](#known-issues)
@@ -38,7 +39,8 @@ An [Obsidian](https://obsidian.md) plugin for intelligent local knowledge base Q
 | 🔄 Incremental Index Sync | Watches vault file changes and updates the index automatically |
 | 🌊 Streaming Output | Pseudo-streaming response rendering with low perceived latency |
 | 💾 Conversation Persistence | Chat history saved locally and restored after restart |
-| 🔒 100% Local | Powered by Ollama REST API — no data leaves your device |
+| 🔒 Local by Default | Powered by Ollama REST API unless the user explicitly configures a cloud provider |
+| ☁️ Cloud Models | Planned optional OpenAI-compatible cloud model path with API keys stored in Obsidian SecretStorage |
 
 ---
 
@@ -68,7 +70,7 @@ npm run build
 ### Basic Setup
 
 1. Open **Settings → Vault Coach**
-2. Set your Ollama base URL (default: `http://127.0.0.1:11434`)
+2. Choose a model provider. The default provider is local Ollama.
 3. Enter your chat model name (e.g. `gemma3:4b`) and embedding model name
 4. Click **Rebuild Index** or wait for auto-sync to complete
 5. Click the 💬 ribbon icon to start chatting
@@ -124,6 +126,19 @@ npm run build
 | Rerank Service URL | Optional; leave empty to use heuristic rerank |
 | Rerank Model | Used when a rerank service URL is configured |
 
+### Cloud Model (Planned)
+
+Cloud model support is intended to be opt-in. When enabled, Vault Coach will call a user-configured OpenAI-compatible chat completion endpoint for query rewrite, final answer generation, and long-term memory extraction. Local Ollama remains the default.
+
+| Setting | Description |
+|---------|-------------|
+| Model Provider | `ollama` by default; `openai-compatible` only when explicitly selected |
+| Cloud Base URL | The API endpoint selected by the user |
+| Cloud Chat Model | The remote model used for query rewrite, answer generation, and memory extraction |
+| API Key Secret | A reference to an Obsidian SecretStorage entry; the raw API key must not be saved in `data.json` |
+
+Cloud embedding is not enabled by default and should remain a separate explicit option, because embedding index builds may send many vault chunks to the selected remote provider.
+
 ### Long-term Memory
 
 | Setting | Default | Description |
@@ -132,6 +147,24 @@ npm run build
 | Memory Top-k | 4 | Max memories injected per answer |
 | Max Memory Items | 150 | Oldest/least-accessed items are evicted when exceeded |
 | Max Persisted Messages | 60 | Max conversation messages kept in local storage |
+
+---
+
+## Privacy and network use
+
+Vault Coach is local-first. With the default Ollama provider, requests are sent only to the configured local Ollama endpoint, usually `http://127.0.0.1:11434`.
+
+If the user enables a cloud model provider, Vault Coach will send the following data to the configured remote API endpoint:
+
+- The user's current question.
+- Retrieved Markdown chunks from the vault that are needed for RAG context.
+- A small amount of recent conversation context.
+- Relevant long-term memory entries if long-term memory is enabled.
+- Model parameters such as model name and temperature.
+
+Vault Coach does not include hidden telemetry. API keys for cloud providers must be stored through Obsidian SecretStorage. The plugin settings file (`data.json`) should store only the SecretStorage entry name, never the raw API key.
+
+Remote services are used only to generate model responses when the user chooses a cloud provider. The plugin cannot control how the selected provider stores or processes submitted data; users should review the provider's privacy and retention policy before enabling cloud model support.
 
 ---
 
@@ -171,7 +204,7 @@ See [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the full three-phase development pl
        │
 ┌──────▼──────────────────────────────────────────┐
 │                model-client.ts                    │
-│     Ollama REST API · /api/chat · /api/embed      │
+│ Ollama REST API · optional cloud model provider   │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -182,6 +215,7 @@ For detailed technical documentation, see [TECHNICAL_DOC.docx](./TECHNICAL_DOC.d
 ## Known Issues
 
 - **Non-true streaming**: `requestUrl` returns the full response at once; true token-level streaming will require a `fetch` + `ReadableStream` migration
+- **No live Markdown rendering during streaming**: The streaming bubble should display plain text while tokens arrive, then render the final complete Markdown response with Obsidian's Markdown renderer when generation finishes
 - **Memory search lacks semantic similarity**: Currently uses keyword matching only; embedding-based memory search is planned for Phase 2
 - **VIEW_TYPE typo**: The constant value in `constants.ts` says `value-coach-view` instead of `vault-coach-view` (non-breaking, will be fixed in next release)
 
