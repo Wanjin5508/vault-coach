@@ -2,7 +2,7 @@
 
 > 🌐 语言版本：[English](./README.md) | 中文
 
-一个运行在 [Obsidian](https://obsidian.md) 中的智能知识库问答插件，通过 Advanced RAG（检索增强生成）技术，让你在自己的 Markdown 知识库中进行高质量的自然语言问答。Vault Coach 默认通过本地 [Ollama](https://ollama.com) 服务运行；后续计划支持可选的云端大模型，但必须由用户显式开启。
+一个运行在 [Obsidian](https://obsidian.md) 中的智能知识库问答插件，通过 Advanced RAG（检索增强生成）技术，让你在自己的 Markdown 知识库中进行高质量的自然语言问答。Vault Coach 默认通过本地 [Ollama](https://ollama.com) 服务运行；用户也可以在显式开启后，配置并调用外部 OpenAI-compatible LLM API。
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
 ![Version](https://img.shields.io/badge/version-0.0.2-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
@@ -38,8 +38,8 @@
 | 🔄 增量索引同步 | 监听 vault 文件变化，自动增量更新索引 |
 | 🌊 流式输出 | 伪流式渲染回答，降低感知延迟 |
 | 💾 对话持久化 | 会话历史本地持久化，重启后恢复 |
-| 🔒 默认本地 | 默认通过 Ollama REST API 工作，除非用户显式配置云端模型 |
-| ☁️ 云端模型 | 计划支持可选的 OpenAI-compatible 云端模型链路，API key 保存到 Obsidian SecretStorage |
+| 🔒 默认本地 | 默认通过 Ollama REST API 工作，除非用户显式配置外部 LLM 服务 |
+| ☁️ 外部 LLM API | 可选调用 OpenAI-compatible API，API key 保存到 Obsidian SecretStorage |
 
 ---
 
@@ -71,8 +71,9 @@ npm run build
 1. 打开 **设置 → Vault Coach**
 2. 选择模型服务。默认模型服务为本地 Ollama。
 3. 填写聊天模型名（如 `gemma3:4b`）和 Embedding 模型名
-4. 点击 **重建索引** 或等待自动索引完成
-5. 点击右侧边栏的 💬 图标开始问答
+4. 可选：选择 `openai-compatible`，并配置外部 LLM API 服务地址、聊天模型和 API key secret
+5. 点击 **重建索引** 或等待自动索引完成
+6. 点击右侧边栏的 💬 图标开始问答
 
 ---
 
@@ -125,15 +126,17 @@ npm run build
 | 独立 Rerank 服务地址 | 可选，留空时使用本地启发式 rerank |
 | Rerank 模型 | 配置了 rerank 服务时使用 |
 
-### 云端模型设置（计划）
+### 外部 LLM API 设置
 
-云端模型支持应当是显式 opt-in 功能。启用后，Vault Coach 会调用用户配置的 OpenAI-compatible chat completion 接口，用于 Query Rewrite、最终回答生成和长期记忆抽取。本地 Ollama 仍然是默认路径。
+外部 LLM API 支持是显式 opt-in 功能。启用后，Vault Coach 会调用用户配置的 OpenAI-compatible chat completion 接口，用于 Query Rewrite、最终回答生成和长期记忆抽取。本地 Ollama 仍然是默认路径。
+
+这意味着用户可以按需接入 OpenAI-compatible 托管服务、自托管网关，或其他兼容的模型 API。用户需要自行选择可信赖的服务商，并理解生成回答时检索到的 vault 上下文可能会发送给该服务商。
 
 | 设置项 | 说明 |
 |--------|------|
 | 模型服务 | 默认值为 `ollama`；只有用户显式选择时才使用 `openai-compatible` |
-| 云端服务地址 | 用户选择的 API endpoint |
-| 云端聊天模型 | 用于 Query Rewrite、最终回答和长期记忆抽取的远程模型 |
+| 云端服务地址 | 用户选择的外部 API endpoint |
+| 云端聊天模型 | 用于 Query Rewrite、最终回答和长期记忆抽取的外部模型 |
 | API key secret | 指向 Obsidian SecretStorage 中某个条目的名称；原始 API key 不能保存到 `data.json` |
 
 云端 Embedding 不应默认启用，而应该作为单独的显式选项，因为构建向量索引时可能会向远程服务发送大量 vault chunk。
@@ -153,7 +156,9 @@ npm run build
 
 Vault Coach 优先本地运行。使用默认 Ollama 模型服务时，插件只会向配置的本地 Ollama endpoint 发起请求，通常是 `http://127.0.0.1:11434`。
 
-如果用户启用云端模型服务，Vault Coach 会向用户配置的远程 API endpoint 发送以下数据：
+外部 LLM API 调用默认关闭。只有当用户显式选择 OpenAI-compatible 模型服务，并配置外部 API endpoint、模型和 API key secret 后，插件才会调用外部 LLM API。
+
+如果用户启用外部 LLM 服务，Vault Coach 会向用户配置的远程 API endpoint 发送以下数据：
 
 - 用户当前问题。
 - RAG 回答所需的已检索 Markdown 片段。
@@ -161,9 +166,9 @@ Vault Coach 优先本地运行。使用默认 Ollama 模型服务时，插件只
 - 如果启用了长期记忆，则发送与当前问题相关的长期记忆条目。
 - 模型名称、temperature 等模型参数。
 
-Vault Coach 不包含隐藏遥测。云端模型的 API key 必须通过 Obsidian SecretStorage 保存。插件设置文件（`data.json`）只能保存 SecretStorage 条目名称，不能保存原始 API key。
+Vault Coach 不包含隐藏遥测。外部 LLM 服务的 API key 必须通过 Obsidian SecretStorage 保存。插件设置文件（`data.json`）只能保存 SecretStorage 条目名称，不能保存原始 API key。
 
-远程服务只在用户选择云端模型时用于生成模型回答。插件无法控制所选服务商如何保存或处理提交的数据；用户启用云端模型前应阅读对应服务商的隐私政策和数据保留政策。
+远程服务只在用户选择外部 LLM 服务时用于生成模型回答。插件无法控制所选服务商如何保存或处理提交的数据；用户启用外部 LLM API 前应阅读对应服务商的隐私政策和数据保留政策。
 
 ---
 
@@ -203,7 +208,7 @@ Vault Coach 不包含隐藏遥测。云端模型的 API key 必须通过 Obsidia
        │
 ┌──────▼──────────────────────────────────────────┐
 │                model-client.ts                    │
-│     Ollama REST API · 可选云端模型服务              │
+│     Ollama REST API · 可选外部 LLM 服务             │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -222,7 +227,9 @@ Vault Coach 不包含隐藏遥测。云端模型的 API key 必须通过 Obsidia
 
 ## 贡献
 
-欢迎提交 Issue 和 PR！请先查看 [PROJECT_PLAN.md](./PROJECT_PLAN.md) 了解当前开发方向。
+欢迎提交 Issue 和 PR。如果你发现 bug、交互不清晰、外部模型服务兼容问题、隐私风险或文档缺口，欢迎开 issue，并尽量附上复现步骤和相关环境信息。
+
+也欢迎提交 PR 或提出合作开发想法。较大的改动建议先查看 [PROJECT_PLAN.md](./PROJECT_PLAN.md) 了解当前开发方向，并先开 issue 对齐范围。
 
 ---
 

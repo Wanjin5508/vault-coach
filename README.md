@@ -2,7 +2,7 @@
 
 > 🌐 Language: English | [中文](./README_CN.md)
 
-An [Obsidian](https://obsidian.md) plugin for intelligent knowledge base Q&A, powered by Advanced RAG (Retrieval-Augmented Generation). Vault Coach runs locally by default through a locally-running [Ollama](https://ollama.com) service. Optional cloud model support is planned and must be explicitly enabled by the user.
+An [Obsidian](https://obsidian.md) plugin for intelligent knowledge base Q&A, powered by Advanced RAG (Retrieval-Augmented Generation). Vault Coach runs locally by default through a locally-running [Ollama](https://ollama.com) service. It can also call a user-configured external OpenAI-compatible LLM API when explicitly enabled by the user.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
 ![Version](https://img.shields.io/badge/version-0.0.2-1E90FF)
@@ -39,8 +39,8 @@ An [Obsidian](https://obsidian.md) plugin for intelligent knowledge base Q&A, po
 | 🔄 Incremental Index Sync | Watches vault file changes and updates the index automatically |
 | 🌊 Streaming Output | Pseudo-streaming response rendering with low perceived latency |
 | 💾 Conversation Persistence | Chat history saved locally and restored after restart |
-| 🔒 Local by Default | Powered by Ollama REST API unless the user explicitly configures a cloud provider |
-| ☁️ Cloud Models | Planned optional OpenAI-compatible cloud model path with API keys stored in Obsidian SecretStorage |
+| 🔒 Local by Default | Powered by Ollama REST API unless the user explicitly configures an external LLM provider |
+| ☁️ External LLM API | Optional OpenAI-compatible API calls with API keys stored in Obsidian SecretStorage |
 
 ---
 
@@ -72,8 +72,9 @@ npm run build
 1. Open **Settings → Vault Coach**
 2. Choose a model provider. The default provider is local Ollama.
 3. Enter your chat model name (e.g. `gemma3:4b`) and embedding model name
-4. Click **Rebuild Index** or wait for auto-sync to complete
-5. Click the 💬 ribbon icon to start chatting
+4. Optional: select `openai-compatible` and configure an external LLM API base URL, chat model, and API key secret
+5. Click **Rebuild Index** or wait for auto-sync to complete
+6. Click the 💬 ribbon icon to start chatting
 
 ---
 
@@ -126,15 +127,17 @@ npm run build
 | Rerank Service URL | Optional; leave empty to use heuristic rerank |
 | Rerank Model | Used when a rerank service URL is configured |
 
-### Cloud Model (Planned)
+### External LLM API
 
-Cloud model support is intended to be opt-in. When enabled, Vault Coach will call a user-configured OpenAI-compatible chat completion endpoint for query rewrite, final answer generation, and long-term memory extraction. Local Ollama remains the default.
+External LLM API support is opt-in. When enabled, Vault Coach calls the user-configured OpenAI-compatible chat completion endpoint for query rewrite, final answer generation, and long-term memory extraction. Local Ollama remains the default path.
+
+This makes it possible to use providers such as OpenAI-compatible hosted services, self-hosted gateways, or other compatible model APIs. Users are responsible for choosing a provider they trust and for understanding that retrieved vault context may be sent to that provider during generation.
 
 | Setting | Description |
 |---------|-------------|
 | Model Provider | `ollama` by default; `openai-compatible` only when explicitly selected |
-| Cloud Base URL | The API endpoint selected by the user |
-| Cloud Chat Model | The remote model used for query rewrite, answer generation, and memory extraction |
+| Cloud Base URL | The external API endpoint selected by the user |
+| Cloud Chat Model | The external model used for query rewrite, answer generation, and memory extraction |
 | API Key Secret | A reference to an Obsidian SecretStorage entry; the raw API key must not be saved in `data.json` |
 
 Cloud embedding is not enabled by default and should remain a separate explicit option, because embedding index builds may send many vault chunks to the selected remote provider.
@@ -154,7 +157,9 @@ Cloud embedding is not enabled by default and should remain a separate explicit 
 
 Vault Coach is local-first. With the default Ollama provider, requests are sent only to the configured local Ollama endpoint, usually `http://127.0.0.1:11434`.
 
-If the user enables a cloud model provider, Vault Coach will send the following data to the configured remote API endpoint:
+External LLM API calls are disabled by default. They are allowed only when the user explicitly selects an OpenAI-compatible provider and configures the external endpoint, model, and API key secret.
+
+If the user enables an external LLM provider, Vault Coach will send the following data to the configured remote API endpoint:
 
 - The user's current question.
 - Retrieved Markdown chunks from the vault that are needed for RAG context.
@@ -162,9 +167,9 @@ If the user enables a cloud model provider, Vault Coach will send the following 
 - Relevant long-term memory entries if long-term memory is enabled.
 - Model parameters such as model name and temperature.
 
-Vault Coach does not include hidden telemetry. API keys for cloud providers must be stored through Obsidian SecretStorage. The plugin settings file (`data.json`) should store only the SecretStorage entry name, never the raw API key.
+Vault Coach does not include hidden telemetry. API keys for external LLM providers must be stored through Obsidian SecretStorage. The plugin settings file (`data.json`) should store only the SecretStorage entry name, never the raw API key.
 
-Remote services are used only to generate model responses when the user chooses a cloud provider. The plugin cannot control how the selected provider stores or processes submitted data; users should review the provider's privacy and retention policy before enabling cloud model support.
+Remote services are used only to generate model responses when the user chooses an external LLM provider. The plugin cannot control how the selected provider stores or processes submitted data; users should review the provider's privacy and retention policy before enabling external LLM API support.
 
 ---
 
@@ -204,7 +209,7 @@ See [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the full three-phase development pl
        │
 ┌──────▼──────────────────────────────────────────┐
 │                model-client.ts                    │
-│ Ollama REST API · optional cloud model provider   │
+│ Ollama REST API · optional external LLM provider  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -223,7 +228,9 @@ For detailed technical documentation, see [TECHNICAL_DOC.docx](./TECHNICAL_DOC.d
 
 ## Contributing
 
-Issues and PRs are welcome! Please check [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the current development direction before opening a PR.
+Issues and PRs are welcome. If you find bugs, unclear UX, provider compatibility problems, privacy concerns, or documentation gaps, please open an issue with reproduction steps and relevant environment details.
+
+Pull requests and collaboration proposals are also welcome. Before starting larger changes, please check [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the current development direction and consider opening an issue first so we can align on scope.
 
 ---
 
