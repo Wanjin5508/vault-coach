@@ -17,6 +17,9 @@ import {
     DEFAULT_KEYWORD_TOP_K,
     DEFAULT_CLOUD_BASE_URL,
     DEFAULT_CLOUD_CHAT_MODEL,
+    DEFAULT_CLOUD_EMBEDDING_BASE_URL,
+    DEFAULT_CLOUD_EMBEDDING_MODEL,
+    DEFAULT_EMBEDDING_PROVIDER,
     DEFAULT_MAX_CONVERSATION_MESSAGES,
     DEFAULT_MEMORY_MAX_ITEMS,
     DEFAULT_MEMORY_TOP_K,
@@ -60,6 +63,9 @@ export const DEFAULT_SETTINGS: VaultCoachSettings = {
     llmBaseUrl: DEFAULT_OLLAMA_BASE_URL,
     chatModel: DEFAULT_CHAT_MODEL,
     embeddingModel: DEFAULT_EMBEDDING_MODEL,
+    embeddingProvider: DEFAULT_EMBEDDING_PROVIDER,
+    cloudEmbeddingBaseUrl: DEFAULT_CLOUD_EMBEDDING_BASE_URL,
+    cloudEmbeddingModel: DEFAULT_CLOUD_EMBEDDING_MODEL,
     cloudBaseUrl: DEFAULT_CLOUD_BASE_URL,
     cloudChatModel: DEFAULT_CLOUD_CHAT_MODEL,
     cloudApiKeySecretName: "",
@@ -87,6 +93,10 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 
     // display 用于渲染设置页界面，每次打开设置页的时候，Obsidian 都会调用这个方法
     display(): void {
+        this.renderSettings();
+    }
+
+    private renderSettings(): void {
         const { containerEl } = this;
         containerEl.empty();
 
@@ -98,10 +108,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 
         this.renderGeneralSection(containerEl);
         this.renderKnowledgeSection(containerEl);
+        this.renderModelSection(containerEl);
         this.renderMemorySection(containerEl);
         this.renderAdvancedRagSection(containerEl);
-        this.renderLocalModelSection(containerEl);
-        this.renderCloudModelSection(containerEl);
     }
 
     /**
@@ -503,31 +512,72 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
-    /**
-     * 本地模型服务连接参数。
-     */
-    private renderLocalModelSection(containerEl: HTMLElement): void {
+    private renderModelSection(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setHeading()
-            .setName("本地模型")
-            .setDesc("默认按本地 ollama 风格接口工作。修改地址或模型后，建议重新提问；修改 embedding 模型后建议重建索引。 ");
+            .setName("模型")
+            .setDesc("分别选择回答生成、向量检索和可选 rerank 使用的模型服务。只有当前选中的服务会被调用。");
 
         new Setting(containerEl)
-            .setName("本地推理服务地址")
-            .setDesc("例如：http://127.0.0.1:11434")
-            .addText((text) =>
-                text
-                    .setPlaceholder(DEFAULT_OLLAMA_BASE_URL)
-                    .setValue(this.plugin.settings.llmBaseUrl)
+            .setName("回答模型服务")
+            .setDesc("用于 query rewrite、最终回答生成和长期记忆抽取。")
+            .addDropdown((dropdown) =>
+                dropdown
+                    .addOption("ollama", "Local ollama")
+                    .addOption("openai-compatible", "Open AI compatible")
+                    .setValue(this.plugin.settings.modelProvider)
                     .onChange(async (value: string) => {
-                        this.plugin.settings.llmBaseUrl = value.trim() || DEFAULT_OLLAMA_BASE_URL;
+                        if (value !== "ollama" && value !== "openai-compatible") return;
+                        this.plugin.settings.modelProvider = value;
                         await this.plugin.saveSettings();
+                        this.renderSettings();
                     }),
             );
 
+        if (this.usesLocalModel()) {
+            this.renderLocalServiceAddressSetting(containerEl);
+        }
+
+        if (this.plugin.settings.modelProvider === "ollama") {
+            this.renderLocalChatSettings(containerEl);
+        } else {
+            this.renderCloudChatSettings(containerEl);
+        }
+
         new Setting(containerEl)
-            .setName("聊天模型")
-            .setDesc("用于 query rewrite 与最终回答生成。")
+            .setName("Embedding 模型服务")
+            .setDesc("用于向量检索。切换服务或模型后需要重建索引。")
+            .addDropdown((dropdown) =>
+                dropdown
+                    .addOption("ollama", "Local ollama")
+                    .addOption("openai-compatible", "Open AI compatible")
+                    .setValue(this.plugin.settings.embeddingProvider)
+                    .onChange(async (value: string) => {
+                        if (value !== "ollama" && value !== "openai-compatible") return;
+                        this.plugin.settings.embeddingProvider = value;
+                        await this.plugin.saveSettings();
+                        this.plugin.markKnowledgeBaseDirty();
+                        this.renderSettings();
+                    }),
+            );
+
+        if (this.plugin.settings.embeddingProvider === "ollama") {
+            this.renderLocalEmbeddingSettings(containerEl);
+        } else {
+            this.renderCloudEmbeddingSettings(containerEl);
+        }
+
+        if (this.usesCloudModel()) {
+            this.renderCloudApiKeySetting(containerEl);
+        }
+
+        this.renderRerankSettings(containerEl);
+    }
+
+    private renderLocalChatSettings(containerEl: HTMLElement): void {
+        new Setting(containerEl)
+            .setName("本地聊天模型")
+            .setDesc("用于 query rewrite、最终回答生成和长期记忆抽取。")
             .addText((text) =>
                 text
                     .setPlaceholder(DEFAULT_CHAT_MODEL)
@@ -537,10 +587,40 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     }),
             );
+    }
+
+    private renderCloudChatSettings(containerEl: HTMLElement): void {
+        new Setting(containerEl)
+            .setName("云端聊天服务地址")
+            .setDesc("例如：https://api.deepseek.com")
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_CLOUD_BASE_URL)
+                    .setValue(this.plugin.settings.cloudBaseUrl)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.cloudBaseUrl = value.trim() || DEFAULT_CLOUD_BASE_URL;
+                        await this.plugin.saveSettings();
+                    }),
+            );
 
         new Setting(containerEl)
-            .setName("Embedding 模型")
-            .setDesc("用于向量检索。修改后建议重建索引。")
+            .setName("云端聊天模型")
+            .setDesc("用于 query rewrite、最终回答生成和长期记忆抽取。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_CLOUD_CHAT_MODEL)
+                    .setValue(this.plugin.settings.cloudChatModel)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.cloudChatModel = value.trim() || DEFAULT_CLOUD_CHAT_MODEL;
+                        await this.plugin.saveSettings();
+                    }),
+            );
+    }
+
+    private renderLocalEmbeddingSettings(containerEl: HTMLElement): void {
+        new Setting(containerEl)
+            .setName("本地 embedding 模型")
+            .setDesc("用于本地向量检索。修改后需要重建索引。")
             .addText((text) =>
                 text
                     .setPlaceholder(DEFAULT_EMBEDDING_MODEL)
@@ -551,7 +631,71 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                         this.plugin.markKnowledgeBaseDirty();
                     }),
             );
+    }
 
+    private renderCloudEmbeddingSettings(containerEl: HTMLElement): void {
+        new Setting(containerEl)
+            .setName("云端 embedding 服务地址")
+            .setDesc("例如：https://api.openai.com/v1 或其他兼容 /embeddings 的服务地址。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_CLOUD_EMBEDDING_BASE_URL)
+                    .setValue(this.plugin.settings.cloudEmbeddingBaseUrl)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.cloudEmbeddingBaseUrl = value.trim() || DEFAULT_CLOUD_EMBEDDING_BASE_URL;
+                        await this.plugin.saveSettings();
+                        this.plugin.markKnowledgeBaseDirty();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName("云端 embedding 模型")
+            .setDesc("用于网络向量检索。修改后需要重建索引。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_CLOUD_EMBEDDING_MODEL)
+                    .setValue(this.plugin.settings.cloudEmbeddingModel)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.cloudEmbeddingModel = value.trim() || DEFAULT_CLOUD_EMBEDDING_MODEL;
+                        await this.plugin.saveSettings();
+                        this.plugin.markKnowledgeBaseDirty();
+                    }),
+            );
+    }
+
+    private renderLocalServiceAddressSetting(containerEl: HTMLElement): void {
+        new Setting(containerEl)
+            .setName("本地推理服务地址")
+            .setDesc("例如：http://127.0.0.1:11434。用于当前选择的本地聊天或 embedding 模型。")
+            .addText((text) =>
+                text
+                    .setPlaceholder(DEFAULT_OLLAMA_BASE_URL)
+                    .setValue(this.plugin.settings.llmBaseUrl)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.llmBaseUrl = value.trim() || DEFAULT_OLLAMA_BASE_URL;
+                        await this.plugin.saveSettings();
+                        if (this.plugin.settings.embeddingProvider === "ollama") {
+                            this.plugin.markKnowledgeBaseDirty();
+                        }
+                    }),
+            );
+    }
+
+    private renderCloudApiKeySetting(containerEl: HTMLElement): void {
+        new Setting(containerEl)
+            .setName("云端密钥")
+            .setDesc("保存到 Obsidian secret storage。网络模型会向用户配置的远程 API 发送问题、知识片段、检索上下文和少量对话上下文。")
+            .addComponent((el) =>
+                new SecretComponent(this.app, el)
+                    .setValue(this.plugin.settings.cloudApiKeySecretName)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.cloudApiKeySecretName = value;
+                        await this.plugin.saveSettings();
+                    }),
+            );
+    }
+
+    private renderRerankSettings(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setName("独立 rerank 服务地址")
             .setDesc("可选，例如：http://127.0.0.1:11435。留空时自动回退到本地启发式 rerank。")
@@ -579,64 +723,14 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
-    private renderCloudModelSection(containerEl: HTMLElement): void {
-        new Setting(containerEl)
-            .setHeading()
-            .setName("云端模型")
-            .setDesc("可选功能。启用后会向用户配置的远程 API 发送问题、检索上下文和少量对话上下文。");
+    private usesCloudModel(): boolean {
+        return this.plugin.settings.modelProvider === "openai-compatible"
+            || this.plugin.settings.embeddingProvider === "openai-compatible";
+    }
 
-        new Setting(containerEl)
-            .setName("模型服务")
-            //选择聊天模型的调用来源。ollama 为本地默认路径；openai-compatible 用于 OpenAI / DeepSeek / 其他兼容 Chat Completions 的服务。
-            .addDropdown((dropdown) =>
-                dropdown
-                    .addOption("ollama", "Local ollama")    // TODO 检查，这里可能会重复，因为这是 cloud 模型
-                    .addOption("openai-compatible", "Open AI compatible")
-                    .setValue(this.plugin.settings.modelProvider)
-                    .onChange(async (value: string) => {
-                        if (value !== "ollama" && value !== "openai-compatible") return;
-                        this.plugin.settings.modelProvider = value;
-                        await this.plugin.saveSettings();
-                    }),
-            );
-
-        new Setting(containerEl)
-            .setName("云端服务地址")
-            .setDesc("例如：https://api.deepseek.com")
-            .addText((text) =>
-                text
-                    .setPlaceholder(DEFAULT_CLOUD_BASE_URL)
-                    .setValue(this.plugin.settings.cloudBaseUrl)
-                    .onChange(async (value: string) => {
-                        this.plugin.settings.cloudBaseUrl = value.trim() || DEFAULT_CLOUD_BASE_URL;
-                        await this.plugin.saveSettings();
-                    }),
-            );
-
-        new Setting(containerEl)
-            .setName("云端聊天模型")
-            .addText((text) =>
-                text
-                    .setPlaceholder(DEFAULT_CLOUD_CHAT_MODEL)
-                    .setValue(this.plugin.settings.cloudChatModel)
-                    .onChange(async (value: string) => {
-                        this.plugin.settings.cloudChatModel = value.trim() || DEFAULT_CLOUD_CHAT_MODEL;
-                        await this.plugin.saveSettings();
-                    }),
-            );
-
-        new Setting(containerEl)
-            .setName("API key")
-            // API key 会保存到 Obsidian SecretStorage。插件 data.json 只保存 SecretStorage 条目名称，不保存 API key 原文。
-            .setDesc("保存到 Obsidian-secretStorage")
-            .addComponent((el) =>
-                new SecretComponent(this.app, el)
-                    .setValue(this.plugin.settings.cloudApiKeySecretName)
-                    .onChange(async (value: string) => {
-                        this.plugin.settings.cloudApiKeySecretName = value;
-                        await this.plugin.saveSettings();
-                    }),
-            );
+    private usesLocalModel(): boolean {
+        return this.plugin.settings.modelProvider === "ollama"
+            || this.plugin.settings.embeddingProvider === "ollama";
     }
 
     /**

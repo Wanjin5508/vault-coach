@@ -27,6 +27,7 @@ export type KnowledgeScopeMode = "wholeVault" | "specificFolder";
 export type RetrievalMode = "keyword" | "vector" | "hybrid";
 
 export type ModelProvider = "ollama" | "openai-compatible"
+export type EmbeddingProvider = "ollama" | "openai-compatible"
 
 /**
  * 单条来源信息
@@ -149,6 +150,15 @@ export interface VaultCoachSettings {
 
     // 用于向量检索的 embedding 模型
     embeddingModel: string;
+
+    // embedding 模型调用来源。可独立于聊天模型来源配置。
+    embeddingProvider: EmbeddingProvider;
+
+    // OpenAI-compatible embedding 服务地址，例如 https://api.openai.com/v1
+    cloudEmbeddingBaseUrl: string;
+
+    // OpenAI-compatible embedding 模型名
+    cloudEmbeddingModel: string;
 
     // 可选：独立 rerank 服务地址。
     // 如果为空，则自动回退到“本地启发式 rerank”。
@@ -402,6 +412,5 @@ export interface StreamHandlers {
     onDone?: () => void;
     onError?: (error: unknown) => void;
 }
-
 
 

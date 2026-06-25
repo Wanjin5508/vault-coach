@@ -348,7 +348,7 @@ export class VaultCoachView extends ItemView {
         }
     }
 
-    // 新增：创建一个纯文本临时气泡，用于边接收 token 边展示。
+    // 新增：创建一个临时助手气泡；真正 token 到达前显示“思考中”动画。
     private beginStreamingAssistantBubble(): void {
         const wrapperEl: HTMLDivElement = this.messageListEl.createDiv({
             cls: "vault-coach-message-wrapper assistant",
@@ -363,8 +363,7 @@ export class VaultCoachView extends ItemView {
             cls: "vault-coach-message-bubble assistant vault-coach-streaming-bubble", // 三个类，类似 html 的写法
         });
 
-        // bubbleEl.style.whiteSpace = "pre-wrap";
-        bubbleEl.setText("");
+        this.renderThinkingIndicator(bubbleEl);
 
         this.streamingWrapperEl = wrapperEl;
         this.streamingBubbleEl = bubbleEl;
@@ -372,10 +371,50 @@ export class VaultCoachView extends ItemView {
         this.scrollMessagesToBottom();
     }
 
+    private renderThinkingIndicator(bubbleEl: HTMLDivElement): void {
+        bubbleEl.empty();
+        bubbleEl.addClass("vault-coach-thinking-bubble");
+
+        const thinkingEl: HTMLDivElement = bubbleEl.createDiv({
+            cls: "vault-coach-thinking-indicator",
+        });
+
+        thinkingEl.createSpan({
+            cls: "vault-coach-thinking-spinner",
+            attr: {
+                "aria-hidden": "true",
+            },
+        });
+
+        thinkingEl.createSpan({
+            cls: "vault-coach-thinking-text",
+            text: "思考中",
+        });
+
+        const dotsEl: HTMLSpanElement = thinkingEl.createSpan({
+            cls: "vault-coach-thinking-dots",
+            attr: {
+                "aria-hidden": "true",
+            },
+        });
+
+        for (let index = 0; index < 3; index += 1) {
+            dotsEl.createSpan({
+                cls: "vault-coach-thinking-dot",
+                text: ".",
+            });
+        }
+    }
+
     // 新增：将新 token 追加到临时气泡中，降低 UI 感知延迟。
     private appendStreamingToken(token: string): void {
         if (!this.streamingBubbleEl) {
             this.beginStreamingAssistantBubble();
+        }
+
+        if (this.streamingText.length === 0 && token.length > 0) {
+            this.streamingBubbleEl?.removeClass("vault-coach-thinking-bubble");
+            this.streamingBubbleEl?.empty();
         }
 
         this.streamingText += token;
@@ -442,7 +481,8 @@ export class VaultCoachView extends ItemView {
 
         } catch (error: unknown) {
             console.error("[VaultCoachView] 发送消息失败", error);
-            new Notice("发送失败，请打开开发者控制台查看错误信息。")
+            this.clearStreamingAssistantBubble();
+            new Notice(`发送失败：${this.createShortErrorMessage(error)}`);
         } finally {
             this.isBusy = false;
             this.sendButtonEl.disabled = false;
@@ -496,7 +536,16 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    private createShortErrorMessage(error: unknown): string {
+        const message: string = error instanceof Error ? error.message : String(error);
+        const normalizedMessage: string = message.replace(/\s+/g, " ").trim();
+
+        if (normalizedMessage.length <= 180) {
+            return normalizedMessage;
+        }
+
+        return `${normalizedMessage.slice(0, 177)}...`;
+    }
+
 }
-
-
 

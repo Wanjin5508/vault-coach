@@ -87,7 +87,7 @@ export class AdvancedRagEngine {
             lastBuiltAt: null,
         };
 
-        if (!settings.enableVectorRetrieval || settings.embeddingModel.trim().length === 0) {
+        if (!settings.enableVectorRetrieval || this.getActiveEmbeddingModel(settings).length === 0) {
             return this.getVectorIndexStats();
         }
 
@@ -112,7 +112,7 @@ export class AdvancedRagEngine {
     async syncVectorIndex(syncResult: KnowledgeBaseSyncResult): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
 
-        if (!settings.enableVectorRetrieval || settings.embeddingModel.trim().length === 0) {
+        if (!settings.enableVectorRetrieval || this.getActiveEmbeddingModel(settings).length === 0) {
             this.knowledgeBase.clearVectorIndex();
             this.vectorStats = {
                 ready: false,
@@ -141,6 +141,12 @@ export class AdvancedRagEngine {
         };
 
         return this.getVectorIndexStats();
+    }
+
+    private getActiveEmbeddingModel(settings: VaultCoachSettings): string {
+        return settings.embeddingProvider === "openai-compatible"
+            ? settings.cloudEmbeddingModel.trim()
+            : settings.embeddingModel.trim();
     }
 
     async answerQuestion(
@@ -368,12 +374,24 @@ export class AdvancedRagEngine {
         }
 
         if (mode === "vector") {
-            const vectorHits: VectorSearchHit[] = await this.searchVector(query);
-            return this.buildCandidatesFromVectorHits(vectorHits);
+            try {
+                const vectorHits: VectorSearchHit[] = await this.searchVector(query);
+                return this.buildCandidatesFromVectorHits(vectorHits);
+            } catch (error: unknown) {
+                console.error("[VaultCoach] 向量检索失败，将回退到关键词检索。", error);
+                return this.buildCandidatesFromKeywordHits(
+                    this.knowledgeBase.searchKeyword(query, this.getSettings().keywordSearchTopK),
+                );
+            }
         }
 
         const keywordHits: KeywordSearchHit[] = this.knowledgeBase.searchKeyword(query, this.getSettings().keywordSearchTopK);
-        const vectorHits: VectorSearchHit[] = await this.searchVector(query);
+        let vectorHits: VectorSearchHit[] = [];
+        try {
+            vectorHits = await this.searchVector(query);
+        } catch (error: unknown) {
+            console.error("[VaultCoach] 混合检索中的向量召回失败，将只使用关键词召回。", error);
+        }
         return this.mergeHybrid(keywordHits, vectorHits, this.getSettings().hybridSearchTopK);
     }
 

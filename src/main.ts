@@ -468,9 +468,7 @@ export default class VaultCoach extends Plugin {
         this.ragEngine.hydrateVectorStats(snapshot.vectorStats);
         this.knowledgeBaseDirty = false;
 
-        const currentEmbeddingModel: string | null = this.settings.enableVectorRetrieval
-            ? this.settings.embeddingModel.trim()
-            : null;
+        const currentEmbeddingModel: string | null = this.getEmbeddingIndexSignature();
 
         if (snapshot.embeddingModel !== currentEmbeddingModel) {
             this.knowledgeBase.clearVectorIndex();
@@ -499,9 +497,7 @@ export default class VaultCoach extends Plugin {
         const snapshot: KnowledgeBaseSnapshot = {
             version: 1,
             settingsSignature: this.knowledgeBase.getSettingsSignature(),
-            embeddingModel: this.settings.enableVectorRetrieval
-                ? this.settings.embeddingModel.trim()
-                : null,
+            embeddingModel: this.getEmbeddingIndexSignature(),
             stats: this.knowledgeBase.getStats(),
             vectorStats: this.ragEngine.getVectorIndexStats(),
             chunks: this.knowledgeBase.getAllChunks(),
@@ -509,6 +505,26 @@ export default class VaultCoach extends Plugin {
             files: this.knowledgeBase.getFileRecords(),
         };
         await this.persistentStore.saveKnowledgeBaseSnapshot(snapshot);
+    }
+
+    private getEmbeddingIndexSignature(): string | null {
+        if (!this.settings.enableVectorRetrieval) {
+            return null;
+        }
+
+        if (this.settings.embeddingProvider === "openai-compatible") {
+            return [
+                this.settings.embeddingProvider,
+                this.settings.cloudEmbeddingBaseUrl.trim().replace(/\/+$/, ""),
+                this.settings.cloudEmbeddingModel.trim(),
+            ].join("::");
+        }
+
+        return [
+            this.settings.embeddingProvider,
+            this.settings.llmBaseUrl.trim().replace(/\/+$/, ""),
+            this.settings.embeddingModel.trim(),
+        ].join("::");
     }
 
     // 新增：从本地长期记忆中检索与当前问题最相关的条目，并注入到 prompt。

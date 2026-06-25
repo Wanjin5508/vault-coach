@@ -19,6 +19,11 @@ interface OllamaEmbedResponse {
     error?: string;
 }
 
+interface OllamaLegacyEmbeddingResponse {
+    embedding?: number[];
+    error?: string;
+}
+
 // interface OllamaStreamChunk {
 //     message?: {
 //         content?: string;
@@ -47,6 +52,29 @@ interface CloudChatCompletionResponse {
     error?: {
         message?: string;
     };
+}
+
+interface CloudEmbeddingResponse {
+    data?: Array<{
+        embedding?: number[];
+    }>;
+
+    error?: {
+        message?: string;
+    };
+}
+
+class ModelRequestError extends Error {
+    readonly status: number | null;
+    readonly url: string;
+
+    constructor(url: string, status: number | null, message: string) {
+        super(message);
+        this.name = "ModelRequestError";
+        this.status = status;
+        this.url = url;
+        Object.setPrototypeOf(this, ModelRequestError.prototype);
+    }
 }
 
 /**
@@ -82,6 +110,16 @@ export class LocalModelClient {
 
     private shouldUseCloudChat(settings: VaultCoachSettings): boolean {
         return settings.modelProvider === "openai-compatible"
+    }
+
+    private getActiveEmbeddingModel(settings: VaultCoachSettings): string {
+        return settings.embeddingProvider === "openai-compatible"
+            ? settings.cloudEmbeddingModel.trim()
+            : settings.embeddingModel.trim();
+    }
+
+    private shouldUseCloudEmbedding(settings: VaultCoachSettings): boolean {
+        return settings.embeddingProvider === "openai-compatible";
     }
 
     /**
@@ -351,7 +389,8 @@ async streamMarkdownAnswer(
      */
     async embedTexts(texts: string[]): Promise<number[][]> {
         const settings: VaultCoachSettings = this.getSettings();
-        if (!settings.enableVectorRetrieval || settings.embeddingModel.trim().length === 0) {
+        const activeEmbeddingModel: string = this.getActiveEmbeddingModel(settings);
+        if (!settings.enableVectorRetrieval || activeEmbeddingModel.length === 0) {
             return [];
         } 
 
@@ -359,6 +398,26 @@ async streamMarkdownAnswer(
             return [];
         }
 
+        if (this.shouldUseCloudEmbedding(settings)) {
+            return this.embedTextsWithCloudApi(settings, texts);
+        }
+
+        try {
+            return await this.embedTextsWithModernOllamaApi(settings, texts);
+        } catch (error: unknown) {
+            if (!this.isNotFoundError(error)) {
+                throw error;
+            }
+
+            console.warn("[VaultCoach] /api/embed 不可用，尝试使用旧版 /api/embeddings 接口。", error);
+            return this.embedTextsWithLegacyOllamaApi(settings, texts);
+        }
+    }
+
+    private async embedTextsWithModernOllamaApi(
+        settings: VaultCoachSettings,
+        texts: string[],
+    ): Promise<number[][]> {
         const responseText: string = await this.postJson(
             settings.llmBaseUrl,
             "/api/embed",
@@ -368,7 +427,6 @@ async streamMarkdownAnswer(
                 truncate: true,
             },
         );
-
         const parsed: OllamaEmbedResponse = JSON.parse(responseText) as OllamaEmbedResponse;
         if (parsed.error) {
             throw new Error(parsed.error);
@@ -377,6 +435,79 @@ async streamMarkdownAnswer(
         const embeddings: number[][] | undefined = parsed.embeddings;
         if (!embeddings || embeddings.length === 0) {
             throw new Error("embedding 接口返回为空。");
+        }
+
+        return embeddings;
+    }
+
+    private async embedTextsWithCloudApi(
+        settings: VaultCoachSettings,
+        texts: string[],
+    ): Promise<number[][]> {
+        const apiKey: string | null = this.getCloudApiKey();
+
+        if (settings.cloudEmbeddingModel.trim().length === 0) {
+            throw new Error("未配置云端 embedding 模型。");
+        }
+
+        if (!apiKey) {
+            throw new Error("未配置云端模型 API key。请先在设置页选择 SecretStorage 条目。");
+        }
+
+        const responseText: string = await this.postJson(
+            settings.cloudEmbeddingBaseUrl,
+            this.getCloudEmbeddingsPath(settings.cloudEmbeddingBaseUrl),
+            {
+                model: settings.cloudEmbeddingModel,
+                input: texts,
+            },
+            { Authorization: `Bearer ${apiKey}` },
+        );
+
+        const parsed: CloudEmbeddingResponse = JSON.parse(responseText) as CloudEmbeddingResponse;
+        if (parsed.error?.message) {
+            throw new Error(parsed.error.message);
+        }
+
+        const embeddings: number[][] = (parsed.data ?? [])
+            .map((item: { embedding?: number[] }) => item.embedding)
+            .filter((embedding: number[] | undefined): embedding is number[] => {
+                return Array.isArray(embedding) && embedding.length > 0;
+            });
+
+        if (embeddings.length === 0) {
+            throw new Error("云端 embedding 接口返回为空。");
+        }
+
+        return embeddings;
+    }
+
+    private async embedTextsWithLegacyOllamaApi(
+        settings: VaultCoachSettings,
+        texts: string[],
+    ): Promise<number[][]> {
+        const embeddings: number[][] = [];
+
+        for (const text of texts) {
+            const responseText: string = await this.postJson(
+                settings.llmBaseUrl,
+                "/api/embeddings",
+                {
+                    model: settings.embeddingModel,
+                    prompt: text,
+                },
+            );
+
+            const parsed: OllamaLegacyEmbeddingResponse = JSON.parse(responseText) as OllamaLegacyEmbeddingResponse;
+            if (parsed.error) {
+                throw new Error(parsed.error);
+            }
+
+            if (!parsed.embedding || parsed.embedding.length === 0) {
+                throw new Error("旧版 embedding 接口返回为空。");
+            }
+
+            embeddings.push(parsed.embedding);
         }
 
         return embeddings;
@@ -521,6 +652,20 @@ async streamMarkdownAnswer(
         return "/v1/chat/completions";
     }
 
+    private getCloudEmbeddingsPath(baseUrl: string): string {
+        const normalizedBase: string = baseUrl.trim().replace(/\/+$/, "");
+
+        if (normalizedBase.endsWith("/embeddings")) {
+            return "";
+        }
+
+        if (normalizedBase.endsWith("/v1")) {
+            return "/embeddings";
+        }
+
+        return "/v1/embeddings";
+    }
+
     /**
      * 统一发送 JSON POST 请求。
      *
@@ -535,17 +680,99 @@ async streamMarkdownAnswer(
         headers: Record<string, string> = {},
     ): Promise<string> {
         const targetUrl: string = this.joinUrl(baseUrl, path);
-        const response = await requestUrl({
-            url: targetUrl,
-            method: "POST",
-            body: JSON.stringify(payload),
-            headers: {
-                "Content-Type": "application/json",
-                ...headers,
-            },
-        });
+        try {
+            const response = await requestUrl({
+                url: targetUrl,
+                method: "POST",
+                body: JSON.stringify(payload),
+                headers: {
+                    "Content-Type": "application/json",
+                    ...headers,
+                },
+            });
 
-        return response.text;
+            return response.text;
+        } catch (error: unknown) {
+            throw this.createRequestError(targetUrl, error);
+        }
+    }
+
+    private createRequestError(targetUrl: string, error: unknown): ModelRequestError {
+        const status: number | null = this.extractStatusCode(error);
+        const originalMessage: string = this.getErrorMessage(error);
+        const hint: string = this.buildRequestFailureHint(targetUrl, status);
+        const messageParts: string[] = [
+            `模型请求失败：POST ${targetUrl}`,
+            status === null ? "" : `HTTP ${status}`,
+            originalMessage,
+            hint,
+        ].filter((part: string) => part.length > 0);
+
+        return new ModelRequestError(targetUrl, status, messageParts.join("。"));
+    }
+
+    private buildRequestFailureHint(targetUrl: string, status: number | null): string {
+        if (status !== 404) {
+            return "";
+        }
+
+        if (targetUrl.includes("/api/embed")) {
+            return "如果你使用的是旧版 Ollama，插件会自动尝试 /api/embeddings；如果仍失败，请确认本地推理服务地址只填写根地址，例如 http://127.0.0.1:11434。";
+        }
+
+        if (targetUrl.includes("/api/chat")) {
+            return "请确认本地推理服务地址只填写 Ollama 根地址，例如 http://127.0.0.1:11434，不要带 /api/chat。";
+        }
+
+        if (targetUrl.includes("/chat/completions")) {
+            return "请确认云端模型服务地址与模型提供商匹配，例如 OpenAI 兼容服务通常填写到 /v1 或服务根地址。";
+        }
+
+        if (targetUrl.includes("/embeddings")) {
+            return "请确认云端 embedding 服务地址与模型提供商匹配，例如 OpenAI 兼容服务通常填写到 /v1 或服务根地址。";
+        }
+
+        return "请确认对应模型服务地址和接口路径是否正确。";
+    }
+
+    private isNotFoundError(error: unknown): boolean {
+        if (error instanceof ModelRequestError) {
+            return error.status === 404;
+        }
+
+        return this.extractStatusCode(error) === 404;
+    }
+
+    private extractStatusCode(error: unknown): number | null {
+        if (
+            error
+            && typeof error === "object"
+            && "status" in error
+            && typeof error.status === "number"
+        ) {
+            return error.status;
+        }
+
+        const message: string = this.getErrorMessage(error);
+        const match: RegExpMatchArray | null = message.match(/status\s+(\d{3})/i);
+        if (!match) {
+            return null;
+        }
+
+        const statusText: string | undefined = match[1];
+        if (!statusText) {
+            return null;
+        }
+
+        return Number(statusText);
+    }
+
+    private getErrorMessage(error: unknown): string {
+        if (error instanceof Error) {
+            return error.message;
+        }
+
+        return String(error);
     }
 
     /**
@@ -567,4 +794,3 @@ async streamMarkdownAnswer(
     }
 
 }
-
