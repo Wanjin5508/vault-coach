@@ -24,13 +24,13 @@ interface OllamaLegacyEmbeddingResponse {
     error?: string;
 }
 
-// interface OllamaStreamChunk {
-//     message?: {
-//         content?: string;
-//     };
-//     done?: boolean;
-//     error?: string;
-// }
+interface OllamaStreamChunk {
+    message?: {
+        content?: string;
+    };
+    done?: boolean;
+    error?: string;
+}
 
 interface RerankResponse {
     results?: RerankResultItem[];
@@ -45,6 +45,18 @@ interface ChatOptions {
 interface CloudChatCompletionResponse {
     choices?: Array<{
         message?: {
+            content?: string | null;
+        };
+    }>;
+
+    error?: {
+        message?: string;
+    };
+}
+
+interface CloudChatCompletionStreamChunk {
+    choices?: Array<{
+        delta?: {
             content?: string | null;
         };
     }>;
@@ -282,103 +294,186 @@ export class LocalModelClient {
         });
     }
 
-    // 新增：最终回答使用流式输出，rewrite 仍保持非流式。
-    // 替换streamMarkdownAnswer方法的实现
-// async streamMarkdownAnswer(
-//     messages: LocalChatMessage[],
-//     temperature: number,
-//     handlers?: StreamHandlers,
-// ): Promise<string> {
-//     const settings: VaultCoachSettings = this.getSettings();
-//     const targetUrl: string = this.joinUrl(settings.llmBaseUrl, "/api/chat");
-    
-//     // 使用requestUrl替代fetch
-//     const response = await requestUrl({
-//         url: targetUrl,
-//         method: "POST",
-//         headers: {
-//             "Content-Type": "application/json",
-//         },
-//         body: JSON.stringify({
-//             model: settings.chatModel,
-//             messages,
-//             stream: true,
-//             options: {
-//                 temperature,
-//             },
-//         }),
-//     });
+    async streamMarkdownAnswer(
+        messages: LocalChatMessage[],
+        temperature: number,
+        handlers?: StreamHandlers,
+    ): Promise<string> {
+        const settings: VaultCoachSettings = this.getSettings();
 
-//     // 由于requestUrl不直接支持流式处理，我们需要处理完整响应
-//     // 注意：requestUrl返回的是完整的响应，无法真正实现流式处理
-//     // 这里模拟流式处理行为
-    
-//     let finalText = "";
-    
-//     try {
-//         // 将完整响应文本按行分割来模拟流式处理
-//         const responseText = response.text;
-//         const lines = responseText.split('\n');
-        
-//         for (const line of lines) {
-//             const trimmedLine = line.trim();
-//             if (trimmedLine.length === 0) {
-//                 continue;
-//             }
-            
-//             try {
-//                 const parsed: OllamaStreamChunk = JSON.parse(trimmedLine) as OllamaStreamChunk;
-                
-//                 if (parsed.error) {
-//                     throw new Error(parsed.error);
-//                 }
+        try {
+            if (this.shouldUseCloudChat(settings)) {
+                return await this.streamCloudMarkdownAnswer(settings, messages, temperature, handlers);
+            }
 
-//                 const token: string = parsed.message?.content ?? "";
-//                 if (token.length > 0) {
-//                     finalText += token;
-//                     handlers?.onToken?.(token);
-//                 }
+            return await this.streamOllamaMarkdownAnswer(settings, messages, temperature, handlers);
+        } catch (error: unknown) {
+            handlers?.onError?.(error);
+            throw error;
+        }
+    }
 
-//                 if (parsed.done) {
-//                     handlers?.onDone?.();
-//                     return finalText;
-//                 }
-//             } catch (parseError) {
-//                 // 忽略解析错误，继续处理下一行
-//                 continue;
-//             }
-//         }
-        
-//         handlers?.onDone?.();
-//         return finalText;
-//     } catch (error: unknown) {
-//         handlers?.onError?.(error);
-//         throw error;
-//     }
-// }
+    private async streamOllamaMarkdownAnswer(
+        settings: VaultCoachSettings,
+        messages: LocalChatMessage[],
+        temperature: number,
+        handlers?: StreamHandlers,
+    ): Promise<string> {
+        if (settings.chatModel.trim().length === 0) {
+            throw new Error("未配置本地聊天模型。");
+        }
 
-async streamMarkdownAnswer(
-    messages: LocalChatMessage[],
-    temperature: number,
-    handlers?: StreamHandlers,
-): Promise<string> {
-    try {
-        const finalText: string = await this.chat({
-            messages,
-            temperature,
+        const targetUrl: string = this.joinUrl(settings.llmBaseUrl, "/api/chat");
+        const response: Response = await this.fetchJsonStream(
+            targetUrl,
+            {
+                model: settings.chatModel,
+                messages,
+                stream: true,
+                options: {
+                    temperature,
+                },
+            },
+        );
+
+        let finalText = "";
+        let pendingText = "";
+        let isDone = false;
+
+        const handleLine = (line: string): void => {
+            const trimmedLine: string = line.trim();
+            if (trimmedLine.length === 0) {
+                return;
+            }
+
+            const parsed: OllamaStreamChunk = JSON.parse(trimmedLine) as OllamaStreamChunk;
+            if (parsed.error) {
+                throw new Error(parsed.error);
+            }
+
+            const token: string = parsed.message?.content ?? "";
+            if (token.length > 0) {
+                finalText += token;
+                handlers?.onToken?.(token);
+            }
+
+            if (parsed.done) {
+                isDone = true;
+            }
+        };
+
+        await this.readTextStream(response, (chunk: string) => {
+            pendingText += chunk;
+            const lines: string[] = pendingText.split(/\r?\n/);
+            pendingText = lines.pop() ?? "";
+
+            for (let index = 0; index < lines.length; index += 1) {
+                const line: string | undefined = lines[index];
+                if (line !== undefined) {
+                    handleLine(line);
+                }
+            }
         });
 
-        if (finalText.length > 0) {
-            handlers?.onToken?.(finalText);
+        if (pendingText.trim().length > 0) {
+            handleLine(pendingText);
+        }
+
+        if (!isDone && finalText.length === 0) {
+            throw new Error("Invalid streaming response from Ollama");
         }
 
         handlers?.onDone?.();
         return finalText;
-    } catch (error: unknown) {
-        handlers?.onError?.(error);
-        throw error;
     }
-}
+
+    private async streamCloudMarkdownAnswer(
+        settings: VaultCoachSettings,
+        messages: LocalChatMessage[],
+        temperature: number,
+        handlers?: StreamHandlers,
+    ): Promise<string> {
+        const apiKey: string | null = this.getCloudApiKey();
+
+        if (settings.cloudChatModel.trim().length === 0) {
+            throw new Error("未配置云端聊天模型。");
+        }
+
+        if (!apiKey) {
+            throw new Error("未配置云端模型 API key。请先在设置页选择 SecretStorage 条目。");
+        }
+
+        const targetUrl: string = this.joinUrl(
+            settings.cloudBaseUrl,
+            this.getCloudChatCompletionsPath(settings.cloudBaseUrl),
+        );
+        const response: Response = await this.fetchJsonStream(
+            targetUrl,
+            {
+                model: settings.cloudChatModel,
+                messages,
+                temperature,
+                stream: true,
+            },
+            { Authorization: `Bearer ${apiKey}` },
+        );
+
+        let finalText = "";
+        let pendingText = "";
+        let isDone = false;
+
+        const handleEventLine = (line: string): void => {
+            const trimmedLine: string = line.trim();
+            if (!trimmedLine.startsWith("data:")) {
+                return;
+            }
+
+            const data: string = trimmedLine.slice("data:".length).trim();
+            if (data.length === 0) {
+                return;
+            }
+
+            if (data === "[DONE]") {
+                isDone = true;
+                return;
+            }
+
+            const parsed: CloudChatCompletionStreamChunk = JSON.parse(data) as CloudChatCompletionStreamChunk;
+            if (parsed.error?.message) {
+                throw new Error(parsed.error.message);
+            }
+
+            const token: string = parsed.choices?.[0]?.delta?.content ?? "";
+            if (token.length > 0) {
+                finalText += token;
+                handlers?.onToken?.(token);
+            }
+        };
+
+        await this.readTextStream(response, (chunk: string) => {
+            pendingText += chunk;
+            const lines: string[] = pendingText.split(/\r?\n/);
+            pendingText = lines.pop() ?? "";
+
+            for (let index = 0; index < lines.length; index += 1) {
+                const line: string | undefined = lines[index];
+                if (line !== undefined) {
+                    handleEventLine(line);
+                }
+            }
+        });
+
+        if (pendingText.trim().length > 0) {
+            handleEventLine(pendingText);
+        }
+
+        if (!isDone && finalText.length === 0) {
+            throw new Error("Invalid streaming response from cloud model");
+        }
+
+        handlers?.onDone?.();
+        return finalText;
+    }
 
     /**
      * 批量生成 embedding。
@@ -666,6 +761,78 @@ async streamMarkdownAnswer(
         return "/v1/embeddings";
     }
 
+    private async fetchJsonStream(
+        targetUrl: string,
+        payload: unknown,
+        headers: Record<string, string> = {},
+    ): Promise<Response> {
+        try {
+            // requestUrl returns a buffered response; fetch is required here so the UI can receive tokens as they arrive.
+            // eslint-disable-next-line no-restricted-globals
+            const response: Response = await fetch(targetUrl, {
+                method: "POST",
+                body: JSON.stringify(payload),
+                headers: {
+                    "Content-Type": "application/json",
+                    ...headers,
+                },
+            });
+
+            if (!response.ok) {
+                let responseText = "";
+                try {
+                    responseText = await response.text();
+                } catch (readError: unknown) {
+                    responseText = this.getErrorMessage(readError);
+                }
+
+                throw this.createHttpResponseError(targetUrl, response, responseText);
+            }
+
+            if (!response.body) {
+                throw new Error("Streaming response body is empty.");
+            }
+
+            return response;
+        } catch (error: unknown) {
+            if (error instanceof ModelRequestError) {
+                throw error;
+            }
+
+            throw this.createRequestError(targetUrl, error);
+        }
+    }
+
+    private async readTextStream(response: Response, onChunk: (chunk: string) => void): Promise<void> {
+        const body: ReadableStream<Uint8Array> | null = response.body;
+        if (!body) {
+            throw new Error("Streaming response body is empty.");
+        }
+
+        const reader: ReadableStreamDefaultReader<Uint8Array> = body.getReader();
+        const decoder: TextDecoder = new TextDecoder();
+
+        try {
+            while (true) {
+                const result: ReadableStreamReadResult<Uint8Array> = await reader.read();
+                if (result.done) {
+                    break;
+                }
+
+                if (result.value) {
+                    onChunk(decoder.decode(result.value, { stream: true }));
+                }
+            }
+
+            const remainingText: string = decoder.decode();
+            if (remainingText.length > 0) {
+                onChunk(remainingText);
+            }
+        } finally {
+            reader.releaseLock();
+        }
+    }
+
     /**
      * 统一发送 JSON POST 请求。
      *
@@ -695,6 +862,20 @@ async streamMarkdownAnswer(
         } catch (error: unknown) {
             throw this.createRequestError(targetUrl, error);
         }
+    }
+
+    private createHttpResponseError(targetUrl: string, response: Response, responseText: string): ModelRequestError {
+        const normalizedResponseText: string = responseText.replace(/\s+/g, " ").trim();
+        const hint: string = this.buildRequestFailureHint(targetUrl, response.status);
+        const messageParts: string[] = [
+            `模型请求失败：POST ${targetUrl}`,
+            `HTTP ${response.status}`,
+            response.statusText,
+            normalizedResponseText.length > 0 ? normalizedResponseText : "",
+            hint,
+        ].filter((part: string) => part.length > 0);
+
+        return new ModelRequestError(targetUrl, response.status, messageParts.join("。"));
     }
 
     private createRequestError(targetUrl: string, error: unknown): ModelRequestError {

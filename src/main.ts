@@ -1,9 +1,10 @@
 import { Notice, Plugin, TAbstractFile, WorkspaceLeaf } from "obsidian";
 import { VIEW_TYPE_VAULT_COACH } from "./constants";
+import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { VaultKnowledgeBase } from "./knowledge-base";
 import { VaultCoachPersistentStore } from "./persistent-store";
 import { AdvancedRagEngine } from "./rag-engine";
-import { DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
+import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
 import type {
     AnswerSource,
     AssistantAnswer,
@@ -42,6 +43,10 @@ export default class VaultCoach extends Plugin {
     private isSyncingKnowledgeBase = false;
     private lastAutoIndexAt: number | null = null;
 
+    private t(key: TranslationKey, replacements?: Record<string, string | number>): string {
+        return translate(key, replacements);
+    }
+
     async onload(): Promise<void> {
         await this.loadSettings();
 
@@ -69,7 +74,7 @@ export default class VaultCoach extends Plugin {
 
         this.addCommand({
             id: "open-view",
-            name: "Open the sidebar view on the right side",
+            name: this.t("command.openView"),
             callback: async () => {
                 await this.activateView();
             },
@@ -77,27 +82,31 @@ export default class VaultCoach extends Plugin {
 
         this.addCommand({
             id: "reset-conversation",
-            name: "Reset plugin conversation",
+            name: this.t("command.resetConversation"),
             callback: () => {
                 this.resetConversation();
                 this.refreshAllViews();
-                new Notice("Reset successful.");
+                new Notice(this.t("notice.resetSuccess"));
             },
         });
 
         this.addCommand({
             id: "rebuild-knowledge-index",
-            name: "Rebuild Markdown knowledge index",
+            name: this.t("command.rebuildKnowledgeIndex"),
             callback: async () => {
                 await this.rebuildKnowledgeBase(true);
             },
         });
 
-        this.addRibbonIcon("message-square", "Open vault coach", () => {
+        this.addRibbonIcon("message-square", this.t("ribbon.openVaultCoach"), () => {
             void this.activateView();
         });
 
         this.addSettingTab(new VaultCoachSettingTab(this.app, this));
+        this.registerDomEvent(window, "languagechange", () => {
+            this.refreshBuiltInDefaultGreeting();
+            this.refreshAllViews();
+        });
         this.registerVaultEvents();
 
         if (!this.knowledgeBase.isReady()) {
@@ -118,15 +127,23 @@ export default class VaultCoach extends Plugin {
     }
 
     async loadSettings(): Promise<void> {
+        const savedSettings: Partial<VaultCoachSettings> = ((await this.loadData()) as Partial<VaultCoachSettings> | null) ?? {};
         this.settings = Object.assign(
             {},
-            DEFAULT_SETTINGS,
-            (await this.loadData()) as Partial<VaultCoachSettings>,
+            createDefaultSettings(),
+            savedSettings,
         );
+        this.refreshBuiltInDefaultGreeting();
     }
 
     async saveSettings(): Promise<void> {
         await this.saveData(this.settings);
+    }
+
+    private refreshBuiltInDefaultGreeting(): void {
+        if (this.settings.defaultGreeting.trim().length === 0 || isBuiltInDefaultGreeting(this.settings.defaultGreeting)) {
+            this.settings.defaultGreeting = getDefaultGreeting();
+        }
     }
 
     getCloudApiKey(): string | null {
@@ -159,6 +176,28 @@ export default class VaultCoach extends Plugin {
     getKnowledgeScopeDescription(): string {
         const stats: KnowledgeBaseStats = this.getKnowledgeBaseStats();
         return stats.scopeDescription;
+    }
+
+    getLocalizedKnowledgeScopeDescription(): string {
+        if (this.settings.knowledgeScopeMode === "wholeVault") {
+            return this.t("scope.wholeVault");
+        }
+
+        const folderPath: string = this.settings.knowledgeFolder.trim().replace(/\/$/, "");
+        if (folderPath.length === 0) {
+            return this.t("scope.folderUnset");
+        }
+
+        return this.t("scope.folder", { folder: folderPath });
+    }
+
+    getEffectiveDefaultGreeting(): string {
+        const configuredGreeting: string = this.settings.defaultGreeting.trim();
+        if (configuredGreeting.length === 0 || isBuiltInDefaultGreeting(configuredGreeting)) {
+            return getDefaultGreeting();
+        }
+
+        return this.settings.defaultGreeting;
     }
 
     getRuntimeRetrievalMode(): RetrievalMode {
@@ -204,7 +243,7 @@ export default class VaultCoach extends Plugin {
         this.messages = [
             {
                 role: "assistant",
-                text: this.settings.defaultGreeting || `# 你好\n\n我是 ${this.settings.assistantName}。`,
+                text: this.getEffectiveDefaultGreeting(),
                 createdAt: Date.now(),
             },
         ];
@@ -234,7 +273,7 @@ export default class VaultCoach extends Plugin {
                 this.vectorIndexDirty = false;
             } catch (vectorError: unknown) {
                 console.error("[VaultCoach] 向量索引建立失败，将回退到关键词检索。", vectorError);
-                vectorBuildWarning = "向量索引建立失败，已自动回退到关键词检索。";
+                vectorBuildWarning = this.t("notice.index.vectorFailedWarning");
                 this.vectorIndexDirty = true;
             }
 
@@ -244,15 +283,19 @@ export default class VaultCoach extends Plugin {
 
             if (showNotice) {
                 const vectorInfo: string = this.settings.enableVectorRetrieval
-                    ? `，向量数 ${vectorStats.vectorCount}`
+                    ? this.t("notice.index.vectorInfo", { vectorCount: vectorStats.vectorCount })
                     : "";
-                const message: string = `索引完成：${textStats.fileCount} 个文件，${textStats.chunkCount} 个片段${vectorInfo}。`;
+                const message: string = this.t("notice.index.complete", {
+                    fileCount: textStats.fileCount,
+                    chunkCount: textStats.chunkCount,
+                    vectorInfo,
+                });
                 new Notice(vectorBuildWarning.length > 0 ? `${message} ${vectorBuildWarning}` : message);
             }
         } catch (error: unknown) {
             console.error("[VaultCoach] 重建索引失败", error);
             if (showNotice) {
-                new Notice("重建索引失败，请打开开发者控制台查看错误信息。");
+                new Notice(this.t("notice.index.rebuildFailed"));
             }
         }
     }
@@ -275,7 +318,7 @@ export default class VaultCoach extends Plugin {
         if (!leaf) {
             leaf = workspace.getRightLeaf(false);
             if (!leaf) {
-                new Notice("Cannot create a new view");
+                new Notice(this.t("notice.cannotCreateView"));
                 return;
             }
 
@@ -407,7 +450,7 @@ export default class VaultCoach extends Plugin {
             this.refreshAllViews();
 
             if (showNotice) {
-                new Notice(`增量同步完成：${syncResult.affectedFiles.length} 个文件变更已处理。`);
+                new Notice(this.t("notice.index.incrementalComplete", { count: syncResult.affectedFiles.length }));
             }
         } catch (error: unknown) {
             console.error("[VaultCoach] 自动增量同步失败", error);
@@ -427,13 +470,13 @@ export default class VaultCoach extends Plugin {
             this.refreshAllViews();
 
             if (showNotice) {
-                new Notice(`向量索引完成：${vectorStats.vectorCount} 条向量。`);
+                new Notice(this.t("notice.index.vectorComplete", { count: vectorStats.vectorCount }));
             }
         } catch (error: unknown) {
             console.error("[VaultCoach] 向量索引重建失败", error);
             this.vectorIndexDirty = true;
             if (showNotice) {
-                new Notice("向量索引重建失败，请打开开发者控制台查看错误信息。");
+                new Notice(this.t("notice.index.vectorRebuildFailed"));
             }
         }
     }

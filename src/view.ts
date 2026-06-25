@@ -4,6 +4,9 @@ import { ItemView, WorkspaceLeaf, Notice, MarkdownRenderer } from "obsidian";
 import type VaultCoach  from "./main";
 import type { ChatMessage, AnswerSource, KnowledgeBaseStats, RetrievalMode, VectorIndexStats } from "./types";
 import { VIEW_NAME_VAULT_COACH, VIEW_TYPE_VAULT_COACH } from "./constants";
+import { translate, type TranslationKey } from "./i18n";
+
+type InteractionMode = "qa" | "exam";
 
 /**
  * VaultCoachView 是一个自定义 ItemView。它不会像 Modal 那样弹窗，而是被放进 Obsidian 右侧边栏中。
@@ -32,6 +35,9 @@ export class VaultCoachView extends ItemView {
     // 当前是否正等待插件完成检索回复
     private isBusy = false;
 
+    // 仅用于前端展示的模式切换；后台考试逻辑后续再接入。
+    private activeInteractionMode: InteractionMode = "qa";
+
     // 中文/日文等输入法正在组词时，Enter 应交给输入法确认候选词，而不是发送消息。
     private isComposingInput = false;
 
@@ -43,6 +49,10 @@ export class VaultCoachView extends ItemView {
     constructor(leaf: WorkspaceLeaf, plugin: VaultCoach) {
         super(leaf);
         this.plugin = plugin;
+    }
+
+    private t(key: TranslationKey, replacements?: Record<string, string | number>): string {
+        return translate(key, replacements);
     }
 
     // 返回当前视图的唯一类型 ID，Obsidian 通过它识别这是哪个视图
@@ -104,55 +114,37 @@ export class VaultCoachView extends ItemView {
      */
     private renderHeader(rootEl: HTMLDivElement): void {
         const headerEl: HTMLDivElement = rootEl.createDiv({ cls: "vault-coach-header"});
-        headerEl.createEl("h3", { text: this.plugin.settings.assistantName});
-        headerEl.createEl("p", {
-            text: "Query rewrite + 向量检索 + 混合召回 + rerank + 长期记忆 + 流式回答。"
-        });
+        const headerTopEl: HTMLDivElement = headerEl.createDiv({ cls: "vault-coach-header-top" });
+        headerTopEl.createEl("h3", { text: this.plugin.settings.assistantName});
+        this.renderModeSwitch(headerTopEl);
 
         const textStats: KnowledgeBaseStats = this.plugin.getKnowledgeBaseStats();
         const vectorStats: VectorIndexStats = this.plugin.getVectorIndexStats();
-        const infoListEl: HTMLDivElement = headerEl.createDiv({cls: "vault-coach-header-info"});
+        const infoListEl: HTMLDivElement = headerEl.createDiv({cls: "vault-coach-header-info-grid"});
 
-        infoListEl.createDiv({
-        text: `Knowledge base scope: ${this.plugin.getKnowledgeScopeDescription()}`
-    });
+        const textIndexStatusText: string = this.plugin.isKnowledgeBaseDirty()
+            ? this.t("view.indexStatus.dirty")
+            : (textStats.lastIndexedAt ? this.t("view.indexStatus.ready") : this.t("view.indexStatus.notBuilt"));
 
-    const textIndexStatusText: string = this.plugin.isKnowledgeBaseDirty()
-        ? "待重建"
-        : (textStats.lastIndexedAt ? "已就绪" : "尚未建立");
+        const vectorIndexStatusText: string = vectorStats.ready
+            ? this.t("view.indexStatus.vectorReady", { count: vectorStats.vectorCount })
+            : this.t("view.indexStatus.vectorFallback");
 
-    infoListEl.createDiv({
-        text: `文本索引：${textIndexStatusText}`,
-    });
-
-    const vectorIndexStatusText: string = vectorStats.ready
-        ? `已就绪（${vectorStats.vectorCount} 条）`
-        : "未建立 / 已回退";
-
-    infoListEl.createDiv({
-        text: `向量索引：${vectorIndexStatusText}`,
-    });
-
-    infoListEl.createDiv({
-        text: `文件数：${textStats.fileCount}, 片段数：${textStats.chunkCount}`,
-    });
-
-    infoListEl.createDiv({
-        text: `长期记忆：${this.plugin.getMemoryCount()} 条`,
-    });
-
-        // infoListEl.createEl("div", {
-        //     text: `检索方式：关键词检索（第一阶段）`,
-        // });
+        this.renderHeaderStat(infoListEl, this.t("view.stat.knowledgeScope"), this.plugin.getLocalizedKnowledgeScopeDescription());
+        this.renderHeaderStat(infoListEl, this.t("view.stat.textIndex"), textIndexStatusText);
+        this.renderHeaderStat(infoListEl, this.t("view.stat.vectorIndex"), vectorIndexStatusText);
+        this.renderHeaderStat(infoListEl, this.t("view.stat.files"), String(textStats.fileCount));
+        this.renderHeaderStat(infoListEl, this.t("view.stat.chunks"), String(textStats.chunkCount));
+        this.renderHeaderStat(infoListEl, this.t("view.stat.memory"), this.t("view.stat.memoryValue", { count: this.plugin.getMemoryCount() }));
 
         const toolbarEl: HTMLDivElement = headerEl.createDiv({ cls: "vault-coach-toolbar" });
 
         const retrievalGroupEl: HTMLDivElement = toolbarEl.createDiv({ cls: "vault-coach-retrieval-group"});
-        retrievalGroupEl.createSpan({text: "检索模式： "});
+        retrievalGroupEl.createSpan({text: `${this.t("view.retrievalModeLabel")} `});
         this.retrievalModeSelectEl = retrievalGroupEl.createEl("select");
-        this.addRetrievalOption("keyword", "关键词检索");
-        this.addRetrievalOption("vector", "向量检索");
-        this.addRetrievalOption("hybrid", "混合检索");
+        this.addRetrievalOption("keyword", this.t("view.retrieval.keyword"));
+        this.addRetrievalOption("vector", this.t("view.retrieval.vector"));
+        this.addRetrievalOption("hybrid", this.t("view.retrieval.hybrid"));
         this.retrievalModeSelectEl.value = this.plugin.getRuntimeRetrievalMode();
         this.retrievalModeSelectEl.addEventListener("change", () => {
             const value: string = this.retrievalModeSelectEl.value;
@@ -162,19 +154,75 @@ export class VaultCoachView extends ItemView {
         });
 
         const rebuildButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
-            text: "重建索引",
+            text: this.t("view.rebuildIndex"),
         });
         rebuildButtonEl.addEventListener("click", () => {
             void this.handleRebuildIndex();
         });
 
         const resetButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
-            text: "重置会话",
+            text: this.t("view.resetConversation"),
         });
         resetButtonEl.addEventListener("click", () => {
             this.plugin.resetConversation();
             void this.renderMessages();
             this.focusInput();
+        });
+    }
+
+    private renderModeSwitch(headerTopEl: HTMLDivElement): void {
+        const modeSwitchEl: HTMLDivElement = headerTopEl.createDiv({
+            cls: "vault-coach-mode-switch",
+            attr: {
+                role: "group",
+                "aria-label": this.t("view.modeLabel"),
+            },
+        });
+
+        this.renderModeOption(modeSwitchEl, "qa", this.t("view.mode.qa"));
+        this.renderModeOption(modeSwitchEl, "exam", this.t("view.mode.exam"));
+    }
+
+    private renderModeOption(containerEl: HTMLDivElement, mode: InteractionMode, label: string): void {
+        const buttonEl: HTMLButtonElement = containerEl.createEl("button", {
+            text: label,
+            cls: "vault-coach-mode-option",
+            attr: {
+                type: "button",
+                "data-mode": mode,
+                "aria-pressed": String(this.activeInteractionMode === mode),
+            },
+        });
+
+        if (this.activeInteractionMode === mode) {
+            buttonEl.addClass("is-active");
+        }
+
+        buttonEl.addEventListener("click", () => {
+            this.activeInteractionMode = mode;
+            const optionEls: NodeListOf<Element> = containerEl.querySelectorAll(".vault-coach-mode-option");
+            for (let index = 0; index < optionEls.length; index += 1) {
+                const optionEl: Element | null = optionEls.item(index);
+                if (!(optionEl instanceof HTMLButtonElement)) {
+                    continue;
+                }
+
+                const isActive: boolean = optionEl.getAttribute("data-mode") === mode;
+                optionEl.classList.toggle("is-active", isActive);
+                optionEl.setAttribute("aria-pressed", String(isActive));
+            }
+        });
+    }
+
+    private renderHeaderStat(containerEl: HTMLDivElement, label: string, value: string): void {
+        const itemEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-header-stat" });
+        itemEl.createDiv({
+            cls: "vault-coach-header-stat-label",
+            text: label,
+        });
+        itemEl.createDiv({
+            cls: "vault-coach-header-stat-value",
+            text: value,
         });
     }
 
@@ -201,7 +249,7 @@ export class VaultCoachView extends ItemView {
         this.inputEl = inputAreaEl.createEl("textarea", {
             cls: "vault-coach-input",
             attr: {
-                placeholder: "请输入你的问题，按 Enter 发送, Shift + Enter 换行",
+                placeholder: this.t("view.inputPlaceholder"),
                 rows: "4",
             },
         });
@@ -209,12 +257,12 @@ export class VaultCoachView extends ItemView {
         const buttonRowEl: HTMLDivElement = inputAreaEl.createDiv({ cls: "vault-coach-button-row"});
 
         this.sendButtonEl = buttonRowEl.createEl("button", {
-            text: "Send",
+            text: this.t("view.send"),
             cls: "mod-cta",
         });
 
         const clearButtonEl: HTMLButtonElement = buttonRowEl.createEl("button", {
-            text: "Clear",
+            text: this.t("view.clear"),
         });
 
         this.sendButtonEl.addEventListener("click", () => {
@@ -276,7 +324,7 @@ export class VaultCoachView extends ItemView {
             const emptyStateEl: HTMLDivElement = this.messageListEl.createDiv({
                 cls: "vault-coach-empty-state",
             });
-            emptyStateEl.setText("No messages yet");
+            emptyStateEl.setText(this.t("view.noMessages"));
             return;
         }
 
@@ -309,7 +357,7 @@ export class VaultCoachView extends ItemView {
             cls: "vault-coach-message-meta",
         });
         metaEl.setText(
-            `${message.role === "user" ? "you" : this.plugin.settings.assistantName}` +
+            `${message.role === "user" ? this.t("view.you") : this.plugin.settings.assistantName}` +
             ` · ${this.formatTime(message.createdAt)}`
         );
 
@@ -352,7 +400,7 @@ export class VaultCoachView extends ItemView {
         }
 
         detailsEl.createEl("summary", {
-            text: `Sources: ${sources.length}`,
+            text: this.t("view.sources", { count: sources.length }),
         });
 
         const sourcePath: string = this.app.workspace.getActiveFile()?.path ?? "";
@@ -384,7 +432,7 @@ export class VaultCoachView extends ItemView {
         try {
             await MarkdownRenderer.render(this.app, safeMarkdown, containerEl, sourcePath, this);
         } catch (error: unknown) {
-            console.error("[VaultCoachView] 来源 Markdown 渲染失败，已回退到纯文本。", error);
+            console.error(this.t("view.sourceMarkdownFallback"), error);
             containerEl.empty();
             containerEl.setText(markdown);
         }
@@ -436,7 +484,7 @@ export class VaultCoachView extends ItemView {
 
         thinkingEl.createSpan({
             cls: "vault-coach-thinking-text",
-            text: "思考中",
+            text: this.t("view.thinking"),
         });
 
         const dotsEl: HTMLSpanElement = thinkingEl.createSpan({
@@ -530,7 +578,7 @@ export class VaultCoachView extends ItemView {
         } catch (error: unknown) {
             console.error("[VaultCoachView] 发送消息失败", error);
             this.clearStreamingAssistantBubble();
-            new Notice(`发送失败：${this.createShortErrorMessage(error)}`);
+            new Notice(this.t("view.sendFailed", { message: this.createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.sendButtonEl.disabled = false;
