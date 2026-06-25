@@ -7,7 +7,7 @@ Vault Coach 是一个运行在 [Obsidian](https://obsidian.md) 中的知识库�
 插件默认走本地 [Ollama](https://ollama.com)，也支持用户显式配置 OpenAI-compatible 的云端或自托管模型服务。
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.2.2-1E90FF)
+![Version](https://img.shields.io/badge/version-1.2.3-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)

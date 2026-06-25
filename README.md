@@ -5,7 +5,7 @@
 Vault Coach is an [Obsidian](https://obsidian.md) plugin for asking questions over your Markdown vault with RAG (Retrieval-Augmented Generation). It is local-first with [Ollama](https://ollama.com), and can also use user-configured OpenAI-compatible cloud services for chat and embeddings.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.2.2-1E90FF)
+![Version](https://img.shields.io/badge/version-1.2.3-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
