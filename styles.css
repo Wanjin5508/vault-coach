@@ -72,9 +72,21 @@
     gap: 6px;
 }
 
+.vault-coach-message-wrapper.assistant {
+    align-items: flex-start;
+}
+
+.vault-coach-message-wrapper.user {
+    align-items: flex-end;
+}
+
 .vault-coach-message-meta {
     font-size: var(--font-ui-smaller);
     color: var(--text-muted);
+}
+
+.vault-coach-message-wrapper.user .vault-coach-message-meta {
+    text-align: right;
 }
 
 .vault-coach-message-bubble {
@@ -83,10 +95,22 @@
     padding: 12px;
     background: var(--background-primary-alt);
     overflow-x: auto;
+    max-width: min(88%, 720px);
 }
 
 .vault-coach-message-wrapper.user .vault-coach-message-bubble {
-    background: var(--background-primary);
+    border-color: var(--interactive-accent);
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.vault-coach-message-wrapper.user .vault-coach-message-bubble a,
+.vault-coach-message-wrapper.user .vault-coach-message-bubble code {
+    color: var(--text-on-accent);
+}
+
+.vault-coach-message-wrapper.user .vault-coach-message-bubble code {
+    background: rgba(255, 255, 255, 0.16);
 }
 
 .vault-coach-message-bubble > :first-child {
@@ -120,10 +144,24 @@
     align-self: flex-start;
 }
 
+.vault-coach-source-link-markdown,
+.vault-coach-source-link-markdown p {
+    display: inline;
+    margin: 0;
+}
+
 .vault-coach-source-excerpt {
     font-size: var(--font-ui-small);
     color: var(--text-muted);
     line-height: 1.5;
+}
+
+.vault-coach-source-excerpt > :first-child {
+    margin-top: 0;
+}
+
+.vault-coach-source-excerpt > :last-child {
+    margin-bottom: 0;
 }
 
 .vault-coach-input-area {

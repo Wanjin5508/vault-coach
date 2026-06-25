@@ -32,6 +32,9 @@ export class VaultCoachView extends ItemView {
     // 当前是否正等待插件完成检索回复
     private isBusy = false;
 
+    // 中文/日文等输入法正在组词时，Enter 应交给输入法确认候选词，而不是发送消息。
+    private isComposingInput = false;
+
     // 新增：回答流式输出期间使用的临时助手气泡。
     private streamingWrapperEl: HTMLDivElement | null = null;
     private streamingBubbleEl: HTMLDivElement | null = null;
@@ -223,12 +226,34 @@ export class VaultCoachView extends ItemView {
             this.focusInput();
         });
 
+        this.inputEl.addEventListener("compositionstart", () => {
+            this.isComposingInput = true;
+        });
+
+        this.inputEl.addEventListener("compositionend", () => {
+            this.isComposingInput = false;
+        });
+
         this.inputEl.addEventListener("keydown", (event: KeyboardEvent) => {
+            if (this.shouldLetInputMethodHandleKey(event)) {
+                return;
+            }
+
             if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 void this.handleSend();
             }
         });
+    }
+
+    private shouldLetInputMethodHandleKey(event: KeyboardEvent): boolean {
+        return this.isComposingInput || event.isComposing || this.getLegacyKeyCode(event) === 229;
+    }
+
+    private getLegacyKeyCode(event: KeyboardEvent): number | null {
+        const eventRecord: Record<string, unknown> = event as unknown as Record<string, unknown>;
+        const keyCode: unknown = eventRecord["keyCode"];
+        return typeof keyCode === "number" ? keyCode : null;
     }
 
     /**
@@ -305,7 +330,7 @@ export class VaultCoachView extends ItemView {
 
         // 如果是助手消息，并且携带来源，则在下方渲染折叠来源区域
         if (message.role == "assistant" && message.sources && message.sources.length > 0) {
-            this.renderSources(wrapperEl, message.sources);
+            await this.renderSources(wrapperEl, message.sources);
         }
 
 
@@ -317,7 +342,7 @@ export class VaultCoachView extends ItemView {
      * 这里故意没有使用 block id 或段落定位，
      * 而是仅仅使用“文件路径 + heading”的形式，符合当前阶段的要求。
      */
-    private renderSources(wrapperEl: HTMLDivElement, sources: AnswerSource[]): void {
+    private async renderSources(wrapperEl: HTMLDivElement, sources: AnswerSource[]): Promise<void> {
         const detailsEl: HTMLDetailsElement = wrapperEl.createEl("details", {
             cls: "vault-coach-source-details",
         });
@@ -330,22 +355,45 @@ export class VaultCoachView extends ItemView {
             text: `Sources: ${sources.length}`,
         });
 
+        const sourcePath: string = this.app.workspace.getActiveFile()?.path ?? "";
         for (const source of sources){
             const itemEl: HTMLDivElement = detailsEl.createDiv({ cls: "vault-coach-source-item"});
             const linkButtonEl: HTMLButtonElement = itemEl.createEl("button", {
                 cls: "vault-coach-source-link",
-                text: source.displayLink,
             });
+            const linkMarkdownEl: HTMLSpanElement = linkButtonEl.createSpan({
+                cls: "vault-coach-source-link-markdown markdown-rendered",
+            });
+            await this.renderSourceMarkdown(source.displayLink, linkMarkdownEl, sourcePath);
 
             linkButtonEl.addEventListener("click", () => {
                 void this.plugin.openSource(source);
             });
 
-            itemEl.createDiv({
+            const excerptEl: HTMLDivElement = itemEl.createDiv({
                 cls: "vault-coach-source-excerpt",
-                text: source.excerpt,
             });
+            excerptEl.addClass("markdown-rendered");
+            await this.renderSourceMarkdown(source.excerpt, excerptEl, sourcePath);
         }
+    }
+
+    private async renderSourceMarkdown(markdown: string, containerEl: HTMLElement, sourcePath: string): Promise<void> {
+        const safeMarkdown: string = this.sanitizeSourceMarkdown(markdown);
+
+        try {
+            await MarkdownRenderer.render(this.app, safeMarkdown, containerEl, sourcePath, this);
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 来源 Markdown 渲染失败，已回退到纯文本。", error);
+            containerEl.empty();
+            containerEl.setText(markdown);
+        }
+    }
+
+    private sanitizeSourceMarkdown(markdown: string): string {
+        return markdown
+            .replace(/```[ \t]*mermaid\b/gi, "```text")
+            .replace(/~~~[ \t]*mermaid\b/gi, "~~~text");
     }
 
     // 新增：创建一个临时助手气泡；真正 token 到达前显示“思考中”动画。
@@ -548,4 +596,3 @@ export class VaultCoachView extends ItemView {
     }
 
 }
-
