@@ -203,7 +203,7 @@ export class VaultCoachView extends ItemView {
             const optionEls: NodeListOf<Element> = containerEl.querySelectorAll(".vault-coach-mode-option");
             for (let index = 0; index < optionEls.length; index += 1) {
                 const optionEl: Element | null = optionEls.item(index);
-                if (!(optionEl instanceof HTMLButtonElement)) {
+                if (!optionEl.instanceOf(HTMLButtonElement)) {
                     continue;
                 }
 

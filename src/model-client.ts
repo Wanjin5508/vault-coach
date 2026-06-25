@@ -768,8 +768,7 @@ export class LocalModelClient {
     ): Promise<Response> {
         try {
             // requestUrl returns a buffered response; fetch is required here so the UI can receive tokens as they arrive.
-            // eslint-disable-next-line no-restricted-globals
-            const response: Response = await fetch(targetUrl, {
+            const response: Response = await window.fetch(targetUrl, {
                 method: "POST",
                 body: JSON.stringify(payload),
                 headers: {
