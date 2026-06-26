@@ -294,6 +294,14 @@ export class LocalModelClient {
         });
     }
 
+    async generateJsonAnswer(messages: LocalChatMessage[], temperature: number): Promise<string> {
+        return this.chat({
+            messages,
+            temperature,
+            format: "json",
+        });
+    }
+
     async streamMarkdownAnswer(
         messages: LocalChatMessage[],
         temperature: number,

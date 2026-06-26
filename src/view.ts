@@ -2,11 +2,23 @@
 
 import { ItemView, WorkspaceLeaf, Notice, MarkdownRenderer } from "obsidian";
 import type VaultCoach  from "./main";
-import type { ChatMessage, AnswerSource, KnowledgeBaseStats, RetrievalMode, VectorIndexStats } from "./types";
+import type {
+    AnswerSource,
+    ChatMessage,
+    ExamEvaluationItem,
+    ExamHistoryItem,
+    ExamQuestion,
+    ExamScopeOption,
+    ExamSession,
+    KnowledgeBaseStats,
+    RetrievalMode,
+    VectorIndexStats,
+} from "./types";
 import { VIEW_NAME_VAULT_COACH, VIEW_TYPE_VAULT_COACH } from "./constants";
 import { translate, type TranslationKey } from "./i18n";
 
 type InteractionMode = "qa" | "exam";
+type ExamViewPhase = "setup" | "generating" | "taking" | "evaluating" | "review" | "history";
 
 /**
  * VaultCoachView 是一个自定义 ItemView。它不会像 Modal 那样弹窗，而是被放进 Obsidian 右侧边栏中。
@@ -37,6 +49,16 @@ export class VaultCoachView extends ItemView {
 
     // 仅用于前端展示的模式切换；后台考试逻辑后续再接入。
     private activeInteractionMode: InteractionMode = "qa";
+
+    private examPhase: ExamViewPhase = "setup";
+    private examSession: ExamSession | null = null;
+    private selectedExamScopeIds: Set<string> = new Set<string>(["__all__"]);
+    private examQuestionCount = 5;
+    private examAnswerEls: HTMLTextAreaElement[] = [];
+    private examExportFolderPath = "VaultCoach Exams";
+    private examHistoryItems: ExamHistoryItem[] = [];
+    private selectedExamHistoryPath: string | null = null;
+    private selectedExamHistoryContent = "";
 
     // 中文/日文等输入法正在组词时，Enter 应交给输入法确认候选词，而不是发送消息。
     private isComposingInput = false;
@@ -101,6 +123,12 @@ export class VaultCoachView extends ItemView {
         // 最外层根容器
         const rootEl: HTMLDivElement = contentEl.createDiv({ cls: "vault-coach-root"});
         this.renderHeader(rootEl);
+
+        if (this.activeInteractionMode === "exam") {
+            this.renderExamArea(rootEl);
+            return;
+        }
+
         this.renderMessageArea(rootEl);
         this.renderInputArea(rootEl);
     }
@@ -139,6 +167,19 @@ export class VaultCoachView extends ItemView {
 
         const toolbarEl: HTMLDivElement = headerEl.createDiv({ cls: "vault-coach-toolbar" });
 
+        if (this.activeInteractionMode === "qa") {
+            this.renderQaToolbar(toolbarEl);
+        }
+
+        const rebuildButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
+            text: this.t("view.rebuildIndex"),
+        });
+        rebuildButtonEl.addEventListener("click", () => {
+            void this.handleRebuildIndex();
+        });
+    }
+
+    private renderQaToolbar(toolbarEl: HTMLDivElement): void {
         const retrievalGroupEl: HTMLDivElement = toolbarEl.createDiv({ cls: "vault-coach-retrieval-group"});
         retrievalGroupEl.createSpan({text: `${this.t("view.retrievalModeLabel")} `});
         this.retrievalModeSelectEl = retrievalGroupEl.createEl("select");
@@ -151,13 +192,6 @@ export class VaultCoachView extends ItemView {
             if (value === "keyword" || value === "vector" || value === "hybrid" ) {
                 this.plugin.setRuntimeRetrievalMode(value);
             }
-        });
-
-        const rebuildButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
-            text: this.t("view.rebuildIndex"),
-        });
-        rebuildButtonEl.addEventListener("click", () => {
-            void this.handleRebuildIndex();
         });
 
         const resetButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
@@ -199,18 +233,12 @@ export class VaultCoachView extends ItemView {
         }
 
         buttonEl.addEventListener("click", () => {
-            this.activeInteractionMode = mode;
-            const optionEls: NodeListOf<Element> = containerEl.querySelectorAll(".vault-coach-mode-option");
-            for (let index = 0; index < optionEls.length; index += 1) {
-                const optionEl: Element | null = optionEls.item(index);
-                if (!optionEl.instanceOf(HTMLButtonElement)) {
-                    continue;
-                }
-
-                const isActive: boolean = optionEl.getAttribute("data-mode") === mode;
-                optionEl.classList.toggle("is-active", isActive);
-                optionEl.setAttribute("aria-pressed", String(isActive));
+            if (this.activeInteractionMode === mode) {
+                return;
             }
+
+            this.activeInteractionMode = mode;
+            this.render();
         });
     }
 
@@ -230,6 +258,484 @@ export class VaultCoachView extends ItemView {
         const optionEl: HTMLOptionElement = this.retrievalModeSelectEl.createEl("option");
         optionEl.value = value;
         optionEl.text = label;
+    }
+
+    private renderExamArea(rootEl: HTMLDivElement): void {
+        const examAreaEl: HTMLDivElement = rootEl.createDiv({ cls: "vault-coach-exam-area" });
+
+        if (this.examPhase === "history") {
+            this.renderExamHistory(examAreaEl);
+            return;
+        }
+
+        if (this.examPhase === "generating") {
+            this.renderExamBusyState(examAreaEl, this.t("exam.generating"));
+            return;
+        }
+
+        if (this.examPhase === "evaluating") {
+            this.renderExamBusyState(examAreaEl, this.t("exam.evaluating"));
+            return;
+        }
+
+        if (!this.examSession) {
+            this.renderExamSetup(examAreaEl);
+            return;
+        }
+
+        if (this.examPhase === "taking" || this.examSession.status === "draft") {
+            this.renderExamTaking(examAreaEl, this.examSession);
+            return;
+        }
+
+        this.renderExamReview(examAreaEl, this.examSession);
+    }
+
+    private renderExamSetup(containerEl: HTMLDivElement): void {
+        const panelEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-panel" });
+        panelEl.createEl("h4", { text: this.t("exam.setup.title") });
+        panelEl.createEl("p", { text: this.t("exam.setup.desc"), cls: "vault-coach-exam-description" });
+
+        const scopeOptions: ExamScopeOption[] = this.plugin.getExamScopeOptions();
+        const allScopeOption: ExamScopeOption | undefined = scopeOptions[0];
+
+        if (!allScopeOption || allScopeOption.chunkCount === 0) {
+            const emptyEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-empty" });
+            emptyEl.createDiv({ cls: "vault-coach-exam-empty-title", text: this.t("exam.emptyKnowledge.title") });
+            emptyEl.createDiv({ cls: "vault-coach-exam-empty-description", text: this.t("exam.emptyKnowledge.desc") });
+            const historyButtonEl: HTMLButtonElement = emptyEl.createEl("button", {
+                text: this.t("exam.history"),
+            });
+            historyButtonEl.disabled = this.isBusy;
+            historyButtonEl.addEventListener("click", () => {
+                void this.handleShowExamHistory();
+            });
+            return;
+        }
+
+        const scopeSectionEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-section" });
+        scopeSectionEl.createDiv({ cls: "vault-coach-exam-section-title", text: this.t("exam.scope.title") });
+
+        const scopeListEl: HTMLDivElement = scopeSectionEl.createDiv({ cls: "vault-coach-exam-scope-list" });
+        this.renderExamScopeOption(scopeListEl, allScopeOption, true);
+
+        const folderOptions: ExamScopeOption[] = scopeOptions.slice(1);
+        if (folderOptions.length === 0) {
+            scopeListEl.createDiv({
+                cls: "vault-coach-exam-muted",
+                text: this.t("exam.scope.noFolders"),
+            });
+        } else {
+            scopeListEl.createDiv({
+                cls: "vault-coach-exam-subtitle",
+                text: this.t("exam.scope.folders"),
+            });
+
+            for (const option of folderOptions) {
+                this.renderExamScopeOption(scopeListEl, option, false);
+            }
+        }
+
+        const countSectionEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-section vault-coach-exam-count-row" });
+        countSectionEl.createSpan({ text: this.t("exam.questionCount") });
+        const countInputEl: HTMLInputElement = countSectionEl.createEl("input");
+        countInputEl.type = "number";
+        countInputEl.min = "1";
+        countInputEl.max = "10";
+        countInputEl.step = "1";
+        countInputEl.value = String(this.examQuestionCount);
+        countInputEl.addEventListener("change", () => {
+            this.examQuestionCount = this.normalizeQuestionCount(countInputEl.value);
+            countInputEl.value = String(this.examQuestionCount);
+        });
+
+        const actionRowEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-actions" });
+        const startButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+            text: this.t("exam.start"),
+            cls: "mod-cta",
+        });
+        startButtonEl.disabled = this.isBusy || !this.hasExamScopeSelection(scopeOptions);
+        startButtonEl.addEventListener("click", () => {
+            void this.handleCreateExam();
+        });
+
+        const historyButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+            text: this.t("exam.history"),
+        });
+        historyButtonEl.disabled = this.isBusy;
+        historyButtonEl.addEventListener("click", () => {
+            void this.handleShowExamHistory();
+        });
+    }
+
+    private renderExamScopeOption(containerEl: HTMLDivElement, option: ExamScopeOption, isAllOption: boolean): void {
+        const optionEl: HTMLLabelElement = containerEl.createEl("label", {
+            cls: "vault-coach-exam-scope-option",
+        });
+
+        const checkboxEl: HTMLInputElement = optionEl.createEl("input");
+        checkboxEl.type = "checkbox";
+        checkboxEl.checked = isAllOption
+            ? this.selectedExamScopeIds.has("__all__")
+            : this.selectedExamScopeIds.has(option.id);
+
+        if (checkboxEl.checked) {
+            optionEl.addClass("is-selected");
+        }
+
+        const textEl: HTMLSpanElement = optionEl.createSpan({ cls: "vault-coach-exam-scope-text" });
+        textEl.createSpan({
+            cls: "vault-coach-exam-scope-label",
+            text: isAllOption ? this.t("exam.scope.all") : option.label,
+        });
+        textEl.createSpan({
+            cls: "vault-coach-exam-scope-meta",
+            text: this.t("exam.scope.meta", {
+                fileCount: option.fileCount,
+                chunkCount: option.chunkCount,
+            }),
+        });
+
+        checkboxEl.addEventListener("change", () => {
+            if (isAllOption) {
+                if (checkboxEl.checked) {
+                    this.selectedExamScopeIds = new Set<string>(["__all__"]);
+                } else {
+                    this.selectedExamScopeIds.delete("__all__");
+                }
+                this.render();
+                return;
+            }
+
+            this.selectedExamScopeIds.delete("__all__");
+            if (checkboxEl.checked) {
+                this.selectedExamScopeIds.add(option.id);
+            } else {
+                this.selectedExamScopeIds.delete(option.id);
+            }
+
+            this.render();
+        });
+    }
+
+    private renderExamBusyState(containerEl: HTMLDivElement, label: string): void {
+        const panelEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-panel vault-coach-exam-busy" });
+        const thinkingEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-thinking-indicator" });
+        thinkingEl.createSpan({
+            cls: "vault-coach-thinking-spinner",
+            attr: { "aria-hidden": "true" },
+        });
+        thinkingEl.createSpan({
+            cls: "vault-coach-thinking-text",
+            text: label,
+        });
+        const dotsEl: HTMLSpanElement = thinkingEl.createSpan({
+            cls: "vault-coach-thinking-dots",
+            attr: { "aria-hidden": "true" },
+        });
+
+        for (let index = 0; index < 3; index += 1) {
+            dotsEl.createSpan({ cls: "vault-coach-thinking-dot", text: "." });
+        }
+    }
+
+    private renderExamTaking(containerEl: HTMLDivElement, session: ExamSession): void {
+        this.examAnswerEls = [];
+
+        const panelEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-panel" });
+        const titleRowEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-title-row" });
+        titleRowEl.createEl("h4", { text: session.title });
+        titleRowEl.createSpan({
+            cls: "vault-coach-exam-badge",
+            text: session.scopeLabel,
+        });
+        panelEl.createEl("p", { text: this.t("exam.taking.desc"), cls: "vault-coach-exam-description" });
+
+        session.questions.forEach((question: ExamQuestion, index: number) => {
+            const questionEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-question" });
+            questionEl.createDiv({
+                cls: "vault-coach-exam-question-title",
+                text: `${index + 1}. ${question.question}`,
+            });
+
+            const answerEl: HTMLTextAreaElement = questionEl.createEl("textarea", {
+                cls: "vault-coach-exam-answer-input",
+                attr: {
+                    placeholder: this.t("exam.answerPlaceholder"),
+                    rows: "5",
+                },
+            });
+            answerEl.value = session.userAnswers[index] ?? "";
+            answerEl.addEventListener("input", () => {
+                if (!this.examSession) {
+                    return;
+                }
+
+                const nextAnswers: string[] = [...this.examSession.userAnswers];
+                nextAnswers[index] = answerEl.value;
+                this.examSession = {
+                    ...this.examSession,
+                    userAnswers: nextAnswers,
+                };
+            });
+            this.examAnswerEls.push(answerEl);
+        });
+
+        const actionRowEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-actions" });
+        const submitButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+            text: this.t("exam.submit"),
+            cls: "mod-cta",
+        });
+        submitButtonEl.disabled = this.isBusy;
+        submitButtonEl.addEventListener("click", () => {
+            void this.handleSubmitExam();
+        });
+
+        const deleteButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+            text: this.t("exam.delete"),
+        });
+        deleteButtonEl.disabled = this.isBusy;
+        deleteButtonEl.addEventListener("click", () => {
+            void this.handleDeleteExam();
+        });
+    }
+
+    private renderExamReview(containerEl: HTMLDivElement, session: ExamSession): void {
+        const evaluation = session.evaluation;
+        if (!evaluation) {
+            this.renderExamTaking(containerEl, session);
+            return;
+        }
+
+        const panelEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-panel" });
+        const titleRowEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-title-row" });
+        titleRowEl.createEl("h4", { text: this.t("exam.review.title") });
+        titleRowEl.createSpan({
+            cls: "vault-coach-exam-badge",
+            text: session.title,
+        });
+
+        const scoreEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-score-card" });
+        scoreEl.createDiv({
+            cls: "vault-coach-exam-score-value",
+            text: `${evaluation.score} / ${evaluation.maxScore}`,
+        });
+        scoreEl.createDiv({
+            cls: "vault-coach-exam-score-label",
+            text: this.t("exam.score"),
+        });
+
+        this.renderExamReviewBlock(panelEl, this.t("exam.overallFeedback"), evaluation.overallFeedback);
+
+        session.questions.forEach((question: ExamQuestion, index: number) => {
+            const item: ExamEvaluationItem | undefined = evaluation.items.find((evaluationItem: ExamEvaluationItem) => {
+                return evaluationItem.questionId === question.id;
+            });
+
+            const questionEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-question vault-coach-exam-question-review" });
+            questionEl.createDiv({
+                cls: "vault-coach-exam-question-title",
+                text: `${index + 1}. ${question.question}`,
+            });
+
+            if (item) {
+                questionEl.createDiv({
+                    cls: `vault-coach-exam-question-score ${this.getExamScoreClass(item.score)}`,
+                    text: `${this.t("exam.score")}: ${item.score} / ${item.maxScore}`,
+                });
+            }
+
+            this.renderExamReviewBlock(questionEl, this.t("exam.userAnswer"), session.userAnswers[index]?.trim() || this.t("exam.unanswered"));
+            this.renderExamReviewBlock(questionEl, this.t("exam.referenceAnswer"), question.referenceAnswer);
+            this.renderExamReviewBlock(questionEl, this.t("exam.rubric"), question.rubric);
+
+            if (item) {
+                this.renderExamReviewBlock(questionEl, this.t("exam.feedback"), item.feedback);
+                this.renderExamReviewBlock(questionEl, this.t("exam.improvement"), item.improvement);
+            }
+
+            if (question.sourcePaths.length > 0) {
+                const sourceEl: HTMLDivElement = questionEl.createDiv({ cls: "vault-coach-exam-review-block" });
+                sourceEl.createEl("strong", { cls: "vault-coach-exam-review-label", text: this.t("exam.sourcePaths") });
+                const listEl: HTMLUListElement = sourceEl.createEl("ul", { cls: "vault-coach-exam-source-list" });
+                for (const sourcePath of question.sourcePaths) {
+                    const itemEl: HTMLLIElement = listEl.createEl("li");
+                    const sourceButtonEl: HTMLButtonElement = itemEl.createEl("button", {
+                        cls: "vault-coach-exam-source-link",
+                        text: sourcePath,
+                    });
+                    sourceButtonEl.addEventListener("click", () => {
+                        void this.openExamSourcePath(sourcePath);
+                    });
+                }
+            }
+        });
+
+        if (session.savedPath) {
+            panelEl.createDiv({
+                cls: "vault-coach-exam-saved-path",
+                text: this.t("exam.savedPath", { path: session.savedPath }),
+            });
+        }
+
+        const exportEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-export" });
+        exportEl.createDiv({ cls: "vault-coach-exam-section-title", text: this.t("exam.export.title") });
+        exportEl.createDiv({ cls: "vault-coach-exam-description", text: this.t("exam.export.desc") });
+        const exportRowEl: HTMLDivElement = exportEl.createDiv({ cls: "vault-coach-exam-export-row" });
+        const exportInputEl: HTMLInputElement = exportRowEl.createEl("input", {
+            attr: {
+                type: "text",
+                placeholder: this.t("exam.export.placeholder"),
+            },
+        });
+        exportInputEl.value = this.examExportFolderPath;
+        exportInputEl.addEventListener("input", () => {
+            this.examExportFolderPath = exportInputEl.value;
+        });
+        const exportButtonEl: HTMLButtonElement = exportRowEl.createEl("button", {
+            text: this.t("exam.export.button"),
+        });
+        exportButtonEl.disabled = this.isBusy;
+        exportButtonEl.addEventListener("click", () => {
+            void this.handleExportExam();
+        });
+
+        const actionRowEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-actions" });
+        const historyButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+            text: this.t("exam.history"),
+        });
+        historyButtonEl.disabled = this.isBusy;
+        historyButtonEl.addEventListener("click", () => {
+            void this.handleShowExamHistory();
+        });
+
+        const deleteButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+            text: this.t("exam.delete"),
+        });
+        deleteButtonEl.disabled = this.isBusy;
+        deleteButtonEl.addEventListener("click", () => {
+            void this.handleDeleteExam();
+        });
+
+        const newButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+            text: this.t("exam.newTest"),
+        });
+        newButtonEl.disabled = this.isBusy;
+        newButtonEl.addEventListener("click", () => {
+            this.resetExamSession();
+            this.render();
+        });
+    }
+
+    private renderExamHistory(containerEl: HTMLDivElement): void {
+        const panelEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-panel" });
+        const titleRowEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-title-row" });
+        titleRowEl.createEl("h4", { text: this.t("exam.history.title") });
+        const backButtonEl: HTMLButtonElement = titleRowEl.createEl("button", {
+            text: this.t("exam.history.back"),
+        });
+        backButtonEl.addEventListener("click", () => {
+            this.returnFromExamHistory();
+        });
+
+        if (this.isBusy) {
+            this.renderExamBusyState(panelEl, this.t("exam.history.loading"));
+            return;
+        }
+
+        if (this.examHistoryItems.length === 0) {
+            panelEl.createDiv({
+                cls: "vault-coach-exam-empty-description",
+                text: this.t("exam.history.empty"),
+            });
+            return;
+        }
+
+        const historyLayoutEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-history-layout" });
+        const listEl: HTMLDivElement = historyLayoutEl.createDiv({ cls: "vault-coach-exam-history-list" });
+
+        for (const item of this.examHistoryItems) {
+            const itemEl: HTMLDivElement = listEl.createDiv({
+                cls: `vault-coach-exam-history-item ${item.path === this.selectedExamHistoryPath ? "is-selected" : ""}`,
+            });
+
+            const buttonEl: HTMLButtonElement = itemEl.createEl("button", {
+                cls: "vault-coach-exam-history-main",
+            });
+            buttonEl.createSpan({ cls: "vault-coach-exam-history-title", text: item.title });
+            buttonEl.createSpan({ cls: "vault-coach-exam-history-meta", text: this.formatExamHistoryMeta(item) });
+            buttonEl.addEventListener("click", () => {
+                void this.handleLoadExamHistoryContent(item.path);
+            });
+
+            const deleteButtonEl: HTMLButtonElement = itemEl.createEl("button", {
+                cls: "vault-coach-exam-history-delete",
+                text: this.t("exam.history.delete"),
+            });
+            deleteButtonEl.addEventListener("click", () => {
+                void this.handleDeleteExamHistory(item.path);
+            });
+        }
+
+        const detailEl: HTMLDivElement = historyLayoutEl.createDiv({ cls: "vault-coach-exam-history-detail markdown-rendered" });
+        if (this.selectedExamHistoryContent.length === 0) {
+            detailEl.createDiv({
+                cls: "vault-coach-exam-muted",
+                text: this.t("exam.history.select"),
+            });
+            return;
+        }
+
+        void this.renderExamHistoryMarkdown(detailEl, this.selectedExamHistoryContent);
+    }
+
+    private async renderExamHistoryMarkdown(containerEl: HTMLElement, markdown: string): Promise<void> {
+        containerEl.empty();
+        try {
+            await MarkdownRenderer.render(this.app, markdown, containerEl, "", this);
+            this.bindExamHistoryInternalLinks(containerEl);
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 考试历史 Markdown 渲染失败", error);
+            containerEl.setText(markdown);
+        }
+    }
+
+    private bindExamHistoryInternalLinks(containerEl: HTMLElement): void {
+        containerEl.addEventListener("click", (event: MouseEvent) => {
+            const targetEl: Element | null = this.getEventTargetElement(event.target);
+            const linkEl: Element | null = targetEl?.closest(".internal-link") ?? null;
+            if (!linkEl) {
+                return;
+            }
+
+            const rawLinkTarget: string = linkEl.getAttribute("data-href")
+                ?? linkEl.getAttribute("href")
+                ?? linkEl.textContent
+                ?? "";
+            const normalizedLinkTarget: string = this.normalizeExamSourcePath(rawLinkTarget);
+            if (normalizedLinkTarget.length === 0) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            void this.openExamSourcePath(normalizedLinkTarget);
+        });
+    }
+
+    private getEventTargetElement(target: EventTarget | null): Element | null {
+        if (!target) {
+            return null;
+        }
+
+        const nodeLikeTarget: Partial<Node> = target as Partial<Node>;
+        return nodeLikeTarget.nodeType === Node.ELEMENT_NODE ? target as Element : null;
+    }
+
+    private renderExamReviewBlock(containerEl: HTMLElement, label: string, text: string): void {
+        const blockEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-review-block" });
+        blockEl.createEl("strong", { cls: "vault-coach-exam-review-label", text: label });
+        blockEl.createDiv({ cls: "vault-coach-exam-review-text", text });
     }
 
     /**
@@ -529,6 +1035,271 @@ export class VaultCoachView extends ItemView {
         this.streamingText = "";
     }
 
+    private async handleCreateExam(): Promise<void> {
+        if (this.isBusy) {
+            return;
+        }
+
+        this.isBusy = true;
+        this.examPhase = "generating";
+        this.examSession = null;
+        this.render();
+
+        try {
+            const selectedFolderPaths: string[] = this.getSelectedExamFolderPaths();
+            const session: ExamSession = await this.plugin.createExamSession(
+                selectedFolderPaths,
+                this.examQuestionCount,
+            );
+            this.examSession = session;
+            this.examPhase = "taking";
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 创建考试失败", error);
+            this.examPhase = "setup";
+            new Notice(this.t("exam.notice.createFailed", { message: this.createShortErrorMessage(error) }));
+        } finally {
+            this.isBusy = false;
+            this.render();
+        }
+    }
+
+    private async handleSubmitExam(): Promise<void> {
+        if (this.isBusy || !this.examSession) {
+            return;
+        }
+
+        const answers: string[] = this.examAnswerEls.map((answerEl: HTMLTextAreaElement) => answerEl.value);
+        this.examSession = {
+            ...this.examSession,
+            userAnswers: this.examSession.questions.map((_question: ExamQuestion, index: number) => answers[index] ?? ""),
+        };
+        this.isBusy = true;
+        this.examPhase = "evaluating";
+        this.render();
+
+        try {
+            const evaluatedSession: ExamSession = await this.plugin.evaluateExamSession(this.examSession, this.examSession.userAnswers);
+            this.examSession = evaluatedSession;
+            try {
+                this.examSession = await this.plugin.saveExamSession(evaluatedSession);
+            } catch (saveError: unknown) {
+                console.error("[VaultCoachView] 自动保存考试结果失败", saveError);
+                new Notice(this.t("exam.notice.saveFailed", { message: this.createShortErrorMessage(saveError) }));
+            }
+            this.examPhase = "review";
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 考试评分失败", error);
+            this.examPhase = "taking";
+            new Notice(this.t("exam.notice.evaluateFailed", { message: this.createShortErrorMessage(error) }));
+        } finally {
+            this.isBusy = false;
+            this.render();
+        }
+    }
+
+    private async handleExportExam(): Promise<void> {
+        if (this.isBusy || !this.examSession) {
+            return;
+        }
+
+        this.isBusy = true;
+        try {
+            const exportPath: string = await this.plugin.exportExamSession(this.examSession, this.examExportFolderPath);
+            new Notice(this.t("exam.notice.exported", { path: exportPath }));
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 导出考试结果失败", error);
+            new Notice(this.t("exam.notice.exportFailed", { message: this.createShortErrorMessage(error) }));
+        } finally {
+            this.isBusy = false;
+            this.render();
+        }
+    }
+
+    private async handleShowExamHistory(): Promise<void> {
+        if (this.isBusy) {
+            return;
+        }
+
+        this.isBusy = true;
+        this.examPhase = "history";
+        this.selectedExamHistoryPath = null;
+        this.selectedExamHistoryContent = "";
+        this.render();
+
+        try {
+            this.examHistoryItems = await this.plugin.listExamHistory();
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 读取考试历史失败", error);
+            new Notice(this.t("exam.notice.historyFailed", { message: this.createShortErrorMessage(error) }));
+        } finally {
+            this.isBusy = false;
+            this.render();
+        }
+    }
+
+    private async handleLoadExamHistoryContent(path: string): Promise<void> {
+        if (this.isBusy) {
+            return;
+        }
+
+        this.isBusy = true;
+        this.selectedExamHistoryPath = path;
+        this.selectedExamHistoryContent = "";
+        this.render();
+
+        try {
+            this.selectedExamHistoryContent = await this.plugin.readExamHistoryContent(path);
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 读取考试历史内容失败", error);
+            new Notice(this.t("exam.notice.historyFailed", { message: this.createShortErrorMessage(error) }));
+        } finally {
+            this.isBusy = false;
+            this.render();
+        }
+    }
+
+    private async handleDeleteExamHistory(path: string): Promise<void> {
+        if (this.isBusy) {
+            return;
+        }
+
+        this.isBusy = true;
+        try {
+            await this.plugin.deleteExamHistory(path);
+            if (this.selectedExamHistoryPath === path) {
+                this.selectedExamHistoryPath = null;
+                this.selectedExamHistoryContent = "";
+            }
+            this.examHistoryItems = await this.plugin.listExamHistory();
+            new Notice(this.t("exam.notice.deleted"));
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 删除考试历史失败", error);
+            new Notice(this.t("exam.notice.deleteFailed", { message: this.createShortErrorMessage(error) }));
+        } finally {
+            this.isBusy = false;
+            this.render();
+        }
+    }
+
+    private async handleDeleteExam(): Promise<void> {
+        if (this.isBusy || !this.examSession) {
+            return;
+        }
+
+        this.isBusy = true;
+        try {
+            await this.plugin.deleteExamSession(this.examSession);
+            this.resetExamSession();
+            new Notice(this.t("exam.notice.deleted"));
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 删除考试失败", error);
+            new Notice(this.t("exam.notice.deleteFailed", { message: this.createShortErrorMessage(error) }));
+        } finally {
+            this.isBusy = false;
+            this.render();
+        }
+    }
+
+    private getSelectedExamFolderPaths(): string[] {
+        if (this.selectedExamScopeIds.has("__all__")) {
+            return [];
+        }
+
+        const selectedFolderPaths: string[] = [];
+        for (const option of this.plugin.getExamScopeOptions()) {
+            if (option.folderPath && this.selectedExamScopeIds.has(option.id)) {
+                selectedFolderPaths.push(option.folderPath);
+            }
+        }
+
+        return selectedFolderPaths;
+    }
+
+    private hasExamScopeSelection(scopeOptions: ExamScopeOption[]): boolean {
+        if (this.selectedExamScopeIds.has("__all__")) {
+            return true;
+        }
+
+        return scopeOptions.some((option: ExamScopeOption) => {
+            return option.folderPath !== null && this.selectedExamScopeIds.has(option.id);
+        });
+    }
+
+    private normalizeQuestionCount(value: string): number {
+        const parsedValue: number = Number.parseInt(value, 10);
+        if (!Number.isFinite(parsedValue)) {
+            return 5;
+        }
+
+        return Math.max(1, Math.min(10, parsedValue));
+    }
+
+    private resetExamSession(): void {
+        this.examSession = null;
+        this.examPhase = "setup";
+        this.examAnswerEls = [];
+    }
+
+    private returnFromExamHistory(): void {
+        if (!this.examSession) {
+            this.examPhase = "setup";
+        } else if (this.examSession.evaluation) {
+            this.examPhase = "review";
+        } else {
+            this.examPhase = "taking";
+        }
+
+        this.render();
+    }
+
+    private async openExamSourcePath(sourcePath: string): Promise<void> {
+        const normalizedSourcePath: string = this.normalizeExamSourcePath(sourcePath);
+        if (normalizedSourcePath.length === 0) {
+            return;
+        }
+
+        try {
+            const activeFilePath: string = this.app.workspace.getActiveFile()?.path ?? "";
+            await this.app.workspace.openLinkText(normalizedSourcePath, activeFilePath, false);
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 打开考试来源失败", error);
+            new Notice(this.t("exam.notice.openSourceFailed", { message: this.createShortErrorMessage(error) }));
+        }
+    }
+
+    private normalizeExamSourcePath(sourcePath: string): string {
+        return sourcePath
+            .trim()
+            .replace(/^obsidian:\/\/open\?/i, "")
+            .replace(/^#/, "")
+            .replace(/^\[\[/, "")
+            .replace(/\]\]$/, "")
+            .trim();
+    }
+
+    private getExamScoreClass(score: number): string {
+        if (score >= 85) {
+            return "is-good";
+        }
+
+        if (score >= 60) {
+            return "is-medium";
+        }
+
+        return "is-low";
+    }
+
+    private formatExamHistoryMeta(item: ExamHistoryItem): string {
+        const dateText: string = item.createdAt
+            ? this.formatDateTime(item.createdAt)
+            : this.t("exam.history.unknownDate");
+        const scoreText: string = item.score !== null && item.maxScore !== null
+            ? `${item.score} / ${item.maxScore}`
+            : this.t("exam.history.noScore");
+
+        return `${dateText} · ${scoreText}`;
+    }
+
 
     // 处理发送逻辑
     private async handleSend(): Promise<void> {
@@ -607,7 +1378,9 @@ export class VaultCoachView extends ItemView {
             this.isBusy = false;
             this.sendButtonEl?.removeAttribute("disabled");
             this.retrievalModeSelectEl?.removeAttribute("disabled");
-            this.focusInput();
+            if (this.activeInteractionMode === "qa") {
+                this.focusInput();
+            }
         }
     }
 
@@ -615,7 +1388,7 @@ export class VaultCoachView extends ItemView {
      * 聚焦输入框
      *  */ 
     private focusInput(): void {
-        this.inputEl.focus();
+        this.inputEl?.focus();
     }
 
     private scrollMessagesToBottom(): void {
@@ -629,6 +1402,16 @@ export class VaultCoachView extends ItemView {
         return new Date(timestamp).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit'
+        });
+    }
+
+    private formatDateTime(timestamp: number): string {
+        return new Date(timestamp).toLocaleString([], {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
         });
     }
 

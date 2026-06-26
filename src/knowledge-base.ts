@@ -1,6 +1,8 @@
 import { App, TFile, normalizePath } from "obsidian";
+import { VAULT_COACH_HIDDEN_DIR_PATH } from "./constants";
 import type {
     ChunkEmbedding,
+    ExamScopeOption,
     IndexedChunk,
     KnowledgeBaseFileRecord,
     KnowledgeBaseSnapshot,
@@ -105,6 +107,50 @@ export class VaultKnowledgeBase {
      */
     getAllChunks(): IndexedChunk[] {
         return [...this.chunks];
+    }
+
+    getExamFolderScopeOptions(): ExamScopeOption[] {
+        const folderStats: Map<string, { filePaths: Set<string>; chunkCount: number }> = new Map();
+
+        for (const chunk of this.chunks) {
+            const parentFolders: string[] = this.getParentFolderPaths(chunk.filePath);
+            for (const folderPath of parentFolders) {
+                const stats = folderStats.get(folderPath) ?? {
+                    filePaths: new Set<string>(),
+                    chunkCount: 0,
+                };
+                stats.filePaths.add(chunk.filePath);
+                stats.chunkCount += 1;
+                folderStats.set(folderPath, stats);
+            }
+        }
+
+        return Array.from(folderStats.entries())
+            .sort(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
+            .map(([folderPath, stats]) => ({
+                id: folderPath,
+                label: folderPath,
+                folderPath,
+                fileCount: stats.filePaths.size,
+                chunkCount: stats.chunkCount,
+            }));
+    }
+
+    getChunksForExamScope(folderPaths: string[]): IndexedChunk[] {
+        const normalizedFolderPaths: string[] = folderPaths
+            .map((folderPath: string) => this.normalizeFolderPath(folderPath))
+            .filter((folderPath: string) => folderPath.length > 0);
+
+        if (normalizedFolderPaths.length === 0) {
+            return this.getAllChunks();
+        }
+
+        return this.chunks.filter((chunk: IndexedChunk) => {
+            return normalizedFolderPaths.some((folderPath: string) => {
+                const prefix: string = `${folderPath}/`;
+                return chunk.filePath.startsWith(prefix);
+            });
+        });
     }
 
     getEmbeddingSnapshot(): ChunkEmbedding[] {
@@ -515,7 +561,8 @@ export class VaultKnowledgeBase {
      */
     private resolveTargetMarkdownFiles(): TFile[] {
         const settings: VaultCoachSettings = this.getSettings();
-        const allMarkdownFiles: TFile[] = this.app.vault.getMarkdownFiles();
+        const allMarkdownFiles: TFile[] = this.app.vault.getMarkdownFiles()
+            .filter((file: TFile) => !this.isVaultCoachHiddenPath(file.path));
 
         if (settings.knowledgeScopeMode === "wholeVault") {
             return allMarkdownFiles;
@@ -531,6 +578,22 @@ export class VaultKnowledgeBase {
             : `${normalizedFolder}/`
 
         return allMarkdownFiles.filter((file: TFile) => file.path.startsWith(folderPrefix));
+    }
+
+    private getParentFolderPaths(filePath: string): string[] {
+        const normalizedPath: string = normalizePath(filePath);
+        const pathParts: string[] = normalizedPath.split("/");
+        pathParts.pop();
+
+        const folderPaths: string[] = [];
+        for (let length = 1; length <= pathParts.length; length += 1) {
+            const folderPath: string = pathParts.slice(0, length).join("/");
+            if (folderPath.length > 0 && !this.isVaultCoachHiddenPath(folderPath)) {
+                folderPaths.push(folderPath);
+            }
+        }
+
+        return folderPaths;
     }
 
     /**
@@ -925,8 +988,13 @@ export class VaultKnowledgeBase {
     private isMarkdownPath(path: string): boolean {
         return path.toLowerCase().endsWith(".md");
     }
-}
 
+    private isVaultCoachHiddenPath(path: string): boolean {
+        const normalizedPath: string = normalizePath(path);
+        return normalizedPath === VAULT_COACH_HIDDEN_DIR_PATH
+            || normalizedPath.startsWith(`${VAULT_COACH_HIDDEN_DIR_PATH}/`);
+    }
+}
 
 
 

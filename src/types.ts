@@ -324,6 +324,61 @@ export interface AssistantAnswer {
     queryRewrite: QueryRewriteResult;
 }
 
+export type ExamSessionStatus = "draft" | "submitted" | "saved";
+
+export interface ExamScopeOption {
+    id: string;
+    label: string;
+    folderPath: string | null;
+    fileCount: number;
+    chunkCount: number;
+}
+
+export interface ExamQuestion {
+    id: string;
+    question: string;
+    referenceAnswer: string;
+    rubric: string;
+    sourcePaths: string[];
+}
+
+export interface ExamEvaluationItem {
+    questionId: string;
+    score: number;
+    maxScore: number;
+    feedback: string;
+    improvement: string;
+}
+
+export interface ExamEvaluation {
+    score: number;
+    maxScore: number;
+    overallFeedback: string;
+    items: ExamEvaluationItem[];
+}
+
+export interface ExamSession {
+    id: string;
+    title: string;
+    createdAt: number;
+    scopeLabel: string;
+    selectedFolderPaths: string[];
+    questions: ExamQuestion[];
+    userAnswers: string[];
+    evaluation: ExamEvaluation | null;
+    savedPath: string | null;
+    status: ExamSessionStatus;
+}
+
+export interface ExamHistoryItem {
+    path: string;
+    title: string;
+    createdAt: number | null;
+    score: number | null;
+    maxScore: number | null;
+    modifiedAt: number | null;
+}
+
 /**
  * 发送给本地聊天模型的消息结构。
  * 这个类型与 Ollama / OpenAI 风格消息结构兼容度较高。
@@ -412,5 +467,3 @@ export interface StreamHandlers {
     onDone?: () => void;
     onError?: (error: unknown) => void;
 }
-
-

@@ -1,5 +1,5 @@
-import { Notice, Plugin, TAbstractFile, WorkspaceLeaf } from "obsidian";
-import { VIEW_TYPE_VAULT_COACH } from "./constants";
+import { Notice, normalizePath, Plugin, TAbstractFile, WorkspaceLeaf, type ListedFiles, type Stat } from "obsidian";
+import { EXAM_RESULTS_DIR_PATH, VAULT_COACH_HIDDEN_DIR_PATH, VIEW_TYPE_VAULT_COACH } from "./constants";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { VaultKnowledgeBase } from "./knowledge-base";
 import { VaultCoachPersistentStore } from "./persistent-store";
@@ -9,6 +9,12 @@ import type {
     AnswerSource,
     AssistantAnswer,
     ChatMessage,
+    ExamEvaluationItem,
+    ExamHistoryItem,
+    ExamQuestion,
+    ExamScopeOption,
+    ExamSession,
+    IndexedChunk,
     KnowledgeBaseSnapshot,
     KnowledgeBaseStats,
     KnowledgeBaseSyncResult,
@@ -191,6 +197,125 @@ export default class VaultCoach extends Plugin {
         return this.t("scope.folder", { folder: folderPath });
     }
 
+    getExamScopeOptions(): ExamScopeOption[] {
+        const stats: KnowledgeBaseStats = this.knowledgeBase.getStats();
+        return [
+            {
+                id: "__all__",
+                label: this.t("exam.scope.fullCurrentKnowledgeBase"),
+                folderPath: null,
+                fileCount: stats.fileCount,
+                chunkCount: stats.chunkCount,
+            },
+            ...this.knowledgeBase.getExamFolderScopeOptions(),
+        ];
+    }
+
+    async createExamSession(selectedFolderPaths: string[], questionCount: number): Promise<ExamSession> {
+        await this.ensureKnowledgeBaseReady();
+
+        const normalizedFolderPaths: string[] = this.normalizeExamFolderPaths(selectedFolderPaths);
+        const chunks: IndexedChunk[] = this.knowledgeBase.getChunksForExamScope(normalizedFolderPaths);
+        if (chunks.length === 0) {
+            throw new Error(this.t("exam.notice.noChunks"));
+        }
+
+        const scopeLabel: string = normalizedFolderPaths.length === 0
+            ? this.t("exam.scope.fullCurrentKnowledgeBase")
+            : normalizedFolderPaths.join(", ");
+
+        return this.ragEngine.generateExamSession(scopeLabel, normalizedFolderPaths, chunks, questionCount);
+    }
+
+    async evaluateExamSession(session: ExamSession, userAnswers: string[]): Promise<ExamSession> {
+        const evaluation = await this.ragEngine.evaluateExamSession(session, userAnswers);
+        return {
+            ...session,
+            userAnswers: session.questions.map((_question: ExamQuestion, index: number) => userAnswers[index]?.trim() ?? ""),
+            evaluation,
+            status: "submitted",
+        };
+    }
+
+    async saveExamSession(session: ExamSession): Promise<ExamSession> {
+        await this.ensureExamResultsDirectory();
+
+        const savedPath: string = session.savedPath ?? this.createExamResultPath(session);
+        const savedSession: ExamSession = {
+            ...session,
+            savedPath,
+            status: "saved",
+        };
+
+        await this.app.vault.adapter.write(savedPath, this.formatExamSessionMarkdown(savedSession));
+        return savedSession;
+    }
+
+    async exportExamSession(session: ExamSession, targetFolderPath: string): Promise<string> {
+        const normalizedFolderPath: string = await this.ensureExportFolder(targetFolderPath);
+        const exportPath: string = await this.createUniqueExamResultPath(normalizedFolderPath, session);
+        await this.app.vault.adapter.write(exportPath, this.formatExamSessionMarkdown(session));
+        return exportPath;
+    }
+
+    async listExamHistory(): Promise<ExamHistoryItem[]> {
+        await this.ensureExamResultsDirectory();
+
+        const listedFiles: ListedFiles = await this.app.vault.adapter.list(EXAM_RESULTS_DIR_PATH);
+        const markdownPaths: string[] = listedFiles.files
+            .filter((path: string) => path.toLowerCase().endsWith(".md"))
+            .sort((leftPath: string, rightPath: string) => rightPath.localeCompare(leftPath));
+
+        const items: ExamHistoryItem[] = [];
+        for (const path of markdownPaths) {
+            try {
+                const [content, stat]: [string, Stat | null] = await Promise.all([
+                    this.app.vault.adapter.read(path),
+                    this.app.vault.adapter.stat(path),
+                ]);
+                items.push(this.parseExamHistoryItem(path, content, stat));
+            } catch (error: unknown) {
+                console.error("[VaultCoach] 读取考试历史失败", error);
+            }
+        }
+
+        items.sort((left: ExamHistoryItem, right: ExamHistoryItem) => {
+            return (right.createdAt ?? right.modifiedAt ?? 0) - (left.createdAt ?? left.modifiedAt ?? 0);
+        });
+        return items;
+    }
+
+    async readExamHistoryContent(path: string): Promise<string> {
+        const normalizedPath: string = normalizePath(path);
+        if (!this.isExamResultPath(normalizedPath)) {
+            throw new Error(this.t("exam.notice.invalidHistoryPath"));
+        }
+
+        return this.app.vault.adapter.read(normalizedPath);
+    }
+
+    async deleteExamSession(session: ExamSession): Promise<void> {
+        if (!session.savedPath) {
+            return;
+        }
+
+        const savedPath: string = normalizePath(session.savedPath);
+        if (await this.app.vault.adapter.exists(savedPath)) {
+            await this.app.vault.adapter.remove(savedPath);
+        }
+    }
+
+    async deleteExamHistory(path: string): Promise<void> {
+        const normalizedPath: string = normalizePath(path);
+        if (!this.isExamResultPath(normalizedPath)) {
+            throw new Error(this.t("exam.notice.invalidHistoryPath"));
+        }
+
+        if (await this.app.vault.adapter.exists(normalizedPath)) {
+            await this.app.vault.adapter.remove(normalizedPath);
+        }
+    }
+
     getEffectiveDefaultGreeting(): string {
         const configuredGreeting: string = this.settings.defaultGreeting.trim();
         if (configuredGreeting.length === 0 || isBuiltInDefaultGreeting(configuredGreeting)) {
@@ -362,7 +487,7 @@ export default class VaultCoach extends Plugin {
 
     private registerVaultEvents(): void {
         const queuePath = (path: string): void => {
-            if (!this.isMarkdownPath(path)) {
+            if (!this.isMarkdownPath(path) || this.isVaultCoachHiddenPath(path)) {
                 return;
             }
 
@@ -763,7 +888,241 @@ export default class VaultCoach extends Plugin {
         return `mem_${(hash >>> 0).toString(16)}`;
     }
 
+    private normalizeExamFolderPaths(folderPaths: string[]): string[] {
+        return Array.from(new Set(
+            folderPaths
+                .map((folderPath: string) => normalizePath(folderPath.trim()).replace(/\/$/, ""))
+                .filter((folderPath: string) => folderPath.length > 0 && !this.isVaultCoachHiddenPath(folderPath)),
+        ));
+    }
+
+    private async ensureExamResultsDirectory(): Promise<void> {
+        const hiddenDirPath: string = normalizePath(VAULT_COACH_HIDDEN_DIR_PATH);
+        const examDirPath: string = normalizePath(EXAM_RESULTS_DIR_PATH);
+
+        if (!(await this.app.vault.adapter.exists(hiddenDirPath))) {
+            await this.app.vault.adapter.mkdir(hiddenDirPath);
+        }
+
+        if (!(await this.app.vault.adapter.exists(examDirPath))) {
+            await this.app.vault.adapter.mkdir(examDirPath);
+        }
+    }
+
+    private async ensureExportFolder(targetFolderPath: string): Promise<string> {
+        const normalizedFolderPath: string = normalizePath(targetFolderPath.trim()).replace(/\/$/, "");
+        if (normalizedFolderPath.length === 0 || normalizedFolderPath === "/") {
+            return "";
+        }
+
+        await this.ensureFolderPath(normalizedFolderPath);
+        return normalizedFolderPath;
+    }
+
+    private async ensureFolderPath(folderPath: string): Promise<void> {
+        const parts: string[] = normalizePath(folderPath)
+            .split("/")
+            .map((part: string) => part.trim())
+            .filter((part: string) => part.length > 0);
+
+        let currentPath = "";
+        for (const part of parts) {
+            currentPath = currentPath.length === 0 ? part : `${currentPath}/${part}`;
+            const stat: Stat | null = await this.app.vault.adapter.stat(currentPath);
+            if (stat?.type === "file") {
+                throw new Error(this.t("exam.notice.exportPathIsFile"));
+            }
+
+            if (!stat) {
+                await this.app.vault.adapter.mkdir(currentPath);
+            }
+        }
+    }
+
+    private createExamResultPath(session: ExamSession): string {
+        const safeTitle: string = this.sanitizeFileName(session.title || this.t("exam.defaultTitle"));
+        return normalizePath(`${EXAM_RESULTS_DIR_PATH}/${session.id}-${safeTitle}.md`);
+    }
+
+    private async createUniqueExamResultPath(folderPath: string, session: ExamSession): Promise<string> {
+        const safeTitle: string = this.sanitizeFileName(session.title || this.t("exam.defaultTitle"));
+        const basePath: string = normalizePath(folderPath.length > 0
+            ? `${folderPath}/${session.id}-${safeTitle}`
+            : `${session.id}-${safeTitle}`);
+
+        let candidatePath = `${basePath}.md`;
+        let duplicateIndex = 2;
+        while (await this.app.vault.adapter.exists(candidatePath)) {
+            candidatePath = `${basePath}-${duplicateIndex}.md`;
+            duplicateIndex += 1;
+        }
+
+        return candidatePath;
+    }
+
+    private sanitizeFileName(value: string): string {
+        const sanitizedValue: string = value
+            .replace(/[\\/:*?"<>|#^[\]]+/g, "-")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 60);
+
+        return sanitizedValue.length > 0 ? sanitizedValue : this.t("exam.defaultTitle");
+    }
+
+    private formatExamSessionMarkdown(session: ExamSession): string {
+        const lines: string[] = [
+            "---",
+            "vaultCoachExam: true",
+            `examId: ${JSON.stringify(session.id)}`,
+            `createdAt: ${session.createdAt}`,
+            `score: ${session.evaluation?.score ?? ""}`,
+            `maxScore: ${session.evaluation?.maxScore ?? ""}`,
+            `scope: ${JSON.stringify(session.scopeLabel)}`,
+            "---",
+            "",
+            `# ${session.title}`,
+            "",
+            `- ${this.t("exam.markdown.id")}：${session.id}`,
+            `- ${this.t("exam.markdown.createdAt")}：${this.formatDateTime(session.createdAt)}`,
+            `- ${this.t("exam.markdown.scope")}：${session.scopeLabel}`,
+            `- ${this.t("exam.markdown.questionCount")}：${session.questions.length}`,
+        ];
+
+        if (session.evaluation) {
+            lines.push(`- ${this.t("exam.markdown.score")}：${session.evaluation.score} / ${session.evaluation.maxScore}`);
+            lines.push("");
+            lines.push(`## ${this.t("exam.markdown.overallFeedback")}`);
+            lines.push("");
+            lines.push(session.evaluation.overallFeedback);
+        }
+
+        lines.push("");
+        lines.push(`## ${this.t("exam.markdown.questions")}`);
+
+        session.questions.forEach((question: ExamQuestion, index: number) => {
+            const answer: string = session.userAnswers[index]?.trim() ?? "";
+            const evaluationItem: ExamEvaluationItem | undefined = session.evaluation?.items.find((item: ExamEvaluationItem) => {
+                return item.questionId === question.id;
+            });
+
+            lines.push("");
+            lines.push(`### ${index + 1}. ${question.question}`);
+            lines.push("");
+            lines.push(`#### ${this.t("exam.markdown.userAnswer")}`);
+            lines.push("");
+            lines.push(answer.length > 0 ? answer : this.t("exam.unanswered"));
+            lines.push("");
+            lines.push(`#### ${this.t("exam.markdown.referenceAnswer")}`);
+            lines.push("");
+            lines.push(question.referenceAnswer);
+            lines.push("");
+            lines.push(`#### ${this.t("exam.markdown.rubric")}`);
+            lines.push("");
+            lines.push(question.rubric);
+
+            if (evaluationItem) {
+                lines.push("");
+                lines.push(`#### ${this.t("exam.markdown.evaluation")}`);
+                lines.push("");
+                lines.push(`- ${this.t("exam.markdown.score")}：${evaluationItem.score} / ${evaluationItem.maxScore}`);
+                lines.push(`- ${this.t("exam.markdown.feedback")}：${evaluationItem.feedback}`);
+                lines.push(`- ${this.t("exam.markdown.improvement")}：${evaluationItem.improvement}`);
+            }
+
+            if (question.sourcePaths.length > 0) {
+                lines.push("");
+                lines.push(`#### ${this.t("exam.markdown.sources")}`);
+                lines.push("");
+                for (const sourcePath of question.sourcePaths) {
+                    lines.push(`- [[${sourcePath}]]`);
+                }
+            }
+        });
+
+        lines.push("");
+        return lines.join("\n");
+    }
+
+    private formatDateTime(timestamp: number): string {
+        return new Date(timestamp).toLocaleString();
+    }
+
+    private parseExamHistoryItem(path: string, content: string, stat: Stat | null): ExamHistoryItem {
+        const title: string = this.parseFirstMarkdownHeading(content) || this.sanitizeHistoryTitle(path);
+        const createdAt: number | null = this.parseNumberMetadata(content, "createdAt")
+            ?? this.parseCreatedAtFromMarkdown(content);
+        const score: number | null = this.parseNumberMetadata(content, "score")
+            ?? this.parseScoreFromMarkdown(content, 0);
+        const maxScore: number | null = this.parseNumberMetadata(content, "maxScore")
+            ?? this.parseScoreFromMarkdown(content, 1);
+
+        return {
+            path,
+            title,
+            createdAt,
+            score,
+            maxScore,
+            modifiedAt: stat?.mtime ?? null,
+        };
+    }
+
+    private parseFirstMarkdownHeading(content: string): string | null {
+        const match: RegExpExecArray | null = /^#\s+(.+)$/m.exec(content);
+        return match?.[1]?.trim() ?? null;
+    }
+
+    private sanitizeHistoryTitle(path: string): string {
+        const fileName: string = path.split("/").pop() ?? this.t("exam.defaultTitle");
+        return fileName.replace(/\.md$/i, "");
+    }
+
+    private parseNumberMetadata(content: string, key: string): number | null {
+        const match: RegExpExecArray | null = new RegExp(`^${key}:\\s*(\\d+)\\s*$`, "m").exec(content);
+        if (!match?.[1]) {
+            return null;
+        }
+
+        const parsedValue: number = Number.parseInt(match[1], 10);
+        return Number.isFinite(parsedValue) ? parsedValue : null;
+    }
+
+    private parseCreatedAtFromMarkdown(content: string): number | null {
+        const match: RegExpExecArray | null = /创建时间[：:]\s*(.+)$/m.exec(content)
+            ?? /Created at[：:]\s*(.+)$/m.exec(content);
+        const rawDate: string | undefined = match?.[1]?.trim();
+        if (!rawDate) {
+            return null;
+        }
+
+        const timestamp: number = Date.parse(rawDate);
+        return Number.isFinite(timestamp) ? timestamp : null;
+    }
+
+    private parseScoreFromMarkdown(content: string, index: 0 | 1): number | null {
+        const match: RegExpExecArray | null = /(?:得分|Score)[：:]\s*(\d+)\s*\/\s*(\d+)/m.exec(content);
+        const rawValue: string | undefined = match?.[index + 1];
+        if (!rawValue) {
+            return null;
+        }
+
+        const parsedValue: number = Number.parseInt(rawValue, 10);
+        return Number.isFinite(parsedValue) ? parsedValue : null;
+    }
+
     private isMarkdownPath(path: string): boolean {
         return path.toLowerCase().endsWith(".md");
+    }
+
+    private isExamResultPath(path: string): boolean {
+        const normalizedPath: string = normalizePath(path);
+        return normalizedPath.startsWith(`${EXAM_RESULTS_DIR_PATH}/`)
+            && normalizedPath.toLowerCase().endsWith(".md");
+    }
+
+    private isVaultCoachHiddenPath(path: string): boolean {
+        const normalizedPath: string = normalizePath(path);
+        return normalizedPath === VAULT_COACH_HIDDEN_DIR_PATH
+            || normalizedPath.startsWith(`${VAULT_COACH_HIDDEN_DIR_PATH}/`);
     }
 }

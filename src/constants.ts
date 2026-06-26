@@ -70,4 +70,7 @@ export const DEFAULT_AUTO_INDEX_FILE_THRESHOLD = 8;
 export const RUNTIME_STATE_FILE_NAME = "runtime-state.json"
 export const INDEX_SNAPSHOT_FILE_NAME = "index-snapshot.json"
 
+// 考试结果保存到 vault 内的隐藏目录，避免干扰用户正常笔记列表。
+export const VAULT_COACH_HIDDEN_DIR_PATH = ".vault-coach";
+export const EXAM_RESULTS_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/exams`;
 

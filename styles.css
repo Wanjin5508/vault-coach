@@ -254,6 +254,377 @@
     gap: 8px;
 }
 
+.vault-coach-exam-area {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.vault-coach-exam-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 100%;
+    padding: 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-primary-alt);
+    box-sizing: border-box;
+}
+
+.vault-coach-exam-panel h4 {
+    margin: 0;
+    font-size: var(--font-ui-medium);
+}
+
+.vault-coach-exam-description {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    line-height: 1.5;
+}
+
+.vault-coach-exam-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vault-coach-exam-section-title,
+.vault-coach-exam-review-label {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.vault-coach-exam-review-label {
+    display: block;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: 700 !important;
+}
+
+.vault-coach-exam-scope-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+}
+
+.vault-coach-exam-scope-option {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-exam-scope-option.is-selected {
+    border-color: var(--interactive-accent);
+    background: var(--background-modifier-hover);
+}
+
+.vault-coach-exam-scope-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.vault-coach-exam-scope-label {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-exam-scope-meta,
+.vault-coach-exam-muted,
+.vault-coach-exam-subtitle,
+.vault-coach-exam-saved-path {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.4;
+}
+
+.vault-coach-exam-count-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 80px;
+    align-items: center;
+}
+
+.vault-coach-exam-count-row input {
+    width: 80px;
+}
+
+.vault-coach-exam-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.vault-coach-exam-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.vault-coach-exam-badge {
+    min-width: 0;
+    max-width: 50%;
+    padding: 3px 7px;
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vault-coach-exam-question {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-exam-question-title {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: 600;
+    line-height: 1.45;
+}
+
+.vault-coach-exam-answer-input {
+    width: 100%;
+    min-height: 120px;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.vault-coach-exam-score-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 10px;
+    padding: 10px;
+    border-radius: var(--radius-s);
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.vault-coach-exam-score-value {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.vault-coach-exam-score-label {
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-exam-review-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.vault-coach-exam-review-text {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
+
+.vault-coach-exam-question-score {
+    align-self: flex-start;
+    padding: 2px 6px;
+    border-radius: var(--radius-s);
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary-alt);
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: 700;
+}
+
+.vault-coach-exam-question-score.is-good {
+    border-color: var(--color-green);
+    background: color-mix(in srgb, var(--color-green) 18%, transparent);
+    color: var(--color-green);
+}
+
+.vault-coach-exam-question-score.is-medium {
+    border-color: var(--color-yellow);
+    background: color-mix(in srgb, var(--color-yellow) 18%, transparent);
+    color: var(--color-yellow);
+}
+
+.vault-coach-exam-question-score.is-low {
+    border-color: var(--color-red);
+    background: color-mix(in srgb, var(--color-red) 16%, transparent);
+    color: var(--color-red);
+}
+
+.vault-coach-exam-source-list {
+    margin: 0;
+    padding-inline-start: 18px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-exam-source-link {
+    height: auto;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+    color: var(--link-color);
+    font: inherit;
+    text-align: left;
+    text-decoration: underline;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-exam-source-link:hover {
+    color: var(--link-color-hover);
+    background: transparent;
+}
+
+.vault-coach-exam-empty {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    border: 1px dashed var(--background-modifier-border);
+    border-radius: var(--radius-s);
+}
+
+.vault-coach-exam-empty-title {
+    color: var(--text-normal);
+    font-weight: 600;
+}
+
+.vault-coach-exam-empty-description {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-exam-busy {
+    min-height: 180px;
+    justify-content: center;
+    align-items: center;
+}
+
+.vault-coach-exam-export {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-exam-export-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
+.vault-coach-exam-export-row input {
+    width: 100%;
+    min-width: 0;
+}
+
+.vault-coach-exam-history-layout {
+    display: grid;
+    grid-template-columns: minmax(160px, 0.9fr) minmax(0, 1.4fr);
+    gap: 10px;
+    min-height: 0;
+}
+
+.vault-coach-exam-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.vault-coach-exam-history-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: stretch;
+    padding: 6px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-exam-history-item.is-selected {
+    border-color: var(--interactive-accent);
+}
+
+.vault-coach-exam-history-main {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    min-width: 0;
+    height: auto;
+    text-align: left;
+    white-space: normal;
+}
+
+.vault-coach-exam-history-title {
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: 600;
+}
+
+.vault-coach-exam-history-meta {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.vault-coach-exam-history-delete {
+    align-self: start;
+}
+
+.vault-coach-exam-history-detail {
+    min-width: 0;
+    max-height: 62vh;
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+}
+
+@media (max-width: 520px) {
+    .vault-coach-exam-export-row,
+    .vault-coach-exam-history-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* 新增：流式输出阶段的临时气泡 */
 .vault-coach-streaming-bubble {
     white-space: pre-wrap;
