@@ -48,6 +48,7 @@ export default class VaultCoach extends Plugin {
     private autoIndexMaxWaitTimer: number | null = null;
     private isSyncingKnowledgeBase = false;
     private lastAutoIndexAt: number | null = null;
+    private hasShownOllamaEmbeddingCpuFallbackNotice = false;
 
     private t(key: TranslationKey, replacements?: Record<string, string | number>): string {
         return translate(key, replacements);
@@ -162,13 +163,37 @@ export default class VaultCoach extends Plugin {
     }
 
     markKnowledgeBaseDirty(): void {
+        // Text chunk changes invalidate both the keyword index and any vectors built from those chunks.
+        // Keep this path for scan scope / chunking changes where the whole knowledge base must be rebuilt.
         this.knowledgeBaseDirty = true;
         this.vectorIndexDirty = true;
         this.refreshAllViews();
     }
 
+    markVectorIndexDirty(): void {
+        // Embedding service/model changes do not invalidate parsed Markdown chunks or the keyword index.
+        // Clear stale vectors so the UI and retrieval layer never report old embeddings as current.
+        this.knowledgeBase.clearVectorIndex();
+        this.ragEngine.hydrateVectorStats({
+            ready: false,
+            vectorCount: 0,
+            dimension: null,
+            lastBuiltAt: null,
+        });
+        this.vectorIndexDirty = this.settings.enableVectorRetrieval;
+        this.refreshAllViews();
+    }
+
     isKnowledgeBaseDirty(): boolean {
-        return this.knowledgeBaseDirty || this.vectorIndexDirty;
+        return this.isTextIndexDirty();
+    }
+
+    isTextIndexDirty(): boolean {
+        return this.knowledgeBaseDirty;
+    }
+
+    isVectorIndexDirty(): boolean {
+        return this.vectorIndexDirty;
     }
 
     getKnowledgeBaseStats(): KnowledgeBaseStats {
@@ -396,6 +421,7 @@ export default class VaultCoach extends Plugin {
             try {
                 vectorStats = await this.ragEngine.rebuildVectorIndex();
                 this.vectorIndexDirty = false;
+                this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
             } catch (vectorError: unknown) {
                 console.error("[VaultCoach] 向量索引建立失败，将回退到关键词检索。", vectorError);
                 vectorBuildWarning = this.t("notice.index.vectorFailedWarning");
@@ -461,19 +487,23 @@ export default class VaultCoach extends Plugin {
         await this.ensureKnowledgeBaseReady();
 
         const memoryContext: string = this.buildMemoryContext(userText);
-        const answer: AssistantAnswer = await this.ragEngine.streamAnswerQuestion(
-            userText,
-            this.messages,
-            this.getKnowledgeScopeDescription(),
-            memoryContext,
-            handlers,
-        );
+        try {
+            const answer: AssistantAnswer = await this.ragEngine.streamAnswerQuestion(
+                userText,
+                this.messages,
+                this.getKnowledgeScopeDescription(),
+                memoryContext,
+                handlers,
+            );
 
-        this.addAssistantMessage(answer.text, answer.sources);
-        await this.updateLongTermMemory(userText, answer.text);
-        await this.persistRuntimeState();
+            this.addAssistantMessage(answer.text, answer.sources);
+            await this.updateLongTermMemory(userText, answer.text);
+            await this.persistRuntimeState();
 
-        return answer;
+            return answer;
+        } finally {
+            this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
+        }
     }
 
     async openSource(source: AnswerSource): Promise<void> {
@@ -565,6 +595,7 @@ export default class VaultCoach extends Plugin {
 
             const syncResult: KnowledgeBaseSyncResult = await this.knowledgeBase.syncChangedFiles(filePaths);
             await this.ragEngine.syncVectorIndex(syncResult);
+            this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
 
             this.lastAutoIndexAt = Date.now();
             this.knowledgeBaseDirty = false;
@@ -591,6 +622,7 @@ export default class VaultCoach extends Plugin {
             const vectorStats: VectorIndexStats = await this.ragEngine.rebuildVectorIndex();
             this.vectorIndexDirty = false;
             this.knowledgeBaseDirty = false;
+            this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
             await this.persistKnowledgeBaseSnapshot();
             this.refreshAllViews();
 
@@ -650,6 +682,20 @@ export default class VaultCoach extends Plugin {
         } else {
             this.vectorIndexDirty = false;
         }
+    }
+
+    private showOllamaEmbeddingCpuFallbackNoticeIfNeeded(): void {
+        // CPU fallback may happen once per embedding batch. Show a single user-facing notice per plugin session.
+        if (this.hasShownOllamaEmbeddingCpuFallbackNotice) {
+            return;
+        }
+
+        if (!this.ragEngine.consumeOllamaEmbeddingCpuFallbackUsed()) {
+            return;
+        }
+
+        this.hasShownOllamaEmbeddingCpuFallbackNotice = true;
+        new Notice(this.t("notice.index.ollamaEmbeddingCpuFallback"), 14000);
     }
 
     private async persistRuntimeState(): Promise<void> {

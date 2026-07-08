@@ -93,6 +93,10 @@ export class AdvancedRagEngine {
         return { ...this.vectorStats };
     }
 
+    consumeOllamaEmbeddingCpuFallbackUsed(): boolean {
+        return this.client.consumeOllamaEmbeddingCpuFallbackUsed();
+    }
+
     // 新增：从磁盘恢复向量索引状态。
     hydrateVectorStats(vectorStats: VectorIndexStats): void {
         this.vectorStats = { ...vectorStats };

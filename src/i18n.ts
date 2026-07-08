@@ -15,6 +15,7 @@ const ZH_TRANSLATIONS = {
     "notice.index.incrementalComplete": "增量同步完成：{{count}} 个文件变更已处理。",
     "notice.index.vectorComplete": "向量索引完成：{{count}} 条向量。",
     "notice.index.vectorRebuildFailed": "向量索引重建失败，请打开开发者控制台查看错误信息。",
+    "notice.index.ollamaEmbeddingCpuFallback": "检测到 Ollama GPU 无法完成 embedding，已自动改用 CPU 生成向量。CPU 会更慢；建议检查 Windows NVIDIA 驱动、CUDA 与 Ollama 配置。若本地 LLM 仍报错，建议在模型设置中改用云端 LLM。",
 
     "scope.wholeVault": "整个 Vault",
     "scope.folder": "目录：{{folder}}",
@@ -31,6 +32,7 @@ const ZH_TRANSLATIONS = {
     "view.indexStatus.ready": "已就绪",
     "view.indexStatus.notBuilt": "尚未建立",
     "view.indexStatus.vectorReady": "已就绪（{{count}} 条）",
+    "view.indexStatus.vectorDisabled": "已关闭",
     "view.indexStatus.vectorFallback": "未建立 / 已回退",
     "view.retrievalModeLabel": "检索模式：",
     "view.retrieval.keyword": "关键词检索",
@@ -243,6 +245,7 @@ const EN_TRANSLATIONS: Record<TranslationKey, string> = {
     "notice.index.incrementalComplete": "Incremental sync complete: {{count}} changed files processed.",
     "notice.index.vectorComplete": "Vector index complete: {{count}} vectors.",
     "notice.index.vectorRebuildFailed": "Failed to rebuild the vector index. Open the developer console for details.",
+    "notice.index.ollamaEmbeddingCpuFallback": "Ollama GPU embedding failed, so VaultCoach automatically retried embeddings on CPU. CPU mode is slower; check your Windows NVIDIA driver, CUDA, and Ollama setup. If local LLM calls still fail, switch the answer model to a cloud LLM in settings.",
 
     "scope.wholeVault": "Entire vault",
     "scope.folder": "Folder: {{folder}}",
@@ -259,6 +262,7 @@ const EN_TRANSLATIONS: Record<TranslationKey, string> = {
     "view.indexStatus.ready": "Ready",
     "view.indexStatus.notBuilt": "Not built",
     "view.indexStatus.vectorReady": "Ready ({{count}} vectors)",
+    "view.indexStatus.vectorDisabled": "Disabled",
     "view.indexStatus.vectorFallback": "Not built / fallback active",
     "view.retrievalModeLabel": "Retrieval mode:",
     "view.retrieval.keyword": "Keyword search",

@@ -150,13 +150,11 @@ export class VaultCoachView extends ItemView {
         const vectorStats: VectorIndexStats = this.plugin.getVectorIndexStats();
         const infoListEl: HTMLDivElement = headerEl.createDiv({cls: "vault-coach-header-info-grid"});
 
-        const textIndexStatusText: string = this.plugin.isKnowledgeBaseDirty()
+        const textIndexStatusText: string = this.plugin.isTextIndexDirty()
             ? this.t("view.indexStatus.dirty")
             : (textStats.lastIndexedAt ? this.t("view.indexStatus.ready") : this.t("view.indexStatus.notBuilt"));
 
-        const vectorIndexStatusText: string = vectorStats.ready
-            ? this.t("view.indexStatus.vectorReady", { count: vectorStats.vectorCount })
-            : this.t("view.indexStatus.vectorFallback");
+        const vectorIndexStatusText: string = this.getVectorIndexStatusText(vectorStats);
 
         this.renderHeaderStat(infoListEl, this.t("view.stat.knowledgeScope"), this.plugin.getLocalizedKnowledgeScopeDescription());
         this.renderHeaderStat(infoListEl, this.t("view.stat.textIndex"), textIndexStatusText);
@@ -437,6 +435,20 @@ export class VaultCoachView extends ItemView {
         for (let index = 0; index < 3; index += 1) {
             dotsEl.createSpan({ cls: "vault-coach-thinking-dot", text: "." });
         }
+    }
+
+    private getVectorIndexStatusText(vectorStats: VectorIndexStats): string {
+        if (!this.plugin.settings.enableVectorRetrieval) {
+            return this.t("view.indexStatus.vectorDisabled");
+        }
+
+        if (this.plugin.isVectorIndexDirty()) {
+            return this.t("view.indexStatus.dirty");
+        }
+
+        return vectorStats.ready
+            ? this.t("view.indexStatus.vectorReady", { count: vectorStats.vectorCount })
+            : this.t("view.indexStatus.vectorFallback");
     }
 
     private renderExamTaking(containerEl: HTMLDivElement, session: ExamSession): void {

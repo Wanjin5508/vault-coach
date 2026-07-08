@@ -108,6 +108,11 @@ export class LocalModelClient {
     private readonly getSettings: () => VaultCoachSettings;
     private readonly getCloudApiKey: () => string | null;  // 只读，成员变量不能被重新赋值
 
+    // 这两个字段只影响本插件会话内的 Ollama embedding。
+    // fallbackUsed 用于向 UI 发一次 Notice；preferCpu 用于后续 batch 直接走 CPU，避免反复触发 GPU 崩溃。
+    private ollamaEmbeddingCpuFallbackUsed = false;
+    private preferOllamaEmbeddingCpu = false;
+
     constructor(getSettings: () => VaultCoachSettings, getCloudApiKey: () => string | null) {
         this.getSettings = getSettings;
         this.getCloudApiKey = getCloudApiKey;
@@ -132,6 +137,12 @@ export class LocalModelClient {
 
     private shouldUseCloudEmbedding(settings: VaultCoachSettings): boolean {
         return settings.embeddingProvider === "openai-compatible";
+    }
+
+    consumeOllamaEmbeddingCpuFallbackUsed(): boolean {
+        const fallbackWasUsed: boolean = this.ollamaEmbeddingCpuFallbackUsed;
+        this.ollamaEmbeddingCpuFallbackUsed = false;
+        return fallbackWasUsed;
     }
 
     /**
@@ -505,21 +516,41 @@ export class LocalModelClient {
             return this.embedTextsWithCloudApi(settings, texts);
         }
 
+        const preferredOllamaEmbeddingOptions: Record<string, number> | undefined = this.preferOllamaEmbeddingCpu
+            ? { num_gpu: 0 }
+            : undefined;
+
         try {
-            return await this.embedTextsWithModernOllamaApi(settings, texts);
+            return await this.embedTextsWithModernOllamaApi(settings, texts, preferredOllamaEmbeddingOptions);
         } catch (error: unknown) {
+            // Windows 上 Ollama 的 GPU/CUDA 后端可能在 embedding 阶段返回 500。
+            // 这种情况不应该直接放弃语义检索，先用 num_gpu: 0 强制 CPU 重试。
+            if (!this.preferOllamaEmbeddingCpu && this.shouldRetryOllamaEmbeddingOnCpu(error)) {
+                return this.embedTextsWithModernOllamaApiOnCpu(settings, texts, error);
+            }
+
             if (!this.isNotFoundError(error)) {
                 throw error;
             }
 
             console.warn("[VaultCoach] /api/embed 不可用，尝试使用旧版 /api/embeddings 接口。", error);
-            return this.embedTextsWithLegacyOllamaApi(settings, texts);
+            try {
+                return await this.embedTextsWithLegacyOllamaApi(settings, texts, preferredOllamaEmbeddingOptions);
+            } catch (legacyError: unknown) {
+                // 旧版 embedding 接口也可能触发同类 GPU 后端错误，因此同样保留 CPU fallback。
+                if (!this.preferOllamaEmbeddingCpu && this.shouldRetryOllamaEmbeddingOnCpu(legacyError)) {
+                    return this.embedTextsWithLegacyOllamaApiOnCpu(settings, texts, legacyError);
+                }
+
+                throw legacyError;
+            }
         }
     }
 
     private async embedTextsWithModernOllamaApi(
         settings: VaultCoachSettings,
         texts: string[],
+        options?: Record<string, number>,
     ): Promise<number[][]> {
         const responseText: string = await this.postJson(
             settings.llmBaseUrl,
@@ -528,6 +559,7 @@ export class LocalModelClient {
                 model: settings.embeddingModel,
                 input: texts,
                 truncate: true,
+                ...(options ? { options } : {}),
             },
         );
         const parsed: OllamaEmbedResponse = JSON.parse(responseText) as OllamaEmbedResponse;
@@ -540,6 +572,19 @@ export class LocalModelClient {
             throw new Error("embedding 接口返回为空。");
         }
 
+        return embeddings;
+    }
+
+    private async embedTextsWithModernOllamaApiOnCpu(
+        settings: VaultCoachSettings,
+        texts: string[],
+        originalError: unknown,
+    ): Promise<number[][]> {
+        console.warn("[VaultCoach] Ollama GPU embedding 失败，尝试使用 CPU 重新生成 embedding。", originalError);
+        // Ollama 会把 options 透传给底层运行器；num_gpu: 0 表示本次请求不把层卸载到 GPU。
+        const embeddings: number[][] = await this.embedTextsWithModernOllamaApi(settings, texts, { num_gpu: 0 });
+        this.ollamaEmbeddingCpuFallbackUsed = true;
+        this.preferOllamaEmbeddingCpu = true;
         return embeddings;
     }
 
@@ -588,6 +633,7 @@ export class LocalModelClient {
     private async embedTextsWithLegacyOllamaApi(
         settings: VaultCoachSettings,
         texts: string[],
+        options?: Record<string, number>,
     ): Promise<number[][]> {
         const embeddings: number[][] = [];
 
@@ -598,6 +644,7 @@ export class LocalModelClient {
                 {
                     model: settings.embeddingModel,
                     prompt: text,
+                    ...(options ? { options } : {}),
                 },
             );
 
@@ -613,6 +660,18 @@ export class LocalModelClient {
             embeddings.push(parsed.embedding);
         }
 
+        return embeddings;
+    }
+
+    private async embedTextsWithLegacyOllamaApiOnCpu(
+        settings: VaultCoachSettings,
+        texts: string[],
+        originalError: unknown,
+    ): Promise<number[][]> {
+        console.warn("[VaultCoach] 旧版 Ollama GPU embedding 失败，尝试使用 CPU 重新生成 embedding。", originalError);
+        const embeddings: number[][] = await this.embedTextsWithLegacyOllamaApi(settings, texts, { num_gpu: 0 });
+        this.ollamaEmbeddingCpuFallbackUsed = true;
+        this.preferOllamaEmbeddingCpu = true;
         return embeddings;
     }
 
@@ -863,10 +922,20 @@ export class LocalModelClient {
                     "Content-Type": "application/json",
                     ...headers,
                 },
+                // 保留 400/500 响应体，才能识别 CUDA/PTX 等 Ollama 后端错误并做 CPU fallback。
+                throw: false,
             });
+
+            if (response.status >= 400) {
+                throw this.createRequestUrlResponseError(targetUrl, response.status, response.text);
+            }
 
             return response.text;
         } catch (error: unknown) {
+            if (error instanceof ModelRequestError) {
+                throw error;
+            }
+
             throw this.createRequestError(targetUrl, error);
         }
     }
@@ -883,6 +952,19 @@ export class LocalModelClient {
         ].filter((part: string) => part.length > 0);
 
         return new ModelRequestError(targetUrl, response.status, messageParts.join("。"));
+    }
+
+    private createRequestUrlResponseError(targetUrl: string, status: number, responseText: string): ModelRequestError {
+        const normalizedResponseText: string = responseText.replace(/\s+/g, " ").trim();
+        const hint: string = this.buildRequestFailureHint(targetUrl, status);
+        const messageParts: string[] = [
+            `模型请求失败：POST ${targetUrl}`,
+            `HTTP ${status}`,
+            normalizedResponseText.length > 0 ? normalizedResponseText : "",
+            hint,
+        ].filter((part: string) => part.length > 0);
+
+        return new ModelRequestError(targetUrl, status, messageParts.join("。"));
     }
 
     private createRequestError(targetUrl: string, error: unknown): ModelRequestError {
@@ -929,6 +1011,17 @@ export class LocalModelClient {
         }
 
         return this.extractStatusCode(error) === 404;
+    }
+
+    private shouldRetryOllamaEmbeddingOnCpu(error: unknown): boolean {
+        const status: number | null = this.extractStatusCode(error);
+        if (status !== null && status < 500) {
+            return false;
+        }
+
+        const message: string = this.getErrorMessage(error);
+        // requestUrl 在部分环境下只给出泛化的 HTTP 500，因此同时匹配状态码和常见 GPU 崩溃关键词。
+        return /cuda|gpu|ptx|llama-server|unsupported toolchain|0xc0000409|server error|status 500|http 500/i.test(message);
     }
 
     private extractStatusCode(error: unknown): number | null {

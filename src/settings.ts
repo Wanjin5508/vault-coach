@@ -410,7 +410,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     .onChange(async (value: boolean) => {
                         this.plugin.settings.enableVectorRetrieval = value;
                         await this.plugin.saveSettings();
-                        this.plugin.markKnowledgeBaseDirty();
+                        this.plugin.markVectorIndexDirty();
                     }),
             );
 
@@ -562,7 +562,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                         if (value !== "ollama" && value !== "openai-compatible") return;
                         this.plugin.settings.embeddingProvider = value;
                         await this.plugin.saveSettings();
-                        this.plugin.markKnowledgeBaseDirty();
+                        this.plugin.markVectorIndexDirty();
                         this.renderSettings();
                     }),
             );
@@ -634,7 +634,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     .onChange(async (value: string) => {
                         this.plugin.settings.embeddingModel = value.trim() || DEFAULT_EMBEDDING_MODEL;
                         await this.plugin.saveSettings();
-                        this.plugin.markKnowledgeBaseDirty();
+                        this.plugin.markVectorIndexDirty();
                     }),
             );
     }
@@ -650,7 +650,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     .onChange(async (value: string) => {
                         this.plugin.settings.cloudEmbeddingBaseUrl = value.trim() || DEFAULT_CLOUD_EMBEDDING_BASE_URL;
                         await this.plugin.saveSettings();
-                        this.plugin.markKnowledgeBaseDirty();
+                        this.plugin.markVectorIndexDirty();
                     }),
             );
 
@@ -664,7 +664,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     .onChange(async (value: string) => {
                         this.plugin.settings.cloudEmbeddingModel = value.trim() || DEFAULT_CLOUD_EMBEDDING_MODEL;
                         await this.plugin.saveSettings();
-                        this.plugin.markKnowledgeBaseDirty();
+                        this.plugin.markVectorIndexDirty();
                     }),
             );
     }
@@ -681,7 +681,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                         this.plugin.settings.llmBaseUrl = value.trim() || DEFAULT_OLLAMA_BASE_URL;
                         await this.plugin.saveSettings();
                         if (this.plugin.settings.embeddingProvider === "ollama") {
-                            this.plugin.markKnowledgeBaseDirty();
+                            this.plugin.markVectorIndexDirty();
                         }
                     }),
             );
