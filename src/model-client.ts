@@ -353,6 +353,8 @@ export class LocalModelClient {
                     temperature,
                 },
             },
+            {},
+            handlers?.abortSignal,
         );
 
         let finalText = "";
@@ -381,18 +383,27 @@ export class LocalModelClient {
             }
         };
 
-        await this.readTextStream(response, (chunk: string) => {
-            pendingText += chunk;
-            const lines: string[] = pendingText.split(/\r?\n/);
-            pendingText = lines.pop() ?? "";
+        try {
+            await this.readTextStream(response, (chunk: string) => {
+                pendingText += chunk;
+                const lines: string[] = pendingText.split(/\r?\n/);
+                pendingText = lines.pop() ?? "";
 
-            for (let index = 0; index < lines.length; index += 1) {
-                const line: string | undefined = lines[index];
-                if (line !== undefined) {
-                    handleLine(line);
+                for (let index = 0; index < lines.length; index += 1) {
+                    const line: string | undefined = lines[index];
+                    if (line !== undefined) {
+                        handleLine(line);
+                    }
                 }
+            }, handlers?.abortSignal);
+        } catch (error: unknown) {
+            if (this.isAbortError(error) && finalText.length > 0) {
+                handlers?.onDone?.();
+                return finalText;
             }
-        });
+
+            throw error;
+        }
 
         if (pendingText.trim().length > 0) {
             handleLine(pendingText);
@@ -435,6 +446,7 @@ export class LocalModelClient {
                 stream: true,
             },
             { Authorization: `Bearer ${apiKey}` },
+            handlers?.abortSignal,
         );
 
         let finalText = "";
@@ -469,18 +481,27 @@ export class LocalModelClient {
             }
         };
 
-        await this.readTextStream(response, (chunk: string) => {
-            pendingText += chunk;
-            const lines: string[] = pendingText.split(/\r?\n/);
-            pendingText = lines.pop() ?? "";
+        try {
+            await this.readTextStream(response, (chunk: string) => {
+                pendingText += chunk;
+                const lines: string[] = pendingText.split(/\r?\n/);
+                pendingText = lines.pop() ?? "";
 
-            for (let index = 0; index < lines.length; index += 1) {
-                const line: string | undefined = lines[index];
-                if (line !== undefined) {
-                    handleEventLine(line);
+                for (let index = 0; index < lines.length; index += 1) {
+                    const line: string | undefined = lines[index];
+                    if (line !== undefined) {
+                        handleEventLine(line);
+                    }
                 }
+            }, handlers?.abortSignal);
+        } catch (error: unknown) {
+            if (this.isAbortError(error) && finalText.length > 0) {
+                handlers?.onDone?.();
+                return finalText;
             }
-        });
+
+            throw error;
+        }
 
         if (pendingText.trim().length > 0) {
             handleEventLine(pendingText);
@@ -832,6 +853,7 @@ export class LocalModelClient {
         targetUrl: string,
         payload: unknown,
         headers: Record<string, string> = {},
+        abortSignal?: AbortSignal,
     ): Promise<Response> {
         try {
             // requestUrl returns a buffered response; fetch is required here so the UI can receive tokens as they arrive.
@@ -842,6 +864,7 @@ export class LocalModelClient {
                     "Content-Type": "application/json",
                     ...headers,
                 },
+                signal: abortSignal,
             });
 
             if (!response.ok) {
@@ -865,11 +888,19 @@ export class LocalModelClient {
                 throw error;
             }
 
+            if (this.isAbortError(error)) {
+                throw error;
+            }
+
             throw this.createRequestError(targetUrl, error);
         }
     }
 
-    private async readTextStream(response: Response, onChunk: (chunk: string) => void): Promise<void> {
+    private async readTextStream(
+        response: Response,
+        onChunk: (chunk: string) => void,
+        abortSignal?: AbortSignal,
+    ): Promise<void> {
         const body: ReadableStream<Uint8Array> | null = response.body;
         if (!body) {
             throw new Error("Streaming response body is empty.");
@@ -880,6 +911,7 @@ export class LocalModelClient {
 
         try {
             while (true) {
+                this.throwIfAborted(abortSignal);
                 const result: ReadableStreamReadResult<Uint8Array> = await reader.read();
                 if (result.done) {
                     break;
@@ -897,6 +929,14 @@ export class LocalModelClient {
         } finally {
             reader.releaseLock();
         }
+    }
+
+    private throwIfAborted(abortSignal?: AbortSignal): void {
+        if (!abortSignal?.aborted) {
+            return;
+        }
+
+        throw new DOMException("VaultCoach request aborted by user.", "AbortError");
     }
 
     /**
@@ -1022,6 +1062,18 @@ export class LocalModelClient {
         const message: string = this.getErrorMessage(error);
         // requestUrl 在部分环境下只给出泛化的 HTTP 500，因此同时匹配状态码和常见 GPU 崩溃关键词。
         return /cuda|gpu|ptx|llama-server|unsupported toolchain|0xc0000409|server error|status 500|http 500/i.test(message);
+    }
+
+    private isAbortError(error: unknown): boolean {
+        if (error instanceof DOMException) {
+            return error.name === "AbortError";
+        }
+
+        if (error instanceof Error) {
+            return error.name === "AbortError" || /aborted|aborterror/i.test(error.message);
+        }
+
+        return false;
     }
 
     private extractStatusCode(error: unknown): number | null {

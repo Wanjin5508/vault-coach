@@ -354,6 +354,18 @@ export default class VaultCoach extends Plugin {
         return this.runtimeRetrievalMode;
     }
 
+    getActiveChatModelName(): string {
+        return this.settings.modelProvider === "openai-compatible"
+            ? this.settings.cloudChatModel.trim()
+            : this.settings.chatModel.trim();
+    }
+
+    getActiveEmbeddingModelName(): string {
+        return this.settings.embeddingProvider === "openai-compatible"
+            ? this.settings.cloudEmbeddingModel.trim()
+            : this.settings.embeddingModel.trim();
+    }
+
     setRuntimeRetrievalMode(mode: RetrievalMode): void {
         this.runtimeRetrievalMode = mode;
         this.refreshAllViews();
@@ -497,7 +509,9 @@ export default class VaultCoach extends Plugin {
             );
 
             this.addAssistantMessage(answer.text, answer.sources);
-            await this.updateLongTermMemory(userText, answer.text);
+            if (!handlers?.abortSignal?.aborted) {
+                await this.updateLongTermMemory(userText, answer.text);
+            }
             await this.persistRuntimeState();
 
             return answer;

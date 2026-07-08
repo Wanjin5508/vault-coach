@@ -466,4 +466,5 @@ export interface StreamHandlers {
     onToken?: (token: string) => void;
     onDone?: () => void;
     onError?: (error: unknown) => void;
+    abortSignal?: AbortSignal;
 }

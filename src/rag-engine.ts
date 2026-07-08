@@ -285,6 +285,10 @@ export class AdvancedRagEngine {
                 queryRewrite: prepared.rewriteResult,
             };
         } catch (streamError: unknown) {
+            if (this.isAbortError(streamError)) {
+                throw streamError;
+            }
+
             console.error("[VaultCoach] 流式回答失败，将回退到非流式回答。", streamError);
 
             try {
@@ -321,6 +325,18 @@ export class AdvancedRagEngine {
                 };
             }
         }
+    }
+
+    private isAbortError(error: unknown): boolean {
+        if (error instanceof DOMException) {
+            return error.name === "AbortError";
+        }
+
+        if (error instanceof Error) {
+            return error.name === "AbortError" || /aborted|aborterror/i.test(error.message);
+        }
+
+        return false;
     }
 
     // 新增：对外暴露长期记忆抽取入口，由主插件负责持久化与去重。

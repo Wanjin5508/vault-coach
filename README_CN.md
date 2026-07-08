@@ -7,7 +7,7 @@ Vault Coach 是一个运行在 [Obsidian](https://obsidian.md) 中的知识库�
 插件默认走本地 [Ollama](https://ollama.com)，也支持用户显式配置 OpenAI-compatible 的云端或自托管模型服务。
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.2.4-1E90FF)
+![Version](https://img.shields.io/badge/version-1.2.6-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
@@ -24,7 +24,11 @@ Vault Coach 会扫描你的 Obsidian Markdown 文件，将笔记切分为 chunk�
 - 长期记忆：从对话中提取长期有用的信息，并在后续相关问题中注入。
 - 自动增量同步：监听 Markdown 文件变化，自动同步索引。
 - 真实流式输出：模型生成时逐步显示文本，完成后再渲染 Markdown。
+- 停止输出：回答生成时间过长时，可以中断当前流式输出，并保留已经生成的部分文本。
 - Markdown 来源渲染：回答来源中的摘录支持 Markdown 渲染，并可跳转回原笔记。
+- 考试模式：可基于知识库创建测试、填写答案、调用已配置 LLM 评分，并按需保留历史或手动导出记录。
+- 模型状态显示：输入区旁会显示当前使用的聊天模型和 embedding 模型。
+- Windows Ollama embedding fallback：当 Ollama GPU/CUDA embedding 失败时，自动尝试使用 CPU 生成向量。
 - 双语界面：插件界面和设置页会跟随系统语言显示中文或英文。
 - 默认本地优先：默认使用 Ollama；只有用户明确配置后才会调用远程服务。
 
@@ -40,7 +44,7 @@ Vault Coach 会扫描你的 Obsidian Markdown 文件，将笔记切分为 chunk�
 4. 在侧边栏点击 **重建索引**，或等待文件变化触发自动同步。
 5. 在侧边栏输入问题开始问答。
 
-第一次提问可能会更慢，因为插件可能需要建立文本索引、生成或刷新 embedding、执行检索，并调用模型。进入最终回答生成阶段后，Vault Coach 会以流式方式逐步显示文本，完整回答生成后再渲染为 Markdown。
+第一次提问可能会更慢，因为插件可能需要建立文本索引、生成或刷新 embedding、执行检索，并调用模型。进入最终回答生成阶段后，Vault Coach 会以流式方式逐步显示文本，完整回答生成后再渲染为 Markdown。如果回答生成时间过长，可以点击 **停止输出** 中断当前生成。
 
 ## 设置说明
 
@@ -73,7 +77,7 @@ Vault Coach 会扫描你的 Obsidian Markdown 文件，将笔记切分为 chunk�
 | 自动同步防抖时间 | 15,000 ms | 最后一次文件变化后等待多久再同步。 | 如果经常连续编辑多篇笔记，可以适当调大。 |
 | 自动同步最大等待时间 | 120,000 ms | 文件变化持续发生时，最长等待多久后强制同步。 | 用于避免长时间编辑导致索引迟迟不同步。 |
 
-修改扫描范围、chunk 参数或 embedding 配置后，知识库会被标记为需要重建。要让检索结果反映新配置，请在侧边栏点击 **重建索引**。
+修改扫描范围或 chunk 参数后，文本索引会被标记为需要重建；修改 embedding 服务、embedding 模型或向量检索配置后，向量索引会被标记为需要重建。要让检索结果反映新配置，请在侧边栏点击 **重建索引**。
 
 ### 模型
 
@@ -102,6 +106,8 @@ Embedding 模型用于向量检索。切换 embedding 服务或模型后，需�
 | OpenAI 兼容 | 调用用户配置的云端或自托管 embedding 接口。 | 云端 embedding 服务地址、云端 embedding 模型、云端密钥。 |
 
 使用云端 embedding 时，构建向量索引可能会向远程服务发送大量笔记 chunk。只有在理解并接受这种数据流向后，才建议启用云端 embedding。
+
+Windows 用户注意：如果本地 Ollama embedding 报 CUDA、PTX 或 `llama-server` 相关错误，请优先更新 NVIDIA 驱动、CUDA 相关环境和 Ollama。Vault Coach 会在 Ollama GPU embedding 失败后自动用 CPU 重试，但 CPU 构建向量索引会更慢。如果仍有问题，欢迎在 [GitHub issue](https://github.com/Wanjin5508/vault-coach/issues) 提交反馈，并附上模型名称、模型服务设置和开发者工具错误日志。
 
 #### 云端密钥
 
@@ -148,10 +154,12 @@ Rerank 是可选能力。如果 **独立 rerank 服务地址** 或 **Rerank 模�
 
 侧边栏顶部会以网格形式展示当前知识库范围、文本索引状态、向量索引状态、文件数、片段数和长期记忆数量。
 
-- **问答模式 / 考试模式**：目前是前端模式开关。当前实际生效的是问答模式，考试模式的后台逻辑尚未实现。
+- **问答模式 / 考试模式**：问答模式维持一个可随时重置的临时对话；考试模式会基于当前知识库范围创建测试，支持选择完整知识库或指定目录，提交答案后由已配置 LLM 评分，并可保留历史或手动导出记录。
 - **检索模式**：切换当前会话使用关键词、向量或混合检索。
 - **重建索引**：重建文本索引，并在开启向量检索时重建向量索引。
 - **重置会话**：清空当前对话历史，回到默认欢迎语。
+- **停止输出**：中断当前正在生成的流式回答。
+- **模型状态**：在输入区旁显示当前使用的聊天模型和 embedding 模型。
 
 ## 隐私与网络使用
 
@@ -176,7 +184,7 @@ Vault Coach 不包含隐藏遥测。插件无法控制用户选择的远程服�
 - 流式输出期间先显示纯文本；完整答案生成后，再使用 Obsidian MarkdownRenderer 渲染 Markdown。
 - 来源摘录支持 Markdown 渲染，但如果截断摘录中包含 Mermaid 代码块，会作为普通文本渲染，以避免 Obsidian Mermaid 报错。
 - 长期记忆检索目前基于关键词匹配，还不是语义相似度检索。
-- 考试模式目前只是 UI 开关，后台考试逻辑尚未实现。
+- 考试评分由用户配置的 LLM 生成，适合作为学习反馈，不应视为权威评分。
 
 ## 项目计划
 

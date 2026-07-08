@@ -5,7 +5,7 @@
 Vault Coach is an [Obsidian](https://obsidian.md) plugin for asking questions over your Markdown vault with RAG (Retrieval-Augmented Generation). It is local-first with [Ollama](https://ollama.com), and can also use user-configured OpenAI-compatible cloud services for chat and embeddings.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.2.4-1E90FF)
+![Version](https://img.shields.io/badge/version-1.2.6-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
@@ -22,7 +22,11 @@ Key features:
 - Long-term memory: extracts durable user facts and injects relevant memories into future answers.
 - Incremental index sync: watches Markdown changes and updates the index automatically.
 - True streaming output: answer text appears as the model generates it, then renders as Markdown after completion.
+- Stop generation: interrupt a long answer while keeping any partial text already streamed.
 - Markdown sources: source excerpts render Markdown and link back to vault notes.
+- Exam mode: create knowledge-base tests, answer questions, score with the configured LLM, keep hidden history, and export records when needed.
+- Model status: shows the active chat model and embedding model beside the input controls.
+- Windows Ollama embedding fallback: retries local embeddings on CPU if Ollama GPU/CUDA embedding fails.
 - Bilingual UI: plugin view and settings follow the operating system language, currently Chinese or English.
 - Local-first privacy model: Ollama is the default; remote services are used only after explicit configuration.
 
@@ -38,7 +42,7 @@ Recommended first setup:
 4. Select **Rebuild index** in the sidebar, or wait for automatic sync after file changes.
 5. Ask a question in the Vault Coach sidebar.
 
-The first question can take longer because the plugin may need to build the text index, build or refresh embeddings, retrieve context, and call the model. During answer generation, Vault Coach streams text into the assistant bubble before rendering the final Markdown response.
+The first question can take longer because the plugin may need to build the text index, build or refresh embeddings, retrieve context, and call the model. During answer generation, Vault Coach streams text into the assistant bubble before rendering the final Markdown response. Use **Stop** if you need to interrupt a long generation.
 
 ## Configuration Guide
 
@@ -71,7 +75,7 @@ Use this section to decide what Markdown content enters the index and how notes 
 | Auto-sync debounce time | 15,000 ms | Wait time after the last file change before syncing. | Increase if you often edit many files in bursts. |
 | Auto-sync maximum wait | 120,000 ms | Forces sync after this time even if changes continue. | Prevents long editing sessions from delaying sync indefinitely. |
 
-Changing scan scope, chunk size, chunk overlap, or embedding settings marks the knowledge base dirty. Rebuild the index before expecting updated retrieval results.
+Changing scan scope, chunk size, or chunk overlap marks the text index dirty. Changing the embedding provider, embedding model, or vector setting marks the vector index dirty. Rebuild the index before expecting updated retrieval results.
 
 ### Models
 
@@ -100,6 +104,8 @@ The embedding model is used for vector retrieval. Changing it requires rebuildin
 | OpenAI compatible | Calls a configured remote or self-hosted embedding API. | Cloud embedding service URL, cloud embedding model, cloud API key. |
 
 Remote embeddings may send many vault chunks to the configured provider during index building. Use remote embeddings only when you understand and accept that data flow.
+
+Windows note: if local Ollama embeddings fail with CUDA, PTX, or `llama-server` errors, update your NVIDIA driver, CUDA-related environment, and Ollama first. Vault Coach retries Ollama embeddings on CPU after GPU embedding failures, but CPU indexing is slower. If the problem continues, please open a [GitHub issue](https://github.com/Wanjin5508/vault-coach/issues) with your model names, provider settings, and developer console logs.
 
 #### Cloud API Key
 
@@ -146,10 +152,12 @@ These settings control retrieval quality and prompt construction. The defaults a
 
 The sidebar header shows current index status, file and chunk counts, vector status, and memory count in a compact grid.
 
-- **Q&A / Exam mode**: a front-end mode switch. Q&A mode is the active behavior today; exam-mode backend behavior is not implemented yet.
+- **Q&A / Exam mode**: Q&A keeps a temporary, resettable chat. Exam mode creates a test from the configured knowledge-base scope, lets you choose full-vault or folder ranges, scores answers with the configured LLM, and can keep or export test records.
 - **Retrieval mode**: switches the current session between keyword, vector, and hybrid retrieval.
 - **Rebuild index**: rebuilds the text index and, if enabled, the vector index.
 - **Reset conversation**: clears the chat history and returns to the default greeting.
+- **Stop**: interrupts the current streaming answer.
+- **Model status**: displays the active chat and embedding models next to the input controls.
 
 ## Privacy and Network Use
 
@@ -174,7 +182,7 @@ Vault Coach does not include hidden telemetry. The plugin cannot control how a s
 - Streaming text is displayed as plain text while tokens arrive. After generation finishes, the complete answer is rendered as Markdown.
 - Source excerpts are Markdown-rendered, but Mermaid fences inside truncated excerpts are rendered as text to avoid Obsidian Mermaid errors.
 - Long-term memory search is keyword-based at the moment.
-- Exam mode is currently a UI switch only; Q&A mode remains the implemented behavior.
+- Exam scores are generated by the configured LLM and should be treated as study feedback, not authoritative grading.
 
 ## Roadmap
 

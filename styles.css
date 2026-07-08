@@ -251,7 +251,49 @@
 .vault-coach-button-row {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
+}
+
+.vault-coach-stop-button {
+    color: var(--text-on-accent, #ffffff);
+    background-color: var(--background-modifier-error, var(--text-error));
+    border-color: var(--background-modifier-error, var(--text-error));
+}
+
+.vault-coach-stop-button:hover:not(:disabled),
+.vault-coach-stop-button:focus-visible:not(:disabled) {
+    color: var(--text-on-accent, #ffffff);
+    background-color: var(--background-modifier-error-hover, var(--text-error));
+    border-color: var(--background-modifier-error-hover, var(--text-error));
+}
+
+.vault-coach-stop-button:disabled {
+    color: var(--text-muted);
+    background-color: var(--background-secondary);
+    border-color: var(--background-modifier-border);
+    opacity: 0.65;
+}
+
+.vault-coach-model-status {
+    display: inline-flex;
+    flex: 1 1 220px;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.4;
+}
+
+.vault-coach-model-status-item {
+    min-width: 0;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .vault-coach-exam-area {

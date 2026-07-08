@@ -40,6 +40,7 @@ export class VaultCoachView extends ItemView {
 
     // 发送按钮元素，单独保存出来，便于在异步请求期间禁用按钮
     private sendButtonEl!: HTMLButtonElement;
+    private stopButtonEl!: HTMLButtonElement;
 
     // 检索模式选择元素
     private retrievalModeSelectEl!: HTMLSelectElement;
@@ -67,6 +68,7 @@ export class VaultCoachView extends ItemView {
     private streamingWrapperEl: HTMLDivElement | null = null;
     private streamingBubbleEl: HTMLDivElement | null = null;
     private streamingText = "";
+    private activeAbortController: AbortController | null = null;
 
     constructor(leaf: WorkspaceLeaf, plugin: VaultCoach) {
         super(leaf);
@@ -783,6 +785,14 @@ export class VaultCoachView extends ItemView {
             text: this.t("view.clear"),
         });
 
+        this.stopButtonEl = buttonRowEl.createEl("button", {
+            text: this.t("view.stopGenerating"),
+            cls: "vault-coach-stop-button",
+        });
+        this.stopButtonEl.disabled = true;
+
+        this.renderModelStatus(buttonRowEl);
+
         this.sendButtonEl.addEventListener("click", () => {
             void this.handleSend();
         });
@@ -790,6 +800,10 @@ export class VaultCoachView extends ItemView {
         clearButtonEl.addEventListener("click", () => {
             this.inputEl.value = "";
             this.focusInput();
+        });
+
+        this.stopButtonEl.addEventListener("click", () => {
+            this.abortActiveAssistantTurn();
         });
 
         this.inputEl.addEventListener("compositionstart", () => {
@@ -809,6 +823,21 @@ export class VaultCoachView extends ItemView {
                 event.preventDefault();
                 void this.handleSend();
             }
+        });
+    }
+
+    private renderModelStatus(buttonRowEl: HTMLDivElement): void {
+        const modelStatusEl: HTMLDivElement = buttonRowEl.createDiv({ cls: "vault-coach-model-status" });
+        const chatModelName: string = this.plugin.getActiveChatModelName() || this.t("view.modelUnset");
+        const embeddingModelName: string = this.plugin.getActiveEmbeddingModelName() || this.t("view.modelUnset");
+
+        modelStatusEl.createSpan({
+            cls: "vault-coach-model-status-item",
+            text: this.t("view.modelStatus.chat", { model: chatModelName }),
+        });
+        modelStatusEl.createSpan({
+            cls: "vault-coach-model-status-item",
+            text: this.t("view.modelStatus.embedding", { model: embeddingModelName }),
         });
     }
 
@@ -1045,6 +1074,15 @@ export class VaultCoachView extends ItemView {
         this.streamingWrapperEl = null;
         this.streamingBubbleEl = null;
         this.streamingText = "";
+    }
+
+    private abortActiveAssistantTurn(): void {
+        if (!this.activeAbortController || this.activeAbortController.signal.aborted) {
+            return;
+        }
+
+        this.activeAbortController.abort();
+        this.stopButtonEl.disabled = true;
     }
 
     private async handleCreateExam(): Promise<void> {
@@ -1323,7 +1361,9 @@ export class VaultCoachView extends ItemView {
         }
 
         this.isBusy = true;
+        this.activeAbortController = new AbortController();
         this.sendButtonEl.disabled = true;
+        this.stopButtonEl.disabled = false;
         this.inputEl.disabled = true;
         this.retrievalModeSelectEl.disabled = true;
 
@@ -1351,7 +1391,12 @@ export class VaultCoachView extends ItemView {
                 onToken: (token: string) => {
                     this.appendStreamingToken(token);
                 },
+                abortSignal: this.activeAbortController.signal,
             });
+
+            if (this.activeAbortController.signal.aborted) {
+                new Notice(this.t("view.generationStopped"));
+            }
 
             this.clearStreamingAssistantBubble();
 
@@ -1359,17 +1404,37 @@ export class VaultCoachView extends ItemView {
             await this.renderMessages();
 
         } catch (error: unknown) {
+            if (this.isAbortError(error)) {
+                this.clearStreamingAssistantBubble();
+                new Notice(this.t("view.generationStopped"));
+                return;
+            }
+
             console.error("[VaultCoachView] 发送消息失败", error);
             this.clearStreamingAssistantBubble();
             new Notice(this.t("view.sendFailed", { message: this.createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
+            this.activeAbortController = null;
             this.sendButtonEl.disabled = false;
+            this.stopButtonEl.disabled = true;
             this.inputEl.disabled = false;
             this.retrievalModeSelectEl.disabled = false;
             // 7. 把焦点重新放回输入框
             this.focusInput();
         }
+    }
+
+    private isAbortError(error: unknown): boolean {
+        if (error instanceof DOMException) {
+            return error.name === "AbortError";
+        }
+
+        if (error instanceof Error) {
+            return error.name === "AbortError" || /aborted|aborterror/i.test(error.message);
+        }
+
+        return false;
     }
 
     /**
