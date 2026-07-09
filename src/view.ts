@@ -69,6 +69,7 @@ export class VaultCoachView extends ItemView {
     private streamingBubbleEl: HTMLDivElement | null = null;
     private streamingText = "";
     private activeAbortController: AbortController | null = null;
+    private postOpenStyleRefreshTimers: number[] = [];
 
     constructor(leaf: WorkspaceLeaf, plugin: VaultCoach) {
         super(leaf);
@@ -100,17 +101,67 @@ export class VaultCoachView extends ItemView {
         // 满足了"async 函数必须有 await 表达式"的 lint 规则，同时对实际行为没有任何影响
         await Promise.resolve();
         this.render();
+        this.schedulePostOpenStyleRefresh();
     }
 
     // 当视图被关闭时调用
     async onClose(): Promise<void> {
         await Promise.resolve();
-        this.containerEl.empty();
+        this.clearPostOpenStyleRefreshTimers();
+        // 只清理插件自己的内容区。清空 containerEl 会移除 Obsidian 的视图外壳，
+        // 在某些冷启动/首次打开路径下会导致后续渲染缺少正常的样式和布局上下文。
+        this.contentEl.empty();
+        this.contentEl.removeClass("vault-coach-view");
     }
 
     // 对外暴露的刷新方法，当 settings 变化、会话重置后，可以重新渲染界面
     public refresh(): void {
         this.render();
+    }
+
+    private schedulePostOpenStyleRefresh(): void {
+        this.clearPostOpenStyleRefreshTimers();
+
+        for (const delayMs of [50, 250, 750]) {
+            const timerId: number = window.setTimeout(() => {
+                this.postOpenStyleRefreshTimers = this.postOpenStyleRefreshTimers.filter((id: number) => id !== timerId);
+                this.refreshInitialLayoutIfStylesReady();
+            }, delayMs);
+            this.postOpenStyleRefreshTimers.push(timerId);
+        }
+    }
+
+    private clearPostOpenStyleRefreshTimers(): void {
+        for (const timerId of this.postOpenStyleRefreshTimers) {
+            window.clearTimeout(timerId);
+        }
+        this.postOpenStyleRefreshTimers = [];
+    }
+
+    private refreshInitialLayoutIfStylesReady(): void {
+        if (!this.isVaultCoachStylesheetActive()) {
+            return;
+        }
+
+        this.clearPostOpenStyleRefreshTimers();
+
+        // 首次打开时 Obsidian 可能稍晚才让插件 styles.css 生效。这里只在用户尚未开始
+        // 输入/生成时补一次完整渲染，避免为了修复冷启动排版而清掉用户正在编辑的内容。
+        if (this.isBusy || (this.inputEl?.isConnected && this.inputEl.value.length > 0)) {
+            return;
+        }
+
+        this.render();
+    }
+
+    private isVaultCoachStylesheetActive(): boolean {
+        const sentinelEl: HTMLDivElement = this.contentEl.createDiv({ cls: "vault-coach-style-sentinel" });
+        const loadedValue: string = getComputedStyle(sentinelEl)
+            .getPropertyValue("--vault-coach-style-loaded")
+            .trim();
+
+        sentinelEl.remove();
+        return loadedValue === "1";
     }
 
     // render 方法，负责完整渲染界面

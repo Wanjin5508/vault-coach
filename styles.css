@@ -7,6 +7,16 @@
  * 3. 让 Markdown 内容、来源区和输入区更可读。
  */
 
+.vault-coach-style-sentinel {
+    --vault-coach-style-loaded: 1;
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+}
+
 .vault-coach-view,
 .vault-coach-root {
     height: 100%;
