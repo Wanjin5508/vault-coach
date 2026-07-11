@@ -7,7 +7,7 @@ Vault Coach 是一个运行在 [Obsidian](https://obsidian.md) 中的知识库�
 插件默认走本地 [Ollama](https://ollama.com)，也支持用户显式配置 OpenAI-compatible 的云端或自托管模型服务。
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.2.6-1E90FF)
+![Version](https://img.shields.io/badge/version-1.2.9-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
@@ -26,7 +26,7 @@ Vault Coach 会扫描你的 Obsidian Markdown 文件，将笔记切分为 chunk�
 - 真实流式输出：模型生成时逐步显示文本，完成后再渲染 Markdown。
 - 停止输出：回答生成时间过长时，可以中断当前流式输出，并保留已经生成的部分文本。
 - Markdown 来源渲染：回答来源中的摘录支持 Markdown 渲染，并可跳转回原笔记。
-- 考试模式：可基于知识库创建测试、填写答案、调用已配置 LLM 评分，并按需保留历史或手动导出记录。
+- 考试模式：可基于知识库创建测试，支持目录与文件级范围控制、填写答案、调用已配置 LLM 评分，并按需保留历史或手动导出记录。
 - 模型状态显示：输入区旁会显示当前使用的聊天模型和 embedding 模型。
 - Windows Ollama embedding fallback：当 Ollama GPU/CUDA embedding 失败时，自动尝试使用 CPU 生成向量。
 - 双语界面：插件界面和设置页会跟随系统语言显示中文或英文。
@@ -76,6 +76,8 @@ Vault Coach 会扫描你的 Obsidian Markdown 文件，将笔记切分为 chunk�
 | 自动同步文件阈值 | 8 | 累计变更文件达到该数量时立即同步。 | 调低会更及时，调高会减少后台工作。 |
 | 自动同步防抖时间 | 15,000 ms | 最后一次文件变化后等待多久再同步。 | 如果经常连续编辑多篇笔记，可以适当调大。 |
 | 自动同步最大等待时间 | 120,000 ms | 文件变化持续发生时，最长等待多久后强制同步。 | 用于避免长时间编辑导致索引迟迟不同步。 |
+| 考试模式排除路径 | 空 | 仅在考试出题时排除的 vault 相对路径或简单 glob。 | 每行一个规则，例如 `TODO/**`、`Archive/**` 或 `**/*.draft.md`。 |
+| 智能排除不适合出题的内容 | 开启 | 从考试中排除空白笔记、占位笔记、任务清单、链接索引和正文过少的笔记。 | 建议保持开启；如果只想使用手动和路径规则过滤，可以关闭。 |
 
 修改扫描范围或 chunk 参数后，文本索引会被标记为需要重建；修改 embedding 服务、embedding 模型或向量检索配置后，向量索引会被标记为需要重建。要让检索结果反映新配置，请在侧边栏点击 **重建索引**。
 
@@ -154,7 +156,7 @@ Rerank 是可选能力。如果 **独立 rerank 服务地址** 或 **Rerank 模�
 
 侧边栏顶部会以网格形式展示当前知识库范围、文本索引状态、向量索引状态、文件数、片段数和长期记忆数量。
 
-- **问答模式 / 考试模式**：问答模式维持一个可随时重置的临时对话；考试模式会基于当前知识库范围创建测试，支持选择完整知识库或指定目录，提交答案后由已配置 LLM 评分，并可保留历史或手动导出记录。
+- **问答模式 / 考试模式**：问答模式维持一个可随时重置的临时对话；考试模式会基于当前知识库范围创建测试，支持选择完整知识库、指定目录和文件级范围，提交答案后由已配置 LLM 评分，并可保留历史或手动导出记录。
 - **检索模式**：切换当前会话使用关键词、向量或混合检索。
 - **重建索引**：重建文本索引，并在开启向量检索时重建向量索引。
 - **重置会话**：清空当前对话历史，回到默认欢迎语。
@@ -171,6 +173,7 @@ Vault Coach 默认本地优先。使用默认 Ollama 配置时，聊天和 embed
 
 - 用户当前问题。
 - RAG 回答所需的已检索 Markdown 片段。
+- 使用考试模式时选定的考试笔记片段、生成的题目、参考答案、评分标准和用户答案。
 - 少量最近对话上下文。
 - 如果启用了长期记忆，则包含与当前问题相关的长期记忆。
 - 模型名称、temperature 等参数。

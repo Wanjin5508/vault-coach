@@ -10,8 +10,11 @@ import type {
     AssistantAnswer,
     ChatMessage,
     ExamEvaluationItem,
+    ExamFileOption,
     ExamHistoryItem,
     ExamQuestion,
+    ExamScopeSelection,
+    ExamScopeSnapshot,
     ExamScopeOption,
     ExamSession,
     IndexedChunk,
@@ -236,20 +239,39 @@ export default class VaultCoach extends Plugin {
         ];
     }
 
-    async createExamSession(selectedFolderPaths: string[], questionCount: number): Promise<ExamSession> {
+    getExamFileOptions(selectedFolderPaths: string[]): ExamFileOption[] {
+        const normalizedFolderPaths: string[] = this.normalizeExamFolderPaths(selectedFolderPaths);
+        return this.knowledgeBase.getExamFileOptions(normalizedFolderPaths);
+    }
+
+    getExamScopeSnapshot(selection: ExamScopeSelection): ExamScopeSnapshot {
+        return this.knowledgeBase.getExamScopeSnapshot(this.normalizeExamScopeSelection(selection));
+    }
+
+    async createExamSession(selection: ExamScopeSelection, questionCount: number): Promise<ExamSession> {
         await this.ensureKnowledgeBaseReady();
 
-        const normalizedFolderPaths: string[] = this.normalizeExamFolderPaths(selectedFolderPaths);
-        const chunks: IndexedChunk[] = this.knowledgeBase.getChunksForExamScope(normalizedFolderPaths);
+        const normalizedSelection: ExamScopeSelection = this.normalizeExamScopeSelection(selection);
+        const chunks: IndexedChunk[] = this.knowledgeBase.getChunksForExamScope(normalizedSelection);
         if (chunks.length === 0) {
             throw new Error(this.t("exam.notice.noChunks"));
         }
 
-        const scopeLabel: string = normalizedFolderPaths.length === 0
+        const scopeSnapshot: ExamScopeSnapshot = this.knowledgeBase.getExamScopeSnapshot(normalizedSelection);
+        const effectiveQuestionCount: number = scopeSnapshot.estimatedMaxQuestions > 0
+            ? Math.min(questionCount, scopeSnapshot.estimatedMaxQuestions)
+            : questionCount;
+        const scopeLabel: string = normalizedSelection.selectedFolderPaths.length === 0
             ? this.t("exam.scope.fullCurrentKnowledgeBase")
-            : normalizedFolderPaths.join(", ");
+            : normalizedSelection.selectedFolderPaths.join(", ");
 
-        return this.ragEngine.generateExamSession(scopeLabel, normalizedFolderPaths, chunks, questionCount);
+        return this.ragEngine.generateExamSession(
+            scopeLabel,
+            normalizedSelection,
+            chunks,
+            effectiveQuestionCount,
+            scopeSnapshot,
+        );
     }
 
     async evaluateExamSession(session: ExamSession, userAnswers: string[]): Promise<ExamSession> {
@@ -953,6 +975,22 @@ export default class VaultCoach extends Plugin {
             folderPaths
                 .map((folderPath: string) => normalizePath(folderPath.trim()).replace(/\/$/, ""))
                 .filter((folderPath: string) => folderPath.length > 0 && !this.isVaultCoachHiddenPath(folderPath)),
+        ));
+    }
+
+    private normalizeExamScopeSelection(selection: ExamScopeSelection): ExamScopeSelection {
+        return {
+            selectedFolderPaths: this.normalizeExamFolderPaths(selection.selectedFolderPaths),
+            excludedFilePaths: this.normalizeExamFilePaths(selection.excludedFilePaths),
+            forceIncludedFilePaths: this.normalizeExamFilePaths(selection.forceIncludedFilePaths),
+        };
+    }
+
+    private normalizeExamFilePaths(filePaths: string[]): string[] {
+        return Array.from(new Set(
+            filePaths
+                .map((filePath: string) => normalizePath(filePath.trim()))
+                .filter((filePath: string) => filePath.length > 0 && !this.isVaultCoachHiddenPath(filePath)),
         ));
     }
 

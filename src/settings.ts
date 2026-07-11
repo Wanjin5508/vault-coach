@@ -78,6 +78,8 @@ export function createDefaultSettings(): VaultCoachSettings {
         autoIndexDebounceMs: DEFAULT_AUTO_INDEX_DEBOUNCE_MS,
         autoIndexMaxWaitMs: DEFAULT_AUTO_INDEX_MAX_WAIT_MS,
         autoIndexFileThreshold: DEFAULT_AUTO_INDEX_FILE_THRESHOLD,
+        examExcludePathPatterns: "",
+        enableExamSmartFiltering: true,
     };
 }
 
@@ -114,6 +116,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 
         this.renderGeneralSection(containerEl);
         this.renderKnowledgeSection(containerEl);
+        this.renderExamSection(containerEl);
         this.renderModelSection(containerEl);
         this.renderMemorySection(containerEl);
         this.renderAdvancedRagSection(containerEl);
@@ -318,6 +321,41 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     .onChange(async (value: string) => {
                         this.plugin.settings.autoIndexMaxWaitMs = this.parsePositiveInteger(value, DEFAULT_AUTO_INDEX_MAX_WAIT_MS);
                         await this.plugin.saveSettings();
+                    }),
+            );
+
+    }
+
+    private renderExamSection(containerEl: HTMLElement): void {
+        new Setting(containerEl)
+            .setHeading()
+            .setName(this.t("settings.exam.heading"))
+            .setDesc(this.t("settings.exam.desc"));
+
+        new Setting(containerEl)
+            .setName(this.t("settings.examExcludePaths.name"))
+            .setDesc(this.t("settings.examExcludePaths.desc"))
+            .addTextArea((text) =>
+                text
+                    .setPlaceholder(this.t("settings.examExcludePaths.placeholder"))
+                    .setValue(this.plugin.settings.examExcludePathPatterns)
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.examExcludePathPatterns = value;
+                        await this.plugin.saveSettings();
+                        this.plugin.refreshAllViews();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName(this.t("settings.examSmartFiltering.name"))
+            .setDesc(this.t("settings.examSmartFiltering.desc"))
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.enableExamSmartFiltering)
+                    .onChange(async (value: boolean) => {
+                        this.plugin.settings.enableExamSmartFiltering = value;
+                        await this.plugin.saveSettings();
+                        this.plugin.refreshAllViews();
                     }),
             );
     }

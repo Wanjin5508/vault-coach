@@ -6,8 +6,11 @@ import type {
     AnswerSource,
     ChatMessage,
     ExamEvaluationItem,
+    ExamFileOption,
     ExamHistoryItem,
     ExamQuestion,
+    ExamScopeSelection,
+    ExamScopeSnapshot,
     ExamScopeOption,
     ExamSession,
     KnowledgeBaseStats,
@@ -54,6 +57,11 @@ export class VaultCoachView extends ItemView {
     private examPhase: ExamViewPhase = "setup";
     private examSession: ExamSession | null = null;
     private selectedExamScopeIds: Set<string> = new Set<string>(["__all__"]);
+    private excludedExamFilePaths: Set<string> = new Set<string>();
+    private forceIncludedExamFilePaths: Set<string> = new Set<string>();
+    private showExamFileManager = false;
+    private examFileSearchText = "";
+    private pendingExamAreaScrollTop: number | null = null;
     private examQuestionCount = 5;
     private examAnswerEls: HTMLTextAreaElement[] = [];
     private examExportFolderPath = "VaultCoach Exams";
@@ -179,11 +187,38 @@ export class VaultCoachView extends ItemView {
 
         if (this.activeInteractionMode === "exam") {
             this.renderExamArea(rootEl);
+            this.restorePendingExamAreaScroll();
             return;
         }
 
         this.renderMessageArea(rootEl);
         this.renderInputArea(rootEl);
+    }
+
+    private renderPreservingExamScroll(): void {
+        const examAreaEl: HTMLDivElement | null = this.contentEl.querySelector(".vault-coach-exam-area");
+        this.pendingExamAreaScrollTop = examAreaEl?.scrollTop ?? null;
+        this.render();
+    }
+
+    private restorePendingExamAreaScroll(): void {
+        if (this.pendingExamAreaScrollTop === null) {
+            return;
+        }
+
+        const scrollTop: number = this.pendingExamAreaScrollTop;
+        this.pendingExamAreaScrollTop = null;
+        const examAreaEl: HTMLDivElement | null = this.contentEl.querySelector(".vault-coach-exam-area");
+        if (!examAreaEl) {
+            return;
+        }
+
+        examAreaEl.scrollTop = scrollTop;
+        window.requestAnimationFrame(() => {
+            if (examAreaEl.isConnected) {
+                examAreaEl.scrollTop = scrollTop;
+            }
+        });
     }
 
     /**
@@ -370,6 +405,12 @@ export class VaultCoachView extends ItemView {
         const scopeListEl: HTMLDivElement = scopeSectionEl.createDiv({ cls: "vault-coach-exam-scope-list" });
         this.renderExamScopeOption(scopeListEl, allScopeOption, true);
 
+        const selectedFolderPaths: string[] = this.getSelectedExamFolderPaths(scopeOptions);
+        const fileOptions: ExamFileOption[] = this.plugin.getExamFileOptions(selectedFolderPaths);
+        const scopeSelection: ExamScopeSelection = this.getCurrentExamScopeSelection(scopeOptions);
+        const scopeSnapshot: ExamScopeSnapshot = this.plugin.getExamScopeSnapshot(scopeSelection);
+        this.renderExamFileScopeSection(panelEl, fileOptions, scopeSnapshot);
+
         const folderOptions: ExamScopeOption[] = scopeOptions.slice(1);
         if (folderOptions.length === 0) {
             scopeListEl.createDiv({
@@ -387,16 +428,20 @@ export class VaultCoachView extends ItemView {
             }
         }
 
+        if (scopeSnapshot.estimatedMaxQuestions > 0 && this.examQuestionCount > scopeSnapshot.estimatedMaxQuestions) {
+            this.examQuestionCount = scopeSnapshot.estimatedMaxQuestions;
+        }
+
         const countSectionEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-section vault-coach-exam-count-row" });
         countSectionEl.createSpan({ text: this.t("exam.questionCount") });
         const countInputEl: HTMLInputElement = countSectionEl.createEl("input");
         countInputEl.type = "number";
         countInputEl.min = "1";
-        countInputEl.max = "10";
+        countInputEl.max = String(Math.max(1, scopeSnapshot.estimatedMaxQuestions || 10));
         countInputEl.step = "1";
         countInputEl.value = String(this.examQuestionCount);
         countInputEl.addEventListener("change", () => {
-            this.examQuestionCount = this.normalizeQuestionCount(countInputEl.value);
+            this.examQuestionCount = this.normalizeQuestionCount(countInputEl.value, scopeSnapshot.estimatedMaxQuestions);
             countInputEl.value = String(this.examQuestionCount);
         });
 
@@ -405,7 +450,7 @@ export class VaultCoachView extends ItemView {
             text: this.t("exam.start"),
             cls: "mod-cta",
         });
-        startButtonEl.disabled = this.isBusy || !this.hasExamScopeSelection(scopeOptions);
+        startButtonEl.disabled = this.isBusy || !this.hasExamScopeSelection(scopeOptions) || scopeSnapshot.eligibleChunkCount === 0;
         startButtonEl.addEventListener("click", () => {
             void this.handleCreateExam();
         });
@@ -467,6 +512,204 @@ export class VaultCoachView extends ItemView {
 
             this.render();
         });
+    }
+
+    private renderExamFileScopeSection(
+        containerEl: HTMLDivElement,
+        fileOptions: ExamFileOption[],
+        scopeSnapshot: ExamScopeSnapshot,
+    ): void {
+        const fileSectionEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-section" });
+        fileSectionEl.createDiv({ cls: "vault-coach-exam-section-title", text: this.t("exam.files.title") });
+        this.renderExamSmartFilteringToggle(fileSectionEl);
+
+        const summaryEl: HTMLDivElement = fileSectionEl.createDiv({ cls: "vault-coach-exam-file-summary" });
+        summaryEl.createDiv({
+            cls: "vault-coach-exam-file-summary-main",
+            text: this.t("exam.files.summary", {
+                total: scopeSnapshot.totalFileCount,
+                excluded: scopeSnapshot.excludedFileCount,
+                eligible: scopeSnapshot.eligibleFileCount,
+            }),
+        });
+        summaryEl.createDiv({
+            cls: "vault-coach-exam-file-summary-sub",
+            text: scopeSnapshot.estimatedMaxQuestions > 0
+                ? this.t("exam.files.capacity", {
+                    min: scopeSnapshot.estimatedMinQuestions,
+                    max: scopeSnapshot.estimatedMaxQuestions,
+                })
+                : this.t("exam.files.capacityEmpty"),
+        });
+
+        const manageButtonEl: HTMLButtonElement = summaryEl.createEl("button", {
+            text: this.showExamFileManager ? this.t("exam.files.hideManager") : this.t("exam.files.manage"),
+        });
+        manageButtonEl.disabled = this.isBusy || fileOptions.length === 0;
+        manageButtonEl.addEventListener("click", () => {
+            this.showExamFileManager = !this.showExamFileManager;
+            this.render();
+        });
+
+        if (scopeSnapshot.eligibleChunkCount === 0) {
+            fileSectionEl.createDiv({
+                cls: "vault-coach-exam-warning",
+                text: this.t("exam.files.noEligible"),
+            });
+        }
+
+        if (this.showExamFileManager) {
+            this.renderExamFileManager(fileSectionEl, fileOptions);
+        }
+    }
+
+    private renderExamSmartFilteringToggle(containerEl: HTMLDivElement): void {
+        const toggleLabelEl: HTMLLabelElement = containerEl.createEl("label", {
+            cls: "vault-coach-exam-toggle",
+        });
+        const checkboxEl: HTMLInputElement = toggleLabelEl.createEl("input");
+        checkboxEl.type = "checkbox";
+        checkboxEl.checked = this.plugin.settings.enableExamSmartFiltering;
+        checkboxEl.disabled = this.isBusy;
+        const textEl: HTMLSpanElement = toggleLabelEl.createSpan({ cls: "vault-coach-exam-toggle-text" });
+        textEl.createSpan({
+            cls: "vault-coach-exam-toggle-title",
+            text: this.t("settings.examSmartFiltering.name"),
+        });
+        textEl.createSpan({
+            cls: "vault-coach-exam-toggle-description",
+            text: this.t("settings.examSmartFiltering.desc"),
+        });
+
+        checkboxEl.addEventListener("change", () => {
+            this.plugin.settings.enableExamSmartFiltering = checkboxEl.checked;
+            void this.plugin.saveSettings().then(() => {
+                this.render();
+            });
+        });
+    }
+
+    private renderExamFileManager(containerEl: HTMLDivElement, fileOptions: ExamFileOption[]): void {
+        const managerEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-file-manager" });
+        const toolbarEl: HTMLDivElement = managerEl.createDiv({ cls: "vault-coach-exam-file-toolbar" });
+        const searchInputEl: HTMLInputElement = toolbarEl.createEl("input", {
+            attr: {
+                type: "search",
+                placeholder: this.t("exam.files.search"),
+            },
+        });
+        searchInputEl.value = this.examFileSearchText;
+        searchInputEl.addEventListener("input", () => {
+            this.examFileSearchText = searchInputEl.value;
+            this.renderPreservingExamScroll();
+        });
+
+        const includeAllButtonEl: HTMLButtonElement = toolbarEl.createEl("button", { text: this.t("exam.files.includeAll") });
+        includeAllButtonEl.addEventListener("click", () => {
+            for (const option of fileOptions) {
+                this.excludedExamFilePaths.delete(option.filePath);
+            }
+            this.renderPreservingExamScroll();
+        });
+
+        const excludeAllButtonEl: HTMLButtonElement = toolbarEl.createEl("button", { text: this.t("exam.files.excludeAll") });
+        excludeAllButtonEl.addEventListener("click", () => {
+            for (const option of fileOptions) {
+                if (!option.permanentlyExcluded) {
+                    this.excludedExamFilePaths.add(option.filePath);
+                }
+            }
+            this.renderPreservingExamScroll();
+        });
+
+        const resetButtonEl: HTMLButtonElement = toolbarEl.createEl("button", { text: this.t("exam.files.reset") });
+        resetButtonEl.addEventListener("click", () => {
+            for (const option of fileOptions) {
+                this.excludedExamFilePaths.delete(option.filePath);
+                this.forceIncludedExamFilePaths.delete(option.filePath);
+            }
+            this.renderPreservingExamScroll();
+        });
+
+        const normalizedSearchText: string = this.examFileSearchText.trim().toLowerCase();
+        const visibleFileOptions: ExamFileOption[] = normalizedSearchText.length === 0
+            ? fileOptions
+            : fileOptions.filter((option: ExamFileOption) => {
+                return option.filePath.toLowerCase().includes(normalizedSearchText);
+            });
+
+        if (visibleFileOptions.length === 0) {
+            managerEl.createDiv({ cls: "vault-coach-exam-muted", text: this.t("exam.files.noMatches") });
+            return;
+        }
+
+        const groupedOptions: Map<string, ExamFileOption[]> = new Map<string, ExamFileOption[]>();
+        for (const option of visibleFileOptions) {
+            const folderLabel: string = option.parentFolder.length > 0 ? option.parentFolder : this.t("exam.files.rootFolder");
+            const folderOptions: ExamFileOption[] = groupedOptions.get(folderLabel) ?? [];
+            folderOptions.push(option);
+            groupedOptions.set(folderLabel, folderOptions);
+        }
+
+        const listEl: HTMLDivElement = managerEl.createDiv({ cls: "vault-coach-exam-file-list" });
+        for (const [folderLabel, folderOptions] of groupedOptions.entries()) {
+            const folderDetailsEl: HTMLDetailsElement = listEl.createEl("details", {
+                cls: "vault-coach-exam-file-folder",
+                attr: { open: "true" },
+            });
+            folderDetailsEl.createEl("summary", {
+                text: `${folderLabel} (${folderOptions.length})`,
+                cls: "vault-coach-exam-file-folder-title",
+            });
+
+            for (const option of folderOptions) {
+                this.renderExamFileOption(folderDetailsEl, option);
+            }
+        }
+    }
+
+    private renderExamFileOption(containerEl: HTMLElement, option: ExamFileOption): void {
+        const optionEl: HTMLLabelElement = containerEl.createEl("label", {
+            cls: `vault-coach-exam-file-option ${option.permanentlyExcluded ? "is-permanently-excluded" : ""}`,
+        });
+
+        const checkboxEl: HTMLInputElement = optionEl.createEl("input");
+        checkboxEl.type = "checkbox";
+        checkboxEl.disabled = option.permanentlyExcluded || this.isBusy;
+        checkboxEl.checked = !option.permanentlyExcluded && !this.excludedExamFilePaths.has(option.filePath);
+        checkboxEl.addEventListener("change", () => {
+            if (checkboxEl.checked) {
+                this.excludedExamFilePaths.delete(option.filePath);
+            } else {
+                this.excludedExamFilePaths.add(option.filePath);
+                this.forceIncludedExamFilePaths.delete(option.filePath);
+            }
+            this.renderPreservingExamScroll();
+        });
+
+        const bodyEl: HTMLDivElement = optionEl.createDiv({ cls: "vault-coach-exam-file-option-body" });
+        bodyEl.createDiv({ cls: "vault-coach-exam-file-name", text: option.fileName });
+        bodyEl.createDiv({ cls: "vault-coach-exam-file-path", text: option.filePath });
+
+        const metaEl: HTMLDivElement = bodyEl.createDiv({ cls: "vault-coach-exam-file-meta" });
+        metaEl.createSpan({
+            cls: "vault-coach-exam-file-badge",
+            text: this.t("exam.files.chunkCount", { count: option.chunkCount }),
+        });
+
+        if (option.permanentlyExcluded) {
+            metaEl.createSpan({
+                cls: "vault-coach-exam-file-badge is-muted",
+                text: option.permanentExcludeReason
+                    ? this.t("exam.files.permanentReason", { reason: option.permanentExcludeReason })
+                    : this.t("exam.files.permanentExcluded"),
+            });
+        } else if (this.excludedExamFilePaths.has(option.filePath)) {
+            metaEl.createSpan({
+                cls: "vault-coach-exam-file-badge is-muted",
+                text: this.t("exam.files.manualExcluded"),
+            });
+        }
     }
 
     private renderExamBusyState(containerEl: HTMLDivElement, label: string): void {
@@ -1147,12 +1390,18 @@ export class VaultCoachView extends ItemView {
         this.render();
 
         try {
-            const selectedFolderPaths: string[] = this.getSelectedExamFolderPaths();
+            const scopeSelection: ExamScopeSelection = this.getCurrentExamScopeSelection();
             const session: ExamSession = await this.plugin.createExamSession(
-                selectedFolderPaths,
+                scopeSelection,
                 this.examQuestionCount,
             );
             this.examSession = session;
+            if (session.questions.length < this.examQuestionCount) {
+                new Notice(this.t("exam.notice.questionCountReduced", {
+                    requested: this.examQuestionCount,
+                    actual: session.questions.length,
+                }));
+            }
             this.examPhase = "taking";
         } catch (error: unknown) {
             console.error("[VaultCoachView] 创建考试失败", error);
@@ -1301,19 +1550,27 @@ export class VaultCoachView extends ItemView {
         }
     }
 
-    private getSelectedExamFolderPaths(): string[] {
+    private getSelectedExamFolderPaths(scopeOptions?: ExamScopeOption[]): string[] {
         if (this.selectedExamScopeIds.has("__all__")) {
             return [];
         }
 
         const selectedFolderPaths: string[] = [];
-        for (const option of this.plugin.getExamScopeOptions()) {
+        for (const option of scopeOptions ?? this.plugin.getExamScopeOptions()) {
             if (option.folderPath && this.selectedExamScopeIds.has(option.id)) {
                 selectedFolderPaths.push(option.folderPath);
             }
         }
 
         return selectedFolderPaths;
+    }
+
+    private getCurrentExamScopeSelection(scopeOptions?: ExamScopeOption[]): ExamScopeSelection {
+        return {
+            selectedFolderPaths: this.getSelectedExamFolderPaths(scopeOptions),
+            excludedFilePaths: Array.from(this.excludedExamFilePaths),
+            forceIncludedFilePaths: Array.from(this.forceIncludedExamFilePaths),
+        };
     }
 
     private hasExamScopeSelection(scopeOptions: ExamScopeOption[]): boolean {
@@ -1326,13 +1583,14 @@ export class VaultCoachView extends ItemView {
         });
     }
 
-    private normalizeQuestionCount(value: string): number {
+    private normalizeQuestionCount(value: string, maxQuestionCount = 10): number {
         const parsedValue: number = Number.parseInt(value, 10);
         if (!Number.isFinite(parsedValue)) {
             return 5;
         }
 
-        return Math.max(1, Math.min(10, parsedValue));
+        const normalizedMaxQuestionCount: number = Math.max(1, Math.min(10, maxQuestionCount || 10));
+        return Math.max(1, Math.min(normalizedMaxQuestionCount, parsedValue));
     }
 
     private resetExamSession(): void {

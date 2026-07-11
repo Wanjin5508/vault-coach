@@ -5,7 +5,7 @@
 Vault Coach is an [Obsidian](https://obsidian.md) plugin for asking questions over your Markdown vault with RAG (Retrieval-Augmented Generation). It is local-first with [Ollama](https://ollama.com), and can also use user-configured OpenAI-compatible cloud services for chat and embeddings.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.2.6-1E90FF)
+![Version](https://img.shields.io/badge/version-1.2.9-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
@@ -24,7 +24,7 @@ Key features:
 - True streaming output: answer text appears as the model generates it, then renders as Markdown after completion.
 - Stop generation: interrupt a long answer while keeping any partial text already streamed.
 - Markdown sources: source excerpts render Markdown and link back to vault notes.
-- Exam mode: create knowledge-base tests, answer questions, score with the configured LLM, keep hidden history, and export records when needed.
+- Exam mode: create knowledge-base tests with folder and file-level scope controls, answer questions, score with the configured LLM, keep hidden history, and export records when needed.
 - Model status: shows the active chat model and embedding model beside the input controls.
 - Windows Ollama embedding fallback: retries local embeddings on CPU if Ollama GPU/CUDA embedding fails.
 - Bilingual UI: plugin view and settings follow the operating system language, currently Chinese or English.
@@ -74,6 +74,8 @@ Use this section to decide what Markdown content enters the index and how notes 
 | Auto-sync file threshold | 8 | Triggers sync immediately after enough files change. | Lower values update sooner; higher values reduce background work. |
 | Auto-sync debounce time | 15,000 ms | Wait time after the last file change before syncing. | Increase if you often edit many files in bursts. |
 | Auto-sync maximum wait | 120,000 ms | Forces sync after this time even if changes continue. | Prevents long editing sessions from delaying sync indefinitely. |
+| Exam mode excluded paths | Empty | Vault-relative paths or simple globs excluded only from exam generation. | Use one pattern per line, for example `TODO/**`, `Archive/**`, or `**/*.draft.md`. |
+| Smartly exclude low-quality exam content | On | Excludes empty notes, stubs, task lists, link indexes, and low-body-text notes from exams. | Keep enabled for cleaner exams; disable if you want only manual and rule-based filtering. |
 
 Changing scan scope, chunk size, or chunk overlap marks the text index dirty. Changing the embedding provider, embedding model, or vector setting marks the vector index dirty. Rebuild the index before expecting updated retrieval results.
 
@@ -152,7 +154,7 @@ These settings control retrieval quality and prompt construction. The defaults a
 
 The sidebar header shows current index status, file and chunk counts, vector status, and memory count in a compact grid.
 
-- **Q&A / Exam mode**: Q&A keeps a temporary, resettable chat. Exam mode creates a test from the configured knowledge-base scope, lets you choose full-vault or folder ranges, scores answers with the configured LLM, and can keep or export test records.
+- **Q&A / Exam mode**: Q&A keeps a temporary, resettable chat. Exam mode creates a test from the configured knowledge-base scope, lets you choose full-vault, folder, and file-level ranges, scores answers with the configured LLM, and can keep or export test records.
 - **Retrieval mode**: switches the current session between keyword, vector, and hybrid retrieval.
 - **Rebuild index**: rebuilds the text index and, if enabled, the vector index.
 - **Reset conversation**: clears the chat history and returns to the default greeting.
@@ -169,6 +171,7 @@ When a remote answer model is enabled, the configured service may receive:
 
 - The current user question.
 - Retrieved Markdown chunks used as RAG context.
+- Selected exam note excerpts, generated questions, reference answers, rubrics, and user answers when using Exam mode.
 - A small amount of recent conversation context.
 - Relevant long-term memory entries if memory is enabled.
 - Model parameters such as model name and temperature.

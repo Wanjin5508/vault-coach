@@ -7,16 +7,6 @@
  * 3. 让 Markdown 内容、来源区和输入区更可读。
  */
 
-.vault-coach-style-sentinel {
-    --vault-coach-style-loaded: 1;
-    position: absolute;
-    width: 0;
-    height: 0;
-    overflow: hidden;
-    pointer-events: none;
-    opacity: 0;
-}
-
 .vault-coach-view,
 .vault-coach-root {
     height: 100%;
@@ -410,6 +400,193 @@
 
 .vault-coach-exam-count-row input {
     width: 80px;
+}
+
+.vault-coach-exam-toggle {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-exam-toggle-text {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.vault-coach-exam-toggle-title {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.vault-coach-exam-toggle-description {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.4;
+}
+
+.vault-coach-exam-file-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 8px;
+    padding: 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-exam-file-summary-main {
+    min-width: 0;
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: 600;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-exam-file-summary-sub {
+    grid-column: 1 / -1;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.4;
+}
+
+.vault-coach-exam-warning {
+    padding: 8px;
+    border: 1px solid var(--background-modifier-error);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+    color: var(--text-error);
+    font-size: var(--font-ui-small);
+    line-height: 1.45;
+}
+
+.vault-coach-exam-file-manager {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-exam-file-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.vault-coach-exam-file-toolbar input {
+    flex: 1 1 180px;
+    min-width: 0;
+}
+
+.vault-coach-exam-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.vault-coach-exam-file-folder {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary-alt);
+}
+
+.vault-coach-exam-file-folder-title {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-exam-file-option {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    padding: 9px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+    box-sizing: border-box;
+}
+
+.vault-coach-exam-file-option + .vault-coach-exam-file-option {
+    margin-top: 2px;
+}
+
+.vault-coach-exam-file-option:hover {
+    border-color: var(--background-modifier-border-hover, var(--background-modifier-border));
+    background: var(--background-modifier-hover);
+}
+
+.vault-coach-exam-file-option.is-permanently-excluded {
+    opacity: 0.78;
+}
+
+.vault-coach-exam-file-option > input {
+    margin-top: 2px;
+}
+
+.vault-coach-exam-file-option-body {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.vault-coach-exam-file-name {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: 650;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-exam-file-path {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-exam-file-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 1px;
+}
+
+.vault-coach-exam-file-badge {
+    padding: 2px 5px;
+    border-radius: var(--radius-s);
+    background: var(--background-secondary-alt);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-exam-file-badge.is-muted {
+    color: var(--text-faint);
 }
 
 .vault-coach-exam-actions {

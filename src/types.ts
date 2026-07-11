@@ -179,6 +179,12 @@ export interface VaultCoachSettings {
     autoIndexDebounceMs: number;
     autoIndexMaxWaitMs: number;
     autoIndexFileThreshold: number;
+
+    // 考试模式路径排除规则，每行一个 vault 相对路径或简单 glob。
+    examExcludePathPatterns: string;
+
+    // 是否在考试模式中启用内容质量筛选。
+    enableExamSmartFiltering: boolean;
 }
 
 /**
@@ -334,6 +340,46 @@ export interface ExamScopeOption {
     chunkCount: number;
 }
 
+export interface ExamFileOption {
+    filePath: string;
+    fileName: string;
+    parentFolder: string;
+    chunkCount: number;
+    permanentlyExcluded: boolean;
+    permanentExcludeReason?: string;
+}
+
+export interface ExamScopeSelection {
+    selectedFolderPaths: string[];
+    excludedFilePaths: string[];
+    forceIncludedFilePaths: string[];
+}
+
+export interface ExamScopeSnapshot {
+    totalFileCount: number;
+    eligibleFileCount: number;
+    excludedFileCount: number;
+    eligibleChunkCount: number;
+    estimatedMinQuestions: number;
+    estimatedMaxQuestions: number;
+}
+
+export interface ExamBlueprintItem {
+    id: string;
+    topic: string;
+    learningObjective: string;
+    questionType: "explanation" | "comparison" | "application" | "reasoning" | "process";
+    difficulty: "basic" | "intermediate" | "advanced";
+    sourceChunkIds: string[];
+}
+
+export interface ExamBlueprint {
+    title: string;
+    requestedQuestionCount: number;
+    plannedQuestionCount: number;
+    items: ExamBlueprintItem[];
+}
+
 export interface ExamQuestion {
     id: string;
     question: string;
@@ -363,6 +409,10 @@ export interface ExamSession {
     createdAt: number;
     scopeLabel: string;
     selectedFolderPaths: string[];
+    excludedFilePaths: string[];
+    forceIncludedFilePaths: string[];
+    scopeSnapshot?: ExamScopeSnapshot;
+    blueprint?: ExamBlueprint;
     questions: ExamQuestion[];
     userAnswers: string[];
     evaluation: ExamEvaluation | null;

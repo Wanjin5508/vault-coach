@@ -2,6 +2,9 @@ import { App, TFile, normalizePath } from "obsidian";
 import { VAULT_COACH_HIDDEN_DIR_PATH } from "./constants";
 import type {
     ChunkEmbedding,
+    ExamFileOption,
+    ExamScopeSelection,
+    ExamScopeSnapshot,
     ExamScopeOption,
     IndexedChunk,
     KnowledgeBaseFileRecord,
@@ -136,21 +139,49 @@ export class VaultKnowledgeBase {
             }));
     }
 
-    getChunksForExamScope(folderPaths: string[]): IndexedChunk[] {
-        const normalizedFolderPaths: string[] = folderPaths
-            .map((folderPath: string) => this.normalizeFolderPath(folderPath))
-            .filter((folderPath: string) => folderPath.length > 0);
+    getExamFileOptions(folderPaths: string[]): ExamFileOption[] {
+        const filePaths: string[] = this.resolveExamFilePathsForFolders(folderPaths);
+        return filePaths.map((filePath: string) => this.buildExamFileOption(filePath));
+    }
 
-        if (normalizedFolderPaths.length === 0) {
-            return this.getAllChunks();
-        }
-
-        return this.chunks.filter((chunk: IndexedChunk) => {
-            return normalizedFolderPaths.some((folderPath: string) => {
-                const prefix: string = `${folderPath}/`;
-                return chunk.filePath.startsWith(prefix);
-            });
+    getExamScopeSnapshot(selection: ExamScopeSelection): ExamScopeSnapshot {
+        const fileOptions: ExamFileOption[] = this.getExamFileOptions(selection.selectedFolderPaths);
+        const excludedPathSet: Set<string> = new Set(selection.excludedFilePaths.map((filePath: string) => normalizePath(filePath)));
+        const eligibleFiles: ExamFileOption[] = fileOptions.filter((option: ExamFileOption) => {
+            return !option.permanentlyExcluded && !excludedPathSet.has(option.filePath);
         });
+        const eligibleChunkCount: number = eligibleFiles.reduce((sum: number, option: ExamFileOption) => {
+            return sum + option.chunkCount;
+        }, 0);
+        const estimatedMaxQuestions: number = this.estimateMaxExamQuestions(eligibleFiles.length, eligibleChunkCount);
+
+        return {
+            totalFileCount: fileOptions.length,
+            eligibleFileCount: eligibleFiles.length,
+            excludedFileCount: fileOptions.length - eligibleFiles.length,
+            eligibleChunkCount,
+            estimatedMinQuestions: estimatedMaxQuestions > 0 ? Math.max(1, Math.min(estimatedMaxQuestions, Math.floor(estimatedMaxQuestions / 2) || 1)) : 0,
+            estimatedMaxQuestions,
+        };
+    }
+
+    getChunksForExamScope(selectionOrFolderPaths: ExamScopeSelection | string[]): IndexedChunk[] {
+        const selection: ExamScopeSelection = Array.isArray(selectionOrFolderPaths)
+            ? {
+                selectedFolderPaths: selectionOrFolderPaths,
+                excludedFilePaths: [],
+                forceIncludedFilePaths: [],
+            }
+            : selectionOrFolderPaths;
+
+        const excludedPathSet: Set<string> = new Set(selection.excludedFilePaths.map((filePath: string) => normalizePath(filePath)));
+        const allowedFilePaths: Set<string> = new Set(
+            this.getExamFileOptions(selection.selectedFolderPaths)
+                .filter((option: ExamFileOption) => !option.permanentlyExcluded && !excludedPathSet.has(option.filePath))
+                .map((option: ExamFileOption) => option.filePath),
+        );
+
+        return this.chunks.filter((chunk: IndexedChunk) => allowedFilePaths.has(chunk.filePath));
     }
 
     getEmbeddingSnapshot(): ChunkEmbedding[] {
@@ -487,6 +518,216 @@ export class VaultKnowledgeBase {
         hits.sort((left: VectorSearchHit, right: VectorSearchHit) => right.score - left.score);
         return hits.slice(0, limit);
     } 
+
+    private resolveExamFilePathsForFolders(folderPaths: string[]): string[] {
+        const normalizedFolderPaths: string[] = folderPaths
+            .map((folderPath: string) => this.normalizeFolderPath(folderPath))
+            .filter((folderPath: string) => folderPath.length > 0);
+
+        return Array.from(this.fileChunkIds.keys())
+            .filter((filePath: string) => {
+                if (this.isVaultCoachHiddenPath(filePath)) {
+                    return false;
+                }
+
+                if (normalizedFolderPaths.length === 0) {
+                    return true;
+                }
+
+                return normalizedFolderPaths.some((folderPath: string) => this.isFileInFolder(filePath, folderPath));
+            })
+            .sort((leftPath: string, rightPath: string) => leftPath.localeCompare(rightPath));
+    }
+
+    private buildExamFileOption(filePath: string): ExamFileOption {
+        const normalizedPath: string = normalizePath(filePath);
+        const permanentExcludeReason: string | null = this.getPermanentExamExcludeReason(normalizedPath);
+        const pathParts: string[] = normalizedPath.split("/");
+        const fileName: string = pathParts[pathParts.length - 1] ?? normalizedPath;
+        const parentFolder: string = pathParts.length > 1
+            ? pathParts.slice(0, pathParts.length - 1).join("/")
+            : "";
+
+        return {
+            filePath: normalizedPath,
+            fileName,
+            parentFolder,
+            chunkCount: this.getChunkCountForFilePath(normalizedPath),
+            permanentlyExcluded: permanentExcludeReason !== null,
+            permanentExcludeReason: permanentExcludeReason ?? undefined,
+        };
+    }
+
+    private getPermanentExamExcludeReason(filePath: string): string | null {
+        if (this.isVaultCoachHiddenPath(filePath)) {
+            return "VaultCoach hidden directory";
+        }
+
+        const abstractFile = this.app.vault.getAbstractFileByPath(filePath);
+        if (!(abstractFile instanceof TFile)) {
+            return "File no longer exists";
+        }
+
+        const frontmatter = this.app.metadataCache.getFileCache(abstractFile)?.frontmatter;
+        const examFlag: unknown = frontmatter?.["vault_coach_exam"];
+        if (examFlag === false || examFlag === "false") {
+            return "vault_coach_exam: false";
+        }
+
+        const matchedUserRule: string | null = this.findMatchingExamExcludeRule(filePath);
+        if (matchedUserRule !== null) {
+            return `Matched exclude rule: ${matchedUserRule}`;
+        }
+
+        const chunks: IndexedChunk[] = this.getChunksForFilePath(filePath);
+        if (chunks.length === 0) {
+            return "Empty or heading-only note";
+        }
+
+        const rawText: string = chunks.map((chunk: IndexedChunk) => chunk.text).join("\n\n");
+        const cleanedText: string = this.cleanExamMarkdownText(rawText);
+        if (cleanedText.length < 80) {
+            return "Too little exam-ready body text";
+        }
+
+        if (this.getSettings().enableExamSmartFiltering) {
+            const smartExcludeReason: string | null = this.detectLowQualityExamContentReason(rawText, cleanedText);
+            if (smartExcludeReason !== null) {
+                return smartExcludeReason;
+            }
+        }
+
+        return null;
+    }
+
+    private findMatchingExamExcludeRule(filePath: string): string | null {
+        const normalizedPath: string = normalizePath(filePath);
+        const patterns: string[] = this.getSettings().examExcludePathPatterns
+            .split(/\r?\n/g)
+            .map((line: string) => line.trim())
+            .filter((line: string) => line.length > 0 && !line.startsWith("#"));
+
+        for (const pattern of patterns) {
+            const normalizedPattern: string = normalizePath(pattern.replace(/^\/+/, ""));
+            if (this.matchesExamExcludePattern(normalizedPath, normalizedPattern)) {
+                return pattern;
+            }
+        }
+
+        return null;
+    }
+
+    private matchesExamExcludePattern(filePath: string, pattern: string): boolean {
+        if (pattern.length === 0) {
+            return false;
+        }
+
+        if (!pattern.includes("*") && !pattern.includes("?")) {
+            return filePath === pattern || filePath.startsWith(`${pattern}/`);
+        }
+
+        const doubleStarPlaceholder = "__VAULT_COACH_DOUBLE_STAR__";
+        const escapedPattern: string = pattern
+            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+            .replace(/\*\*/g, doubleStarPlaceholder)
+            .replace(/\*/g, "[^/]*")
+            .replace(/\?/g, "[^/]")
+            .replace(new RegExp(doubleStarPlaceholder, "g"), ".*");
+        return new RegExp(`^${escapedPattern}$`).test(filePath);
+    }
+
+    private detectLowQualityExamContentReason(rawText: string, cleanedText: string): string | null {
+        const contentLines: string[] = cleanedText
+            .split(/\r?\n/g)
+            .map((line: string) => line.trim())
+            .filter((line: string) => line.length > 0);
+        const rawLines: string[] = rawText
+            .split(/\r?\n/g)
+            .map((line: string) => line.trim())
+            .filter((line: string) => line.length > 0);
+
+        if (contentLines.length === 0) {
+            return "Empty or heading-only note";
+        }
+
+        const checkboxLineCount: number = rawLines.filter((line: string) => /^[-*+]\s+\[[ xX]\]/.test(line)).length;
+        const linkOnlyLineCount: number = rawLines.filter((line: string) => {
+            const withoutLinks: string = line
+                .replace(/\[\[[^\]]+\]\]/g, "")
+                .replace(/\[[^\]]+\]\([^)]+\)/g, "")
+                .replace(/^[-*+]\s+/, "")
+                .trim();
+            return withoutLinks.length <= 8 && (/\[\[[^\]]+\]\]/.test(line) || /\[[^\]]+\]\([^)]+\)/.test(line));
+        }).length;
+        const substantialParagraphCount: number = contentLines.filter((line: string) => {
+            return line.length >= 24
+                && !/^[-*+]\s+\[[ xX]\]/.test(line)
+                && !/^[-*+]\s+\S+$/.test(line)
+                && !/^#{1,6}\s+/.test(line);
+        }).length;
+
+        if (checkboxLineCount >= Math.max(3, Math.ceil(contentLines.length * 0.6)) && substantialParagraphCount <= 1) {
+            return "Task-list dominant content";
+        }
+
+        if (linkOnlyLineCount >= Math.max(3, Math.ceil(contentLines.length * 0.6)) && substantialParagraphCount <= 1) {
+            return "Link-index dominant content";
+        }
+
+        const commandOrLogLineCount: number = rawLines.filter((line: string) => {
+            return /^(\$|>|npm |pnpm |yarn |cargo |go |python |Traceback|Error:|at\s+\S+\()/.test(line);
+        }).length;
+        if (commandOrLogLineCount >= Math.max(5, Math.ceil(rawLines.length * 0.6)) && substantialParagraphCount <= 1) {
+            return "Raw command or log output";
+        }
+
+        return null;
+    }
+
+    private cleanExamMarkdownText(markdown: string): string {
+        return markdown
+            .replace(/^---[\s\S]*?---\s*/m, "")
+            .replace(/```[\s\S]*?```/g, "")
+            .replace(/~~~[\s\S]*?~~~/g, "")
+            .replace(/<!--[\s\S]*?-->/g, "")
+            .replace(/^#{1,6}\s+/gm, "")
+            .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+            .replace(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g, "$1")
+            .replace(/[`*_~>#-]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    private getChunksForFilePath(filePath: string): IndexedChunk[] {
+        const chunkIds: string[] = this.fileChunkIds.get(filePath) ?? [];
+        return chunkIds
+            .map((chunkId: string) => this.chunkMap.get(chunkId))
+            .filter((chunk: IndexedChunk | undefined): chunk is IndexedChunk => chunk !== undefined);
+    }
+
+    private getChunkCountForFilePath(filePath: string): number {
+        return this.fileChunkIds.get(filePath)?.length ?? 0;
+    }
+
+    private isFileInFolder(filePath: string, folderPath: string): boolean {
+        const normalizedFolderPath: string = this.normalizeFolderPath(folderPath);
+        if (normalizedFolderPath.length === 0) {
+            return true;
+        }
+
+        return filePath.startsWith(`${normalizedFolderPath}/`);
+    }
+
+    private estimateMaxExamQuestions(eligibleFileCount: number, eligibleChunkCount: number): number {
+        if (eligibleFileCount === 0 || eligibleChunkCount === 0) {
+            return 0;
+        }
+
+        const chunkCapacity: number = Math.max(1, Math.ceil(eligibleChunkCount / 2));
+        const fileCapacity: number = Math.max(1, eligibleFileCount * 3);
+        return Math.min(10, chunkCapacity, fileCapacity);
+    }
 
     /**
      * 清空现有索引数据
@@ -995,7 +1236,3 @@ export class VaultKnowledgeBase {
             || normalizedPath.startsWith(`${VAULT_COACH_HIDDEN_DIR_PATH}/`);
     }
 }
-
-
-
-
