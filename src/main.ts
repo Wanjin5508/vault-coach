@@ -1,5 +1,6 @@
 import { Notice, normalizePath, Plugin, TAbstractFile, WorkspaceLeaf, type ListedFiles, type Stat } from "obsidian";
 import { EXAM_RESULTS_DIR_PATH, VAULT_COACH_HIDDEN_DIR_PATH, VIEW_TYPE_VAULT_COACH } from "./constants";
+import { ExamEngine } from "./exam/exam-engine";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { VaultKnowledgeBase } from "./knowledge-base";
 import { VaultCoachPersistentStore } from "./persistent-store";
@@ -11,8 +12,10 @@ import type {
     ChatMessage,
     ExamEvaluationItem,
     ExamFileOption,
+    ExamGenerationOptions,
     ExamHistoryItem,
     ExamQuestion,
+    ExamScopeAnalysisResult,
     ExamScopeSelection,
     ExamScopeSnapshot,
     ExamScopeOption,
@@ -39,6 +42,7 @@ export default class VaultCoach extends Plugin {
 
     private knowledgeBase!: VaultKnowledgeBase;
     private ragEngine!: AdvancedRagEngine;
+    private examEngine!: ExamEngine;
     private persistentStore!: VaultCoachPersistentStore;
 
     private knowledgeBaseDirty = true;
@@ -66,6 +70,12 @@ export default class VaultCoach extends Plugin {
             this.knowledgeBase,
             () => this.settings,
             () => this.runtimeRetrievalMode,
+            () => this.getCloudApiKey(),
+        );
+        this.examEngine = new ExamEngine(
+            this.app,
+            this.knowledgeBase,
+            () => this.settings,
             () => this.getCloudApiKey(),
         );
         this.persistentStore = new VaultCoachPersistentStore(this.app, this.manifest.id);
@@ -248,7 +258,18 @@ export default class VaultCoach extends Plugin {
         return this.knowledgeBase.getExamScopeSnapshot(this.normalizeExamScopeSelection(selection));
     }
 
-    async createExamSession(selection: ExamScopeSelection, questionCount: number): Promise<ExamSession> {
+    async analyzeExamScope(selection: ExamScopeSelection, options: ExamGenerationOptions = {}): Promise<ExamScopeAnalysisResult> {
+        await this.ensureKnowledgeBaseReady();
+
+        const normalizedSelection: ExamScopeSelection = this.normalizeExamScopeSelection(selection);
+        return this.examEngine.analyzeScope(normalizedSelection, options);
+    }
+
+    async createExamSession(
+        selection: ExamScopeSelection,
+        questionCount: number,
+        options: ExamGenerationOptions = {},
+    ): Promise<ExamSession> {
         await this.ensureKnowledgeBaseReady();
 
         const normalizedSelection: ExamScopeSelection = this.normalizeExamScopeSelection(selection);
@@ -265,13 +286,17 @@ export default class VaultCoach extends Plugin {
             ? this.t("exam.scope.fullCurrentKnowledgeBase")
             : normalizedSelection.selectedFolderPaths.join(", ");
 
-        return this.ragEngine.generateExamSession(
+        return this.examEngine.createExamSession(
             scopeLabel,
             normalizedSelection,
-            chunks,
             effectiveQuestionCount,
             scopeSnapshot,
+            options,
         );
+    }
+
+    async clearExamProfileCache(): Promise<void> {
+        await this.examEngine.clearProfileCache();
     }
 
     async evaluateExamSession(session: ExamSession, userAnswers: string[]): Promise<ExamSession> {

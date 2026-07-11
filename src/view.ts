@@ -5,10 +5,13 @@ import type VaultCoach  from "./main";
 import type {
     AnswerSource,
     ChatMessage,
+    ExamContentProfile,
     ExamEvaluationItem,
     ExamFileOption,
+    ExamGenerationProgress,
     ExamHistoryItem,
     ExamQuestion,
+    ExamScopeAnalysisResult,
     ExamScopeSelection,
     ExamScopeSnapshot,
     ExamScopeOption,
@@ -62,6 +65,10 @@ export class VaultCoachView extends ItemView {
     private showExamFileManager = false;
     private examFileSearchText = "";
     private pendingExamAreaScrollTop: number | null = null;
+    private examAnalysisResult: ExamScopeAnalysisResult | null = null;
+    private examSmartFilteringFailed = false;
+    private examProgressLabel = "";
+    private activeExamAbortController: AbortController | null = null;
     private examQuestionCount = 5;
     private examAnswerEls: HTMLTextAreaElement[] = [];
     private examExportFolderPath = "VaultCoach Exams";
@@ -355,7 +362,7 @@ export class VaultCoachView extends ItemView {
         }
 
         if (this.examPhase === "generating") {
-            this.renderExamBusyState(examAreaEl, this.t("exam.generating"));
+            this.renderExamBusyState(examAreaEl, this.examProgressLabel || this.t("exam.generating"), true);
             return;
         }
 
@@ -410,6 +417,12 @@ export class VaultCoachView extends ItemView {
         const scopeSelection: ExamScopeSelection = this.getCurrentExamScopeSelection(scopeOptions);
         const scopeSnapshot: ExamScopeSnapshot = this.plugin.getExamScopeSnapshot(scopeSelection);
         this.renderExamFileScopeSection(panelEl, fileOptions, scopeSnapshot);
+        if (this.examSmartFilteringFailed) {
+            this.renderExamSmartFilteringFailure(panelEl);
+        }
+        if (this.examAnalysisResult) {
+            this.renderExamAnalysisPreview(panelEl, fileOptions, this.examAnalysisResult);
+        }
 
         const folderOptions: ExamScopeOption[] = scopeOptions.slice(1);
         if (folderOptions.length === 0) {
@@ -447,13 +460,30 @@ export class VaultCoachView extends ItemView {
 
         const actionRowEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-actions" });
         const startButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
-            text: this.t("exam.start"),
+            text: this.plugin.settings.enableExamSmartFiltering && !this.examAnalysisResult
+                ? this.t("exam.analyze")
+                : this.t("exam.start"),
             cls: "mod-cta",
         });
         startButtonEl.disabled = this.isBusy || !this.hasExamScopeSelection(scopeOptions) || scopeSnapshot.eligibleChunkCount === 0;
         startButtonEl.addEventListener("click", () => {
-            void this.handleCreateExam();
+            if (this.plugin.settings.enableExamSmartFiltering && !this.examAnalysisResult) {
+                void this.handleAnalyzeExamScope(false);
+                return;
+            }
+
+            void this.handleCreateExam(false);
         });
+
+        if (this.examAnalysisResult) {
+            const reanalyzeButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+                text: this.t("exam.reanalyze"),
+            });
+            reanalyzeButtonEl.disabled = this.isBusy;
+            reanalyzeButtonEl.addEventListener("click", () => {
+                void this.handleAnalyzeExamScope(true);
+            });
+        }
 
         const historyButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
             text: this.t("exam.history"),
@@ -493,13 +523,14 @@ export class VaultCoachView extends ItemView {
         });
 
         checkboxEl.addEventListener("change", () => {
+            this.invalidateExamAnalysis();
             if (isAllOption) {
                 if (checkboxEl.checked) {
                     this.selectedExamScopeIds = new Set<string>(["__all__"]);
                 } else {
                     this.selectedExamScopeIds.delete("__all__");
                 }
-                this.render();
+                this.renderPreservingExamScroll();
                 return;
             }
 
@@ -510,7 +541,7 @@ export class VaultCoachView extends ItemView {
                 this.selectedExamScopeIds.delete(option.id);
             }
 
-            this.render();
+            this.renderPreservingExamScroll();
         });
     }
 
@@ -548,7 +579,7 @@ export class VaultCoachView extends ItemView {
         manageButtonEl.disabled = this.isBusy || fileOptions.length === 0;
         manageButtonEl.addEventListener("click", () => {
             this.showExamFileManager = !this.showExamFileManager;
-            this.render();
+            this.renderPreservingExamScroll();
         });
 
         if (scopeSnapshot.eligibleChunkCount === 0) {
@@ -582,9 +613,10 @@ export class VaultCoachView extends ItemView {
         });
 
         checkboxEl.addEventListener("change", () => {
+            this.invalidateExamAnalysis();
             this.plugin.settings.enableExamSmartFiltering = checkboxEl.checked;
             void this.plugin.saveSettings().then(() => {
-                this.render();
+                this.renderPreservingExamScroll();
             });
         });
     }
@@ -606,6 +638,7 @@ export class VaultCoachView extends ItemView {
 
         const includeAllButtonEl: HTMLButtonElement = toolbarEl.createEl("button", { text: this.t("exam.files.includeAll") });
         includeAllButtonEl.addEventListener("click", () => {
+            this.invalidateExamAnalysis();
             for (const option of fileOptions) {
                 this.excludedExamFilePaths.delete(option.filePath);
             }
@@ -614,6 +647,7 @@ export class VaultCoachView extends ItemView {
 
         const excludeAllButtonEl: HTMLButtonElement = toolbarEl.createEl("button", { text: this.t("exam.files.excludeAll") });
         excludeAllButtonEl.addEventListener("click", () => {
+            this.invalidateExamAnalysis();
             for (const option of fileOptions) {
                 if (!option.permanentlyExcluded) {
                     this.excludedExamFilePaths.add(option.filePath);
@@ -624,6 +658,7 @@ export class VaultCoachView extends ItemView {
 
         const resetButtonEl: HTMLButtonElement = toolbarEl.createEl("button", { text: this.t("exam.files.reset") });
         resetButtonEl.addEventListener("click", () => {
+            this.invalidateExamAnalysis();
             for (const option of fileOptions) {
                 this.excludedExamFilePaths.delete(option.filePath);
                 this.forceIncludedExamFilePaths.delete(option.filePath);
@@ -678,6 +713,7 @@ export class VaultCoachView extends ItemView {
         checkboxEl.disabled = option.permanentlyExcluded || this.isBusy;
         checkboxEl.checked = !option.permanentlyExcluded && !this.excludedExamFilePaths.has(option.filePath);
         checkboxEl.addEventListener("change", () => {
+            this.invalidateExamAnalysis();
             if (checkboxEl.checked) {
                 this.excludedExamFilePaths.delete(option.filePath);
             } else {
@@ -712,7 +748,180 @@ export class VaultCoachView extends ItemView {
         }
     }
 
-    private renderExamBusyState(containerEl: HTMLDivElement, label: string): void {
+    private renderExamSmartFilteringFailure(containerEl: HTMLDivElement): void {
+        const warningEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-analysis-warning" });
+        warningEl.createDiv({
+            cls: "vault-coach-exam-analysis-title",
+            text: this.t("exam.analysis.failedTitle"),
+        });
+        warningEl.createDiv({
+            cls: "vault-coach-exam-analysis-text",
+            text: this.t("exam.analysis.failedDesc"),
+        });
+        const actionRowEl: HTMLDivElement = warningEl.createDiv({ cls: "vault-coach-exam-analysis-actions" });
+        const retryButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+            text: this.t("exam.analysis.retry"),
+        });
+        retryButtonEl.disabled = this.isBusy;
+        retryButtonEl.addEventListener("click", () => {
+            void this.handleAnalyzeExamScope(false);
+        });
+
+        const manualButtonEl: HTMLButtonElement = actionRowEl.createEl("button", {
+            text: this.t("exam.analysis.continueManual"),
+        });
+        manualButtonEl.disabled = this.isBusy;
+        manualButtonEl.addEventListener("click", () => {
+            void this.handleCreateExam(true);
+        });
+    }
+
+    private renderExamAnalysisPreview(
+        containerEl: HTMLDivElement,
+        fileOptions: ExamFileOption[],
+        analysis: ExamScopeAnalysisResult,
+    ): void {
+        const previewEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-analysis" });
+        previewEl.createDiv({
+            cls: "vault-coach-exam-analysis-title",
+            text: this.t("exam.analysis.complete"),
+        });
+        const summaryEl: HTMLDivElement = previewEl.createDiv({ cls: "vault-coach-exam-analysis-grid" });
+        this.renderExamAnalysisStat(summaryEl, this.t("exam.analysis.totalFiles"), analysis.summary.totalFiles);
+        this.renderExamAnalysisStat(summaryEl, this.t("exam.analysis.ruleExcluded"), analysis.summary.ruleExcludedFiles);
+        this.renderExamAnalysisStat(summaryEl, this.t("exam.analysis.semanticExcluded"), analysis.summary.semanticExcludedFiles);
+        this.renderExamAnalysisStat(summaryEl, this.t("exam.analysis.partial"), analysis.summary.partialFiles);
+        this.renderExamAnalysisStat(summaryEl, this.t("exam.analysis.included"), analysis.summary.includedFiles);
+        this.renderExamAnalysisStat(summaryEl, this.t("exam.analysis.capacity"), `${analysis.summary.estimatedMinQuestions}–${analysis.summary.estimatedMaxQuestions}`);
+        this.renderExamAnalysisStat(summaryEl, this.t("exam.analysis.cache"), `${analysis.summary.cacheHits}/${analysis.summary.cacheHits + analysis.summary.cacheMisses}`);
+
+        const detailsEl: HTMLDetailsElement = previewEl.createEl("details", { cls: "vault-coach-exam-analysis-details" });
+        detailsEl.createEl("summary", { text: this.t("exam.analysis.details") });
+        const profileByPath: Map<string, ExamContentProfile> = new Map<string, ExamContentProfile>(
+            analysis.profiles.map((profile: ExamContentProfile) => [profile.filePath, profile]),
+        );
+
+        for (const option of fileOptions) {
+            const profile: ExamContentProfile | undefined = profileByPath.get(option.filePath);
+            const rowEl: HTMLDivElement = detailsEl.createDiv({ cls: "vault-coach-exam-analysis-row" });
+            const mainEl: HTMLDivElement = rowEl.createDiv({ cls: "vault-coach-exam-analysis-file" });
+            const fileLinkButtonEl: HTMLButtonElement = mainEl.createEl("button", {
+                cls: "vault-coach-exam-file-link",
+                text: option.fileName,
+                attr: {
+                    type: "button",
+                    title: option.filePath,
+                },
+            });
+            fileLinkButtonEl.addEventListener("click", () => {
+                void this.openExamSourcePath(option.filePath);
+            });
+            mainEl.createDiv({ cls: "vault-coach-exam-file-path", text: option.filePath });
+
+            const statusEl: HTMLDivElement = rowEl.createDiv({ cls: "vault-coach-exam-analysis-status" });
+            statusEl.createSpan({
+                cls: `vault-coach-exam-file-badge ${this.getExamAnalysisDecisionClass(option, profile)}`,
+                text: this.getExamAnalysisDecisionLabel(option, profile),
+            });
+            const reasonText: string = this.getExamAnalysisReasonText(option, profile);
+            if (reasonText.length > 0) {
+                statusEl.createSpan({
+                    cls: "vault-coach-exam-file-badge is-muted",
+                    text: reasonText,
+                });
+            }
+
+            const actionEl: HTMLDivElement = rowEl.createDiv({ cls: "vault-coach-exam-analysis-actions" });
+            if (!option.permanentlyExcluded && !this.excludedExamFilePaths.has(option.filePath)) {
+                const excludeButtonEl: HTMLButtonElement = actionEl.createEl("button", {
+                    text: this.t("exam.analysis.exclude"),
+                });
+                excludeButtonEl.disabled = this.isBusy;
+                excludeButtonEl.addEventListener("click", () => {
+                    this.excludedExamFilePaths.add(option.filePath);
+                    this.forceIncludedExamFilePaths.delete(option.filePath);
+                    void this.handleAnalyzeExamScope(false);
+                });
+            }
+
+            if (
+                profile
+                && !option.permanentlyExcluded
+                && !this.forceIncludedExamFilePaths.has(option.filePath)
+                && (profile.decision === "exclude" || profile.decision === "partial")
+            ) {
+                const includeButtonEl: HTMLButtonElement = actionEl.createEl("button", {
+                    text: this.t("exam.analysis.forceInclude"),
+                });
+                includeButtonEl.disabled = this.isBusy;
+                includeButtonEl.addEventListener("click", () => {
+                    this.forceIncludedExamFilePaths.add(option.filePath);
+                    this.excludedExamFilePaths.delete(option.filePath);
+                    void this.handleAnalyzeExamScope(false);
+                });
+            }
+        }
+    }
+
+    private renderExamAnalysisStat(containerEl: HTMLDivElement, label: string, value: string | number): void {
+        const itemEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-analysis-stat" });
+        itemEl.createDiv({ cls: "vault-coach-exam-analysis-stat-value", text: String(value) });
+        itemEl.createDiv({ cls: "vault-coach-exam-analysis-stat-label", text: label });
+    }
+
+    private getExamAnalysisDecisionLabel(option: ExamFileOption, profile: ExamContentProfile | undefined): string {
+        if (option.permanentlyExcluded) {
+            return this.t("exam.analysis.ruleExcluded");
+        }
+
+        if (this.excludedExamFilePaths.has(option.filePath)) {
+            return this.t("exam.files.manualExcluded");
+        }
+
+        if (this.forceIncludedExamFilePaths.has(option.filePath)) {
+            return this.t("exam.analysis.forceIncluded");
+        }
+
+        if (!profile) {
+            return this.t("exam.analysis.included");
+        }
+
+        if (profile.decision === "exclude") {
+            return this.t("exam.analysis.semanticExcluded");
+        }
+
+        if (profile.decision === "partial") {
+            return this.t("exam.analysis.partial");
+        }
+
+        return this.t("exam.analysis.included");
+    }
+
+    private getExamAnalysisDecisionClass(option: ExamFileOption, profile: ExamContentProfile | undefined): string {
+        if (option.permanentlyExcluded || this.excludedExamFilePaths.has(option.filePath) || profile?.decision === "exclude") {
+            return "is-muted";
+        }
+
+        if (profile?.decision === "partial") {
+            return "is-warning";
+        }
+
+        return "is-positive";
+    }
+
+    private getExamAnalysisReasonText(option: ExamFileOption, profile: ExamContentProfile | undefined): string {
+        if (option.permanentExcludeReason) {
+            return option.permanentExcludeReason;
+        }
+
+        if (!profile || profile.reasonCodes.length === 0) {
+            return "";
+        }
+
+        return profile.reasonCodes.join(", ");
+    }
+
+    private renderExamBusyState(containerEl: HTMLDivElement, label: string, canCancel = false): void {
         const panelEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-panel vault-coach-exam-busy" });
         const thinkingEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-thinking-indicator" });
         thinkingEl.createSpan({
@@ -730,6 +939,16 @@ export class VaultCoachView extends ItemView {
 
         for (let index = 0; index < 3; index += 1) {
             dotsEl.createSpan({ cls: "vault-coach-thinking-dot", text: "." });
+        }
+
+        if (canCancel) {
+            const cancelButtonEl: HTMLButtonElement = panelEl.createEl("button", {
+                text: this.t("exam.cancel"),
+            });
+            cancelButtonEl.disabled = !this.activeExamAbortController || this.activeExamAbortController.signal.aborted;
+            cancelButtonEl.addEventListener("click", () => {
+                this.cancelActiveExamGeneration();
+            });
         }
     }
 
@@ -1379,7 +1598,17 @@ export class VaultCoachView extends ItemView {
         this.stopButtonEl.disabled = true;
     }
 
-    private async handleCreateExam(): Promise<void> {
+    private cancelActiveExamGeneration(): void {
+        if (!this.activeExamAbortController || this.activeExamAbortController.signal.aborted) {
+            return;
+        }
+
+        this.activeExamAbortController.abort();
+        this.examProgressLabel = this.t("exam.cancelling");
+        this.renderPreservingExamScroll();
+    }
+
+    private async handleAnalyzeExamScope(forceRefresh: boolean): Promise<void> {
         if (this.isBusy) {
             return;
         }
@@ -1387,15 +1616,69 @@ export class VaultCoachView extends ItemView {
         this.isBusy = true;
         this.examPhase = "generating";
         this.examSession = null;
-        this.render();
+        this.examSmartFilteringFailed = false;
+        this.examProgressLabel = this.t("exam.analysis.running");
+        this.activeExamAbortController = new AbortController();
+        this.renderPreservingExamScroll();
+
+        try {
+            const scopeSelection: ExamScopeSelection = this.getCurrentExamScopeSelection();
+            this.examAnalysisResult = await this.plugin.analyzeExamScope(scopeSelection, {
+                forceProfileRefresh: forceRefresh,
+                abortSignal: this.activeExamAbortController.signal,
+                onProgress: (progress: ExamGenerationProgress) => {
+                    this.updateExamProgress(progress);
+                },
+            });
+            this.examPhase = "setup";
+        } catch (error: unknown) {
+            if (this.isAbortError(error)) {
+                this.examPhase = "setup";
+                new Notice(this.t("exam.notice.cancelled"));
+                return;
+            }
+
+            console.error("[VaultCoachView] 智能筛选失败", error);
+            this.examSmartFilteringFailed = true;
+            this.examPhase = "setup";
+            new Notice(this.t("exam.notice.analysisFailed", { message: this.createShortErrorMessage(error) }));
+        } finally {
+            this.isBusy = false;
+            this.activeExamAbortController = null;
+            this.examProgressLabel = "";
+            this.renderPreservingExamScroll();
+        }
+    }
+
+    private async handleCreateExam(skipSemanticFiltering: boolean): Promise<void> {
+        if (this.isBusy) {
+            return;
+        }
+
+        this.isBusy = true;
+        this.examPhase = "generating";
+        this.examSession = null;
+        this.examProgressLabel = this.t("exam.generating");
+        this.activeExamAbortController = new AbortController();
+        this.renderPreservingExamScroll();
 
         try {
             const scopeSelection: ExamScopeSelection = this.getCurrentExamScopeSelection();
             const session: ExamSession = await this.plugin.createExamSession(
                 scopeSelection,
                 this.examQuestionCount,
+                {
+                    analysis: skipSemanticFiltering ? undefined : this.examAnalysisResult ?? undefined,
+                    skipSemanticFiltering,
+                    abortSignal: this.activeExamAbortController.signal,
+                    onProgress: (progress: ExamGenerationProgress) => {
+                        this.updateExamProgress(progress);
+                    },
+                },
             );
             this.examSession = session;
+            this.examAnalysisResult = null;
+            this.examSmartFilteringFailed = false;
             if (session.questions.length < this.examQuestionCount) {
                 new Notice(this.t("exam.notice.questionCountReduced", {
                     requested: this.examQuestionCount,
@@ -1404,12 +1687,20 @@ export class VaultCoachView extends ItemView {
             }
             this.examPhase = "taking";
         } catch (error: unknown) {
+            if (this.isAbortError(error)) {
+                this.examPhase = "setup";
+                new Notice(this.t("exam.notice.cancelled"));
+                return;
+            }
+
             console.error("[VaultCoachView] 创建考试失败", error);
             this.examPhase = "setup";
             new Notice(this.t("exam.notice.createFailed", { message: this.createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
-            this.render();
+            this.activeExamAbortController = null;
+            this.examProgressLabel = "";
+            this.renderPreservingExamScroll();
         }
     }
 
@@ -1593,10 +1884,23 @@ export class VaultCoachView extends ItemView {
         return Math.max(1, Math.min(normalizedMaxQuestionCount, parsedValue));
     }
 
+    private invalidateExamAnalysis(): void {
+        this.examAnalysisResult = null;
+        this.examSmartFilteringFailed = false;
+    }
+
+    private updateExamProgress(progress: ExamGenerationProgress): void {
+        this.examProgressLabel = progress.label;
+        if (this.examPhase === "generating") {
+            this.renderPreservingExamScroll();
+        }
+    }
+
     private resetExamSession(): void {
         this.examSession = null;
         this.examPhase = "setup";
         this.examAnswerEls = [];
+        this.invalidateExamAnalysis();
     }
 
     private returnFromExamHistory(): void {

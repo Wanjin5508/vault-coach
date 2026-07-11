@@ -112,6 +112,34 @@ export class VaultKnowledgeBase {
         return [...this.chunks];
     }
 
+    getExamFileContentHash(filePath: string): string | null {
+        return this.fileHashes.get(normalizePath(filePath)) ?? null;
+    }
+
+    getExamFileChunks(filePath: string): IndexedChunk[] {
+        return this.getChunksForFilePath(normalizePath(filePath));
+    }
+
+    getExamChunksByIds(chunkIds: string[]): IndexedChunk[] {
+        const chunks: IndexedChunk[] = [];
+        for (const chunkId of chunkIds) {
+            const chunk: IndexedChunk | undefined = this.chunkMap.get(chunkId);
+            if (chunk) {
+                chunks.push(chunk);
+            }
+        }
+        return chunks;
+    }
+
+    async readExamFileContent(filePath: string): Promise<string | null> {
+        const abstractFile = this.app.vault.getAbstractFileByPath(normalizePath(filePath));
+        if (!(abstractFile instanceof TFile)) {
+            return null;
+        }
+
+        return this.app.vault.cachedRead(abstractFile);
+    }
+
     getExamFolderScopeOptions(): ExamScopeOption[] {
         const folderStats: Map<string, { filePaths: Set<string>; chunkCount: number }> = new Map();
 
@@ -588,13 +616,6 @@ export class VaultKnowledgeBase {
         const cleanedText: string = this.cleanExamMarkdownText(rawText);
         if (cleanedText.length < 80) {
             return "Too little exam-ready body text";
-        }
-
-        if (this.getSettings().enableExamSmartFiltering) {
-            const smartExcludeReason: string | null = this.detectLowQualityExamContentReason(rawText, cleanedText);
-            if (smartExcludeReason !== null) {
-                return smartExcludeReason;
-            }
         }
 
         return null;
