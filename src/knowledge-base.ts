@@ -21,7 +21,7 @@ import type {
     VaultCoachSettings,
 } from "./types";
 
-const DOCUMENT_CHUNKER_VERSION = "document-chunker-v1";
+const DOCUMENT_CHUNKER_VERSION = "document-chunker-v2";
 
 /**
  * VaultKnowledgeBase 负责第一阶段与第二阶段共享的“知识库底座”：
@@ -220,6 +220,10 @@ export class VaultKnowledgeBase {
         }));
     }
 
+    clearIndexData(): void {
+        this.clearIndex();
+    }
+
     getSettingsSignature(): string {
         const settings: VaultCoachSettings = this.getSettings();
         return JSON.stringify({
@@ -275,26 +279,32 @@ export class VaultKnowledgeBase {
      * - 这里只负责扫描、切块和倒排索引；
      * - 向量索引由上层额外建立，因为向量索引依赖外部 embedding 模型。
      */
-    async rebuildIndex(): Promise<KnowledgeBaseStats> {
-        const result: KnowledgeBaseSyncResult = await this.rebuildIndexDetailed();
+    async rebuildIndex(signal?: AbortSignal): Promise<KnowledgeBaseStats> {
+        const result: KnowledgeBaseSyncResult = await this.rebuildIndexDetailed(signal);
         return result.stats;
     }
 
     // 新增：全量重建时返回详细变更结果，供向量层同步。
-    async rebuildIndexDetailed(): Promise<KnowledgeBaseSyncResult> {
+    async rebuildIndexDetailed(signal?: AbortSignal): Promise<KnowledgeBaseSyncResult> {
+        signal?.throwIfAborted();
         this.clearIndex();
 
         const targetFiles: TFile[] = this.resolveTargetKnowledgeFiles();
         const changedChunks: IndexedChunk[] = [];
 
         for (const file of targetFiles) {
+            signal?.throwIfAborted();
             try {
-                const fileChunks: IndexedChunk[] = await this.parseFileToChunks(file);
+                const fileChunks: IndexedChunk[] = await this.parseFileToChunks(file, signal);
                 for (const chunk of fileChunks) {
+                    signal?.throwIfAborted();
                     this.addChunkToIndex(chunk);
                     changedChunks.push(chunk);
                 }
             } catch (error: unknown) {
+                if (this.isAbortError(error)) {
+                    throw error;
+                }
                 console.error("[VaultCoach] 文档解析失败，已跳过：", file.path, error);
             }
         }
@@ -309,7 +319,8 @@ export class VaultKnowledgeBase {
     }
 
     // 新增：只同步发生改动的知识库文件。
-    async syncChangedFiles(filePaths: string[]): Promise<KnowledgeBaseSyncResult> {
+    async syncChangedFiles(filePaths: string[], signal?: AbortSignal): Promise<KnowledgeBaseSyncResult> {
+        signal?.throwIfAborted();
         const dedupedPaths: string[] = Array.from(
             new Set(
                 filePaths
@@ -337,6 +348,7 @@ export class VaultKnowledgeBase {
         const removedChunkIds: string[] = [];
 
         for (const filePath of dedupedPaths) {
+            signal?.throwIfAborted();
             const existingFile: TFile | undefined = currentFiles.get(filePath);
 
             if (!existingFile) {
@@ -354,12 +366,16 @@ export class VaultKnowledgeBase {
             removedChunkIds.push(...this.removeFileFromIndex(filePath));
 
             try {
-                const fileChunks: IndexedChunk[] = await this.parseFileToChunks(existingFile);
+                const fileChunks: IndexedChunk[] = await this.parseFileToChunks(existingFile, signal);
                 for (const chunk of fileChunks) {
+                    signal?.throwIfAborted();
                     this.addChunkToIndex(chunk);
                     changedChunks.push(chunk);
                 }
             } catch (error: unknown) {
+                if (this.isAbortError(error)) {
+                    throw error;
+                }
                 console.error("[VaultCoach] 增量解析失败，已跳过：", existingFile.path, error);
             }
         }
@@ -779,13 +795,15 @@ export class VaultKnowledgeBase {
         return folderPaths;
     }
 
-    private async parseFileToChunks(file: TFile): Promise<IndexedChunk[]> {
+    private async parseFileToChunks(file: TFile, signal?: AbortSignal): Promise<IndexedChunk[]> {
+        signal?.throwIfAborted();
         const parser: DocumentParser | null = this.parserRegistry.resolve(file);
         if (!parser) {
             return [];
         }
 
-        const parsedDocument: ParsedDocument = await parser.parse(file, {});
+        const parsedDocument: ParsedDocument = await parser.parse(file, { signal });
+        signal?.throwIfAborted();
         const fileChunks: IndexedChunk[] = this.chunkParsedDocument(parsedDocument);
         const chunkIds: string[] = fileChunks.map((chunk: IndexedChunk) => chunk.id);
 
@@ -865,6 +883,8 @@ export class VaultKnowledgeBase {
 
                 chunkSerial += 1;
             }
+
+            pendingBlocks = [];
         };
 
         for (const block of parsedDocument.blocks) {
@@ -1239,5 +1259,17 @@ export class VaultKnowledgeBase {
         const normalizedPath: string = normalizePath(path);
         return normalizedPath === VAULT_COACH_HIDDEN_DIR_PATH
             || normalizedPath.startsWith(`${VAULT_COACH_HIDDEN_DIR_PATH}/`);
+    }
+
+    private isAbortError(error: unknown): boolean {
+        if (error instanceof DOMException) {
+            return error.name === "AbortError";
+        }
+
+        if (error instanceof Error) {
+            return error.name === "AbortError" || /aborted|aborterror/i.test(error.message);
+        }
+
+        return false;
     }
 }

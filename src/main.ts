@@ -25,6 +25,8 @@ import type {
     KnowledgeBaseSnapshot,
     KnowledgeBaseStats,
     KnowledgeBaseSyncResult,
+    KnowledgeIndexBusyPhase,
+    KnowledgeIndexBusyState,
     MemoryItem,
     MemorySearchHit,
     PersistedPluginState,
@@ -57,6 +59,12 @@ export default class VaultCoach extends Plugin {
     private autoIndexDebounceTimer: number | null = null;
     private autoIndexMaxWaitTimer: number | null = null;
     private isSyncingKnowledgeBase = false;
+    private activeKnowledgeIndexAbortController: AbortController | null = null;
+    private knowledgeIndexBusyState: KnowledgeIndexBusyState = {
+        busy: false,
+        phase: null,
+        startedAt: null,
+    };
     private lastAutoIndexAt: number | null = null;
     private hasShownOllamaEmbeddingCpuFallbackNotice = false;
 
@@ -123,6 +131,22 @@ export default class VaultCoach extends Plugin {
             },
         });
 
+        this.addCommand({
+            id: "stop-knowledge-index",
+            name: this.t("command.stopKnowledgeIndex"),
+            callback: () => {
+                this.abortKnowledgeIndexBuild(true);
+            },
+        });
+
+        this.addCommand({
+            id: "clear-knowledge-index",
+            name: this.t("command.clearKnowledgeIndex"),
+            callback: async () => {
+                await this.clearKnowledgeIndex(true);
+            },
+        });
+
         this.addRibbonIcon("message-square", this.t("ribbon.openVaultCoach"), () => {
             void this.activateView();
         });
@@ -142,6 +166,7 @@ export default class VaultCoach extends Plugin {
     }
 
     onunload(): void {
+        this.abortKnowledgeIndexBuild(false);
         this.clearAutoIndexTimers();
     }
 
@@ -206,6 +231,56 @@ export default class VaultCoach extends Plugin {
 
     isVectorIndexDirty(): boolean {
         return this.vectorIndexDirty;
+    }
+
+    getKnowledgeIndexBusyState(): KnowledgeIndexBusyState {
+        return {
+            ...this.knowledgeIndexBusyState,
+        };
+    }
+
+    abortKnowledgeIndexBuild(showNotice: boolean): void {
+        const controller: AbortController | null = this.activeKnowledgeIndexAbortController;
+        if (!controller || controller.signal.aborted) {
+            if (showNotice) {
+                new Notice(this.t("notice.index.noActiveBuild"));
+            }
+            return;
+        }
+
+        controller.abort(new DOMException("VaultCoach index build aborted by user.", "AbortError"));
+        if (showNotice) {
+            new Notice(this.t("notice.index.stopRequested"));
+        }
+    }
+
+    async clearKnowledgeIndex(showNotice: boolean): Promise<void> {
+        if (this.knowledgeIndexBusyState.busy) {
+            if (showNotice) {
+                new Notice(this.t("notice.index.clearWhileBusy"));
+            }
+            return;
+        }
+
+        this.clearAutoIndexTimers();
+        this.pendingChangedKnowledgePaths.clear();
+        this.knowledgeBase.clearIndexData();
+        await this.vectorStore.clear();
+        await this.persistentStore.removeKnowledgeBaseSnapshot();
+        this.ragEngine.hydrateVectorStats({
+            ready: false,
+            vectorCount: 0,
+            dimension: null,
+            lastBuiltAt: null,
+        });
+        this.knowledgeBaseDirty = false;
+        this.vectorIndexDirty = false;
+        this.lastAutoIndexAt = null;
+        this.refreshAllViews();
+
+        if (showNotice) {
+            new Notice(this.t("notice.index.cleared"));
+        }
     }
 
     getKnowledgeBaseStats(): KnowledgeBaseStats {
@@ -468,19 +543,86 @@ export default class VaultCoach extends Plugin {
         }
     }
 
-    async rebuildKnowledgeBase(showNotice: boolean): Promise<void> {
+    private setKnowledgeIndexBusy(phase: KnowledgeIndexBusyPhase): void {
+        const previousStartedAt: number | null = this.knowledgeIndexBusyState.startedAt;
+        this.knowledgeIndexBusyState = {
+            busy: true,
+            phase,
+            startedAt: previousStartedAt ?? Date.now(),
+        };
+        this.refreshAllViews();
+    }
+
+    private setKnowledgeIndexIdle(): void {
+        if (!this.knowledgeIndexBusyState.busy) {
+            return;
+        }
+
+        this.knowledgeIndexBusyState = {
+            busy: false,
+            phase: null,
+            startedAt: null,
+        };
+        this.refreshAllViews();
+    }
+
+    private startKnowledgeIndexOperation(phase: KnowledgeIndexBusyPhase, signal?: AbortSignal): { signal: AbortSignal; ownsController: boolean } | null {
+        if (!signal && this.knowledgeIndexBusyState.busy) {
+            return null;
+        }
+
+        const controller: AbortController | null = signal ? null : new AbortController();
+        const operationSignal: AbortSignal = signal ?? controller!.signal;
+        if (controller) {
+            this.activeKnowledgeIndexAbortController = controller;
+        }
+
+        this.setKnowledgeIndexBusy(phase);
+        return {
+            signal: operationSignal,
+            ownsController: controller !== null,
+        };
+    }
+
+    private finishKnowledgeIndexOperation(operation: { signal: AbortSignal; ownsController: boolean }): void {
+        if (!operation.ownsController) {
+            return;
+        }
+
+        if (this.activeKnowledgeIndexAbortController?.signal === operation.signal) {
+            this.activeKnowledgeIndexAbortController = null;
+        }
+        this.setKnowledgeIndexIdle();
+    }
+
+    async rebuildKnowledgeBase(showNotice: boolean, signal?: AbortSignal): Promise<void> {
+        const operation = this.startKnowledgeIndexOperation("rebuilding", signal);
+        if (!operation) {
+            if (showNotice) {
+                new Notice(this.t("notice.index.alreadyBuilding"));
+            }
+            return;
+        }
+
+        const abortSignal: AbortSignal = operation.signal;
         try {
-            const textSyncResult: KnowledgeBaseSyncResult = await this.knowledgeBase.rebuildIndexDetailed();
+            abortSignal.throwIfAborted();
+            const textSyncResult: KnowledgeBaseSyncResult = await this.knowledgeBase.rebuildIndexDetailed(abortSignal);
             const textStats: KnowledgeBaseStats = textSyncResult.stats;
 
             let vectorStats: VectorIndexStats = this.ragEngine.getVectorIndexStats();
             let vectorBuildWarning = "";
 
             try {
-                vectorStats = await this.ragEngine.rebuildVectorIndex();
+                this.setKnowledgeIndexBusy("vector");
+                abortSignal.throwIfAborted();
+                vectorStats = await this.ragEngine.rebuildVectorIndex(abortSignal);
                 this.vectorIndexDirty = false;
                 this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
             } catch (vectorError: unknown) {
+                if (this.isAbortError(vectorError)) {
+                    throw vectorError;
+                }
                 console.error("[VaultCoach] 向量索引建立失败，将回退到关键词检索。", vectorError);
                 vectorBuildWarning = this.t("notice.index.vectorFailedWarning");
                 this.vectorIndexDirty = true;
@@ -502,10 +644,31 @@ export default class VaultCoach extends Plugin {
                 new Notice(vectorBuildWarning.length > 0 ? `${message} ${vectorBuildWarning}` : message);
             }
         } catch (error: unknown) {
+            if (this.isAbortError(error)) {
+                console.warn("[VaultCoach] 索引构建已停止。", error);
+                this.knowledgeBase.clearIndexData();
+                await this.vectorStore.clear();
+                this.ragEngine.hydrateVectorStats({
+                    ready: false,
+                    vectorCount: 0,
+                    dimension: null,
+                    lastBuiltAt: null,
+                });
+                this.knowledgeBaseDirty = true;
+                this.vectorIndexDirty = this.settings.enableVectorRetrieval;
+                this.refreshAllViews();
+                if (showNotice) {
+                    new Notice(this.t("notice.index.stopped"));
+                }
+                return;
+            }
+
             console.error("[VaultCoach] 重建索引失败", error);
             if (showNotice) {
                 new Notice(this.t("notice.index.rebuildFailed"));
             }
+        } finally {
+            this.finishKnowledgeIndexOperation(operation);
         }
     }
 
@@ -646,17 +809,25 @@ export default class VaultCoach extends Plugin {
         }
 
         this.isSyncingKnowledgeBase = true;
+        const operation = this.startKnowledgeIndexOperation("syncing");
+        if (!operation) {
+            this.isSyncingKnowledgeBase = false;
+            return;
+        }
+
+        const abortSignal: AbortSignal = operation.signal;
         this.pendingChangedKnowledgePaths.clear();
         this.clearAutoIndexTimers();
 
         try {
+            abortSignal.throwIfAborted();
             if (!this.knowledgeBase.isReady()) {
-                await this.rebuildKnowledgeBase(showNotice);
+                await this.rebuildKnowledgeBase(showNotice, abortSignal);
                 return;
             }
 
-            const syncResult: KnowledgeBaseSyncResult = await this.knowledgeBase.syncChangedFiles(filePaths);
-            await this.ragEngine.syncVectorIndex(syncResult);
+            const syncResult: KnowledgeBaseSyncResult = await this.knowledgeBase.syncChangedFiles(filePaths, abortSignal);
+            await this.ragEngine.syncVectorIndex(syncResult, abortSignal);
             this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
 
             this.lastAutoIndexAt = Date.now();
@@ -671,17 +842,37 @@ export default class VaultCoach extends Plugin {
                 new Notice(this.t("notice.index.incrementalComplete", { count: syncResult.affectedFiles.length }));
             }
         } catch (error: unknown) {
+            if (this.isAbortError(error)) {
+                console.warn("[VaultCoach] 自动增量同步已停止。", error);
+                this.knowledgeBaseDirty = true;
+                this.vectorIndexDirty = this.settings.enableVectorRetrieval;
+                if (showNotice) {
+                    new Notice(this.t("notice.index.stopped"));
+                }
+                return;
+            }
+
             console.error("[VaultCoach] 自动增量同步失败", error);
             this.knowledgeBaseDirty = true;
             this.vectorIndexDirty = true;
         } finally {
             this.isSyncingKnowledgeBase = false;
+            this.finishKnowledgeIndexOperation(operation);
         }
     }
 
-    private async rebuildVectorIndexOnly(showNotice: boolean): Promise<void> {
+    private async rebuildVectorIndexOnly(showNotice: boolean, signal?: AbortSignal): Promise<void> {
+        const operation = this.startKnowledgeIndexOperation("vector", signal);
+        if (!operation) {
+            if (showNotice) {
+                new Notice(this.t("notice.index.alreadyBuilding"));
+            }
+            return;
+        }
+
+        const abortSignal: AbortSignal = operation.signal;
         try {
-            const vectorStats: VectorIndexStats = await this.ragEngine.rebuildVectorIndex();
+            const vectorStats: VectorIndexStats = await this.ragEngine.rebuildVectorIndex(abortSignal);
             this.vectorIndexDirty = false;
             this.knowledgeBaseDirty = false;
             this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
@@ -692,11 +883,22 @@ export default class VaultCoach extends Plugin {
                 new Notice(this.t("notice.index.vectorComplete", { count: vectorStats.vectorCount }));
             }
         } catch (error: unknown) {
+            if (this.isAbortError(error)) {
+                console.warn("[VaultCoach] 向量索引构建已停止。", error);
+                this.vectorIndexDirty = this.settings.enableVectorRetrieval;
+                if (showNotice) {
+                    new Notice(this.t("notice.index.stopped"));
+                }
+                return;
+            }
+
             console.error("[VaultCoach] 向量索引重建失败", error);
             this.vectorIndexDirty = true;
             if (showNotice) {
                 new Notice(this.t("notice.index.vectorRebuildFailed"));
             }
+        } finally {
+            this.finishKnowledgeIndexOperation(operation);
         }
     }
 
@@ -952,6 +1154,18 @@ export default class VaultCoach extends Plugin {
             window.clearTimeout(this.autoIndexMaxWaitTimer);
             this.autoIndexMaxWaitTimer = null;
         }
+    }
+
+    private isAbortError(error: unknown): boolean {
+        if (error instanceof DOMException) {
+            return error.name === "AbortError";
+        }
+
+        if (error instanceof Error) {
+            return error.name === "AbortError" || /aborted|aborterror/i.test(error.message);
+        }
+
+        return false;
     }
 
     private normalizeMemoryText(text: string): string {

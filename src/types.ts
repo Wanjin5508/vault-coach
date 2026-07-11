@@ -491,6 +491,14 @@ export interface VectorIndexStats {
     lastBuiltAt: number | null;
 }
 
+export type KnowledgeIndexBusyPhase = "rebuilding" | "syncing" | "vector";
+
+export interface KnowledgeIndexBusyState {
+    busy: boolean;
+    phase: KnowledgeIndexBusyPhase | null;
+    startedAt: number | null;
+}
+
 /**
  * 插件内部统一的“回答结果“结构
  * 这样后续接入 LLM 时，只需要替换 answerQuestion 的内部逻辑，而不需要修改 view 层的渲染代码

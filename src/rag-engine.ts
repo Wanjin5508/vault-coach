@@ -123,8 +123,9 @@ export class AdvancedRagEngine {
         return this.getVectorIndexStats();
     }
 
-    async rebuildVectorIndex(): Promise<VectorIndexStats> {
+    async rebuildVectorIndex(signal?: AbortSignal): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
+        signal?.throwIfAborted();
         await this.vectorStore.clear();
         this.vectorStats = {
             ready: false,
@@ -142,7 +143,8 @@ export class AdvancedRagEngine {
             return this.getVectorIndexStats();
         }
 
-        const items: VectorRecord[] = await this.buildChunkEmbeddings(chunks);
+        const items: VectorRecord[] = await this.buildChunkEmbeddings(chunks, signal);
+        signal?.throwIfAborted();
         await this.vectorStore.upsert(items);
         await this.refreshVectorStatsFromStore();
 
@@ -150,8 +152,9 @@ export class AdvancedRagEngine {
     }
 
     // 新增：增量同步时只为发生变化的 chunk 重算 embedding。
-    async syncVectorIndex(syncResult: KnowledgeBaseSyncResult): Promise<VectorIndexStats> {
+    async syncVectorIndex(syncResult: KnowledgeBaseSyncResult, signal?: AbortSignal): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
+        signal?.throwIfAborted();
 
         if (!settings.enableVectorRetrieval || this.getActiveEmbeddingModel(settings).length === 0) {
             await this.vectorStore.clear();
@@ -165,11 +168,13 @@ export class AdvancedRagEngine {
         }
 
         if (syncResult.removedChunkIds.length > 0) {
+            signal?.throwIfAborted();
             await this.vectorStore.remove(syncResult.removedChunkIds);
         }
 
         if (syncResult.changedChunks.length > 0) {
-            const items: VectorRecord[] = await this.buildChunkEmbeddings(syncResult.changedChunks);
+            const items: VectorRecord[] = await this.buildChunkEmbeddings(syncResult.changedChunks, signal);
+            signal?.throwIfAborted();
             await this.vectorStore.upsert(items);
         }
 
@@ -1479,14 +1484,16 @@ export class AdvancedRagEngine {
         return text.toLowerCase().replace(/\s+/g, " ").trim();
     }
 
-    private async buildChunkEmbeddings(chunks: IndexedChunk[]): Promise<VectorRecord[]> {
+    private async buildChunkEmbeddings(chunks: IndexedChunk[], signal?: AbortSignal): Promise<VectorRecord[]> {
         const batchSize = 16;
         const items: VectorRecord[] = [];
 
         for (let start = 0; start < chunks.length; start += batchSize) {
+            signal?.throwIfAborted();
             const batchChunks: IndexedChunk[] = chunks.slice(start, start + batchSize);
             const batchTexts: string[] = batchChunks.map((chunk: IndexedChunk) => chunk.searchableText);
             const embeddings: number[][] = await this.client.embedTexts(batchTexts);
+            signal?.throwIfAborted();
 
             const pairCount: number = Math.min(batchChunks.length, embeddings.length);
             for (let index = 0; index < pairCount; index += 1) {

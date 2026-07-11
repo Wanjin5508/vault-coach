@@ -32,6 +32,10 @@ export class VaultCoachPersistentStore {
         await this.writeJsonFile(this.getIndexSnapshotPath(), snapshot);
     }
 
+    async removeKnowledgeBaseSnapshot(): Promise<void> {
+        await this.removePath(this.getIndexSnapshotPath());
+    }
+
     async loadKnowledgeIndexJson<T>(relativePath: string): Promise<T | null> {
         return this.readJsonFile<T>(this.getKnowledgeIndexPath(relativePath));
     }
@@ -62,7 +66,10 @@ export class VaultCoachPersistentStore {
     }
 
     async removeKnowledgeIndexPath(relativePath: string): Promise<void> {
-        const path: string = this.getKnowledgeIndexPath(relativePath);
+        await this.removePath(this.getKnowledgeIndexPath(relativePath));
+    }
+
+    private async removePath(path: string): Promise<void> {
         if (await this.app.vault.adapter.exists(path)) {
             await this.app.vault.adapter.remove(path);
         }
@@ -139,4 +146,3 @@ export class VaultCoachPersistentStore {
         await this.app.vault.adapter.write(path, JSON.stringify(payload));
     }
 }
-
