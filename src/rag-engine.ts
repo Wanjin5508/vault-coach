@@ -6,9 +6,13 @@ import type {
     AssistantAnswer,
     ChatMessage,
     ChunkEmbedding,
+    ExamBlueprint,
+    ExamBlueprintItem,
     ExamEvaluation,
     ExamEvaluationItem,
     ExamQuestion,
+    ExamScopeSelection,
+    ExamScopeSnapshot,
     ExamSession,
     IndexedChunk,
     KnowledgeBaseSyncResult,
@@ -354,16 +358,22 @@ export class AdvancedRagEngine {
 
     async generateExamSession(
         scopeLabel: string,
-        selectedFolderPaths: string[],
+        selection: ExamScopeSelection,
         chunks: IndexedChunk[],
         questionCount: number,
+        scopeSnapshot: ExamScopeSnapshot,
     ): Promise<ExamSession> {
         const contextChunks: IndexedChunk[] = this.selectExamContextChunks(chunks, 18, 12000);
         if (contextChunks.length === 0) {
             throw new Error("当前考试范围内没有可用的知识库片段。");
         }
 
-        const normalizedQuestionCount: number = Math.max(1, Math.min(10, Math.floor(questionCount)));
+        const requestedQuestionCount: number = Math.max(1, Math.min(10, Math.floor(questionCount)));
+        const blueprint: ExamBlueprint = this.buildExamBlueprint(scopeLabel, contextChunks, requestedQuestionCount);
+        const plannedQuestionCount: number = blueprint.plannedQuestionCount;
+        if (plannedQuestionCount === 0) {
+            throw new Error("当前考试范围内没有足够内容生成考试蓝图。");
+        }
         const sourcePathFallbacks: string[] = Array.from(new Set(contextChunks.map((chunk: IndexedChunk) => chunk.filePath))).slice(0, 5);
         const messages: LocalChatMessage[] = [
             {
@@ -381,13 +391,15 @@ export class AdvancedRagEngine {
                     "7. 字段值中不要使用未转义的英文双引号；需要引用时优先使用中文引号或单引号。",
                     "8. 题目、参考答案和评分标准中不要出现 EXCERPT_ID、SOURCE_PATH、HEADING、片段编号等内部上下文标记。",
                     "9. 评分标准必须使用 100 分制；不要出现 2 分、5 分、10 分等非满分 100 的总分口径。",
+                    "10. 必须按用户提供的考试蓝图逐项出题，不能新增蓝图之外的主题或来源。",
                 ].join("\n"),
             },
             {
                 role: "user",
                 content: [
                     `考试范围：${scopeLabel}`,
-                    `题目数量：${normalizedQuestionCount}`,
+                    `请求题目数量：${requestedQuestionCount}`,
+                    `蓝图计划题目数量：${plannedQuestionCount}`,
                     "",
                     "请输出 JSON，schema 如下：",
                     "{",
@@ -403,6 +415,9 @@ export class AdvancedRagEngine {
                     "  ]",
                     "}",
                     "",
+                    "考试蓝图：",
+                    this.buildExamBlueprintBlock(blueprint),
+                    "",
                     "知识库上下文：",
                     this.buildExamContextBlock(contextChunks),
                 ].join("\n"),
@@ -417,8 +432,9 @@ export class AdvancedRagEngine {
         );
         const questions: ExamQuestion[] = this.normalizeGeneratedExamQuestions(
             payload.questions ?? [],
-            normalizedQuestionCount,
+            plannedQuestionCount,
             sourcePathFallbacks,
+            contextChunks,
         );
 
         if (questions.length === 0) {
@@ -431,7 +447,11 @@ export class AdvancedRagEngine {
             title: this.normalizeText(payload.title, "VaultCoach 测试"),
             createdAt: now,
             scopeLabel,
-            selectedFolderPaths: [...selectedFolderPaths],
+            selectedFolderPaths: [...selection.selectedFolderPaths],
+            excludedFilePaths: [...selection.excludedFilePaths],
+            forceIncludedFilePaths: [...selection.forceIncludedFilePaths],
+            scopeSnapshot,
+            blueprint,
             questions,
             userAnswers: questions.map(() => ""),
             evaluation: null,
@@ -602,19 +622,95 @@ export class AdvancedRagEngine {
         return `${rawText.slice(0, maxCharacters)}\n...`;
     }
 
-    private selectExamContextChunks(chunks: IndexedChunk[], maxChunks: number, maxCharacters: number): IndexedChunk[] {
-        if (chunks.length <= maxChunks) {
-            return this.limitChunksByCharacters(chunks, maxCharacters);
+    private buildExamBlueprint(scopeLabel: string, contextChunks: IndexedChunk[], requestedQuestionCount: number): ExamBlueprint {
+        const plannedQuestionCount: number = Math.min(requestedQuestionCount, contextChunks.length);
+        const questionTypes: ExamBlueprintItem["questionType"][] = [
+            "explanation",
+            "comparison",
+            "application",
+            "reasoning",
+            "process",
+        ];
+        const difficulties: ExamBlueprintItem["difficulty"][] = [
+            "basic",
+            "intermediate",
+            "advanced",
+        ];
+        const items: ExamBlueprintItem[] = [];
+
+        for (let index = 0; index < plannedQuestionCount; index += 1) {
+            const chunk: IndexedChunk | undefined = contextChunks[index];
+            if (!chunk) {
+                continue;
+            }
+
+            const topic: string = chunk.primaryHeading ?? chunk.fileName.replace(/\.md$/i, "");
+            items.push({
+                id: `bp${index + 1}`,
+                topic,
+                learningObjective: `考察用户是否理解「${topic}」并能基于来源内容作答。`,
+                questionType: questionTypes[index % questionTypes.length] ?? "explanation",
+                difficulty: difficulties[Math.min(difficulties.length - 1, Math.floor(index / Math.max(1, Math.ceil(plannedQuestionCount / difficulties.length))))] ?? "basic",
+                sourceChunkIds: [chunk.id],
+            });
         }
 
-        const selectedChunks: IndexedChunk[] = [];
-        const step: number = Math.max(1, Math.floor(chunks.length / maxChunks));
+        return {
+            title: `${scopeLabel} 测试蓝图`,
+            requestedQuestionCount,
+            plannedQuestionCount: items.length,
+            items,
+        };
+    }
 
-        for (let index = 0; index < chunks.length && selectedChunks.length < maxChunks; index += step) {
-            const chunk: IndexedChunk | undefined = chunks[index];
-            if (chunk) {
+    private buildExamBlueprintBlock(blueprint: ExamBlueprint): string {
+        return blueprint.items.map((item: ExamBlueprintItem, index: number) => {
+            return [
+                `BLUEPRINT_ITEM: ${item.id}`,
+                `QUESTION_INDEX: ${index + 1}`,
+                `TOPIC: ${item.topic}`,
+                `LEARNING_OBJECTIVE: ${item.learningObjective}`,
+                `QUESTION_TYPE: ${item.questionType}`,
+                `DIFFICULTY: ${item.difficulty}`,
+                `SOURCE_CHUNK_IDS: ${item.sourceChunkIds.join(", ")}`,
+            ].join("\n");
+        }).join("\n\n");
+    }
+
+    private selectExamContextChunks(chunks: IndexedChunk[], maxChunks: number, maxCharacters: number): IndexedChunk[] {
+        const chunksByFilePath: Map<string, IndexedChunk[]> = new Map<string, IndexedChunk[]>();
+        for (const chunk of chunks) {
+            const fileChunks: IndexedChunk[] = chunksByFilePath.get(chunk.filePath) ?? [];
+            fileChunks.push(chunk);
+            chunksByFilePath.set(chunk.filePath, fileChunks);
+        }
+
+        const filePaths: string[] = Array.from(chunksByFilePath.keys()).sort((leftPath: string, rightPath: string) => {
+            return leftPath.localeCompare(rightPath);
+        });
+        const selectedChunks: IndexedChunk[] = [];
+        let round = 0;
+
+        while (selectedChunks.length < maxChunks) {
+            let addedInRound = false;
+            for (const filePath of filePaths) {
+                const fileChunks: IndexedChunk[] | undefined = chunksByFilePath.get(filePath);
+                const chunk: IndexedChunk | undefined = fileChunks?.[round];
+                if (!chunk) {
+                    continue;
+                }
+
                 selectedChunks.push(chunk);
+                addedInRound = true;
+                if (selectedChunks.length >= maxChunks) {
+                    break;
+                }
             }
+
+            if (!addedInRound) {
+                break;
+            }
+            round += 1;
         }
 
         return this.limitChunksByCharacters(selectedChunks, maxCharacters);
@@ -657,8 +753,11 @@ export class AdvancedRagEngine {
         payloadQuestions: GeneratedExamQuestionPayload[],
         questionCount: number,
         sourcePathFallbacks: string[],
+        contextChunks: IndexedChunk[],
     ): ExamQuestion[] {
         const questions: ExamQuestion[] = [];
+        const allowedSourcePaths: Set<string> = new Set(contextChunks.map((chunk: IndexedChunk) => chunk.filePath));
+        const normalizedQuestionFingerprints: Set<string> = new Set<string>();
 
         for (let index = 0; index < payloadQuestions.length && questions.length < questionCount; index += 1) {
             const payloadQuestion: GeneratedExamQuestionPayload | undefined = payloadQuestions[index];
@@ -674,24 +773,50 @@ export class AdvancedRagEngine {
                 continue;
             }
 
+            if (referenceAnswer.length < 24) {
+                continue;
+            }
+
+            const questionFingerprint: string = this.normalizeExamQuestionFingerprint(question);
+            if (questionFingerprint.length > 0 && normalizedQuestionFingerprints.has(questionFingerprint)) {
+                continue;
+            }
+
             const fallbackId: string = `q${questions.length + 1}`;
             const sourcePaths: string[] = Array.isArray(payloadQuestion.source_paths)
                 ? payloadQuestion.source_paths
                     .filter((path: unknown): path is string => typeof path === "string")
                     .map((path: string) => path.trim())
-                    .filter((path: string) => path.length > 0)
+                    .filter((path: string) => path.length > 0 && allowedSourcePaths.has(path))
                 : [];
+            const finalSourcePaths: string[] = sourcePaths.length > 0
+                ? Array.from(new Set(sourcePaths))
+                : sourcePathFallbacks.filter((path: string) => allowedSourcePaths.has(path));
+
+            if (finalSourcePaths.length === 0) {
+                continue;
+            }
 
             questions.push({
                 id: this.normalizeQuestionId(payloadQuestion.id, fallbackId),
                 question,
                 referenceAnswer,
                 rubric,
-                sourcePaths: sourcePaths.length > 0 ? Array.from(new Set(sourcePaths)) : [...sourcePathFallbacks],
+                sourcePaths: finalSourcePaths,
             });
+            if (questionFingerprint.length > 0) {
+                normalizedQuestionFingerprints.add(questionFingerprint);
+            }
         }
 
         return questions;
+    }
+
+    private normalizeExamQuestionFingerprint(question: string): string {
+        return question
+            .toLowerCase()
+            .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "")
+            .slice(0, 80);
     }
 
     private stripInternalContextLabels(value: string): string {
