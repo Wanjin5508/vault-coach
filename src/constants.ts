@@ -15,6 +15,10 @@ export const DEFAULT_CHUNK_SIZE = 600;
 export const DEFAULT_CHUNK_OVERLAP = 120;
 export const DEFAULT_KEYWORD_TOP_K = 10;
 export const DEFAULT_SOURCE_LIMIT = 5;
+export const DEFAULT_ENABLE_MARKDOWN_INDEXING = true;
+export const DEFAULT_ENABLE_PDF_INDEXING = false;
+export const DEFAULT_MAX_PDF_FILE_SIZE_MB = 50;
+export const DEFAULT_MAX_PDF_PAGE_COUNT = 300;
 
 // ---------------------------
 // 第二阶段新增的默认值

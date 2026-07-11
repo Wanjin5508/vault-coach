@@ -11,11 +11,121 @@ export type ChatRole = "user" | "assistant";
 
 /**
  * * 知识库范围模式
- * - wholdVault: 扫描整个 vault 中的 md 文件
- * - specificFolder：只扫描用户指定目录下的 md 文件
+ * - wholdVault: 扫描整个 vault 中已启用的知识文件
+ * - specificFolder：只扫描用户指定目录下已启用的知识文件
  * 
  */
 export type KnowledgeScopeMode = "wholeVault" | "specificFolder";
+
+export type KnowledgeDocumentType = "markdown" | "pdf" | "zotero";
+
+export type ParsedDocumentBlockKind =
+    | "heading"
+    | "paragraph"
+    | "list"
+    | "code"
+    | "table"
+    | "caption"
+    | "ocr-text"
+    | "visual-summary";
+
+export type ChunkContentKind =
+    | "native-text"
+    | "ocr-text"
+    | "caption"
+    | "visual-summary"
+    | "annotation";
+
+export interface MarkdownLocator {
+    type: "markdown";
+    filePath: string;
+    heading?: string;
+}
+
+export interface PdfLocator {
+    type: "pdf";
+    filePath: string;
+    pageStart: number;
+    pageEnd?: number;
+}
+
+export interface ZoteroLocator {
+    type: "zotero";
+    itemKey: string;
+    attachmentKey?: string;
+    citationKey?: string;
+    pageStart?: number;
+    pageEnd?: number;
+}
+
+export type DocumentLocator = MarkdownLocator | PdfLocator | ZoteroLocator;
+
+export interface DocumentMetadata {
+    fileSize?: number;
+    modifiedTime?: number;
+    contentHash?: string;
+    pageCount?: number;
+    title?: string;
+    author?: string;
+    warnings?: string[];
+}
+
+export interface DocumentParseProgress {
+    filePath: string;
+    current: number;
+    total: number;
+    label: string;
+}
+
+export interface DocumentParseContext {
+    signal?: AbortSignal;
+    onProgress?: (progress: DocumentParseProgress) => void;
+}
+
+export interface ParsedDocumentBlock {
+    id: string;
+    kind: ParsedDocumentBlockKind;
+    text: string;
+    headingPath?: string[];
+    locator: DocumentLocator;
+    contentKind?: ChunkContentKind;
+    extractionQuality?: number;
+}
+
+export interface ParsedDocument {
+    documentId: string;
+    documentType: KnowledgeDocumentType;
+    title: string;
+    filePath?: string;
+    metadata: DocumentMetadata;
+    blocks: ParsedDocumentBlock[];
+    extraction: {
+        method: "markdown" | "pdf-native-text" | "pdf-ocr" | "visual-summary" | "zotero";
+        parserVersion: string;
+        qualityScore?: number;
+        warnings: string[];
+    };
+}
+
+export interface PdfExtractionReport {
+    totalPages: number;
+    nativeTextPages: number;
+    lowTextPages: number;
+    emptyPages: number;
+    extractedCharacters: number;
+    averageCharactersPerPage: number;
+    likelyScanned: boolean;
+    likelyMultiColumn: boolean;
+    qualityScore: number;
+    warnings: Array<
+        | "likely-scanned"
+        | "layout-order-uncertain"
+        | "font-mapping-error"
+        | "encrypted"
+        | "partially-parsed"
+        | "unsupported-content"
+    >;
+}
 
 /**
  * 检索模式。
@@ -38,8 +148,14 @@ export interface AnswerSource {
     // 来源文件在 vault 中的完整路径，例如："知识库/RAG/intro.md"
     filePath: string;
 
+    // 来源定位。Markdown 为 heading，PDF 为页码范围。
+    locator?: DocumentLocator;
+
     // 当前 chunk 对应的一级定位标题；如果文件没有标题，则为 undefined
     heading?: string;
+
+    pageStart?: number;
+    pageEnd?: number;
 
     // 直接展示给用户看的 Obsidian 链接文本，例如：[[知识库/RAG/intro.md#检索流程]]
     displayLink: string;
@@ -79,6 +195,11 @@ export interface ChatMessage {
  * - 本地模型连接参数
  */
 export interface VaultCoachSettings {
+    enableMarkdownIndexing: boolean;
+    enablePdfIndexing: boolean;
+    maxPdfFileSizeMb: number;
+    maxPdfPageCount: number;
+
     // 助手名称
     assistantName: string;
 
@@ -195,6 +316,9 @@ export interface IndexedChunk {
     // chunk 的唯一 id
     id: string;
 
+    documentId: string;
+    documentType: KnowledgeDocumentType;
+
     // 来源文件路径
     filePath: string;
 
@@ -214,6 +338,9 @@ export interface IndexedChunk {
     // 预处理后的可检索文本（会把文件名、标题等信息一起拼进去）
     searchableText: string;
 
+    locator: DocumentLocator;
+    contentKind: ChunkContentKind;
+    extractionQuality?: number;
 
 }
 
@@ -223,6 +350,52 @@ export interface IndexedChunk {
 export interface ChunkEmbedding {
     chunkId: string;
     vector: number[];
+}
+
+export interface VectorRecord {
+    chunkId: string;
+    vector: Float32Array;
+    metadata: {
+        documentId: string;
+        documentType: KnowledgeDocumentType;
+        filePath?: string;
+        pageStart?: number;
+        pageEnd?: number;
+    };
+}
+
+export interface VectorSearchOptions {
+    topK: number;
+    filter?: {
+        documentIds?: string[];
+        documentTypes?: KnowledgeDocumentType[];
+        folderPaths?: string[];
+    };
+}
+
+export interface VectorStoreHit {
+    chunkId: string;
+    score: number;
+    similarity: number;
+}
+
+export interface VectorStoreStats {
+    backend: "embedded-exact" | "embedded-ann" | "external";
+    vectorCount: number;
+    dimension: number | null;
+    persistedBytes: number;
+    loadedBytes: number;
+    lastUpdatedAt: number | null;
+}
+
+export interface VectorStore {
+    initialize(): Promise<void>;
+    upsert(records: VectorRecord[]): Promise<void>;
+    remove(chunkIds: string[]): Promise<void>;
+    search(queryVector: Float32Array, options: VectorSearchOptions): Promise<VectorStoreHit[]>;
+    clear(): Promise<void>;
+    getStats(): Promise<VectorStoreStats>;
+    close(): Promise<void>;
 }
 
 /**
@@ -288,7 +461,7 @@ export interface QueryRewriteResult {
  * 这些信息主要展示在右侧视图顶部，用来帮助用户理解当前索引状态。
  */
 export interface KnowledgeBaseStats {
-    // 已扫描的 md 文件数量
+    // 已扫描的知识文件数量
     fileCount: number;
 
     // 已生成的 chunk 数量
@@ -591,8 +764,15 @@ export interface RerankResultItem {
  * 文件级索引元数据，用于增量同步与本地持久化
  */
 export interface KnowledgeBaseFileRecord {
+    documentId?: string;
+    documentType?: KnowledgeDocumentType;
     filePath: string;
     contentHash: string;
+    fileSize?: number;
+    modifiedTime?: number;
+    parserVersion?: string;
+    chunkerVersion?: string;
+    extractionQuality?: number;
     chunkIds: string[];
     indexedAt: number;
 }
@@ -617,7 +797,8 @@ export interface KnowledgeBaseSnapshot {
     stats: KnowledgeBaseStats;
     vectorStats: VectorIndexStats;
     chunks: IndexedChunk[];
-    embeddings: ChunkEmbedding[];
+    // 兼容旧快照。新版向量存储使用 knowledge-index/vectors 下的二进制分片。
+    embeddings?: ChunkEmbedding[];
     files: KnowledgeBaseFileRecord[];
 }
 

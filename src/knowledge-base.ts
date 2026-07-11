@@ -1,7 +1,11 @@
 import { App, TFile, normalizePath } from "obsidian";
 import { VAULT_COACH_HIDDEN_DIR_PATH } from "./constants";
+import { createDocumentId, hashArrayBuffer, hashString, type DocumentParser, DocumentParserRegistry } from "./document-parser";
+import { MarkdownDocumentParser } from "./markdown-document-parser";
+import { PdfDocumentParser } from "./pdf-document-parser";
 import type {
-    ChunkEmbedding,
+    ChunkContentKind,
+    DocumentLocator,
     ExamFileOption,
     ExamScopeSelection,
     ExamScopeSnapshot,
@@ -12,33 +16,28 @@ import type {
     KnowledgeBaseStats,
     KnowledgeBaseSyncResult,
     KeywordSearchHit,
-    VectorSearchHit,
+    ParsedDocument,
+    ParsedDocumentBlock,
     VaultCoachSettings,
 } from "./types";
 
-/**
- * 内部使用的 section 结构
- * 一个 section 对应一个md 文件中某个 heading 下的正位片段
- */
-interface MarkdownSection {
-    headingPath: string[];
-    text: string;
-}
+const DOCUMENT_CHUNKER_VERSION = "document-chunker-v1";
 
 /**
  * VaultKnowledgeBase 负责第一阶段与第二阶段共享的“知识库底座”：
- * 1. 扫描 vault / 指定目录中的 Markdown 文件
- * 2. 对 Markdown 文本进行 heading-aware chunking
+ * 1. 扫描 vault / 指定目录中的已启用知识文件
+ * 2. 通过文档解析器把不同载体转换为统一 block
  * 3. 建立倒排索引用于关键词检索
- * 4. 保存向量索引并提供向量检索接口
+ * 4. 维护 chunk 元数据，向量存储由独立 VectorStore 负责
  *
  * 设计原则：
  * - 它不直接关心 LLM 生成回答；
- * - 它只负责“把 Markdown 变成可检索的数据结构”。
+ * - 它只负责“把知识文件变成可检索的数据结构”。
  */
 export class VaultKnowledgeBase {
     private readonly app: App;
     private readonly getSettings: () => VaultCoachSettings;  // ? 这什么类型？
+    private readonly parserRegistry: DocumentParserRegistry;
 
     /**
      * 所有 chunk 的顺序数组。
@@ -63,16 +62,9 @@ export class VaultKnowledgeBase {
      */
     private readonly invertedIndex: Map<string, Map<string, number>> = new Map<string, Map<string, number>>();
 
-    /**
-     * 向量索引：chunkId -> L2 归一化后的 embedding 向量。
-     *
-     * 之所以存“归一化后的向量”，是因为这样做余弦相似度时只需要点积，
-     * 可以避免每次查询都重复计算范数。
-     */
-    private readonly embeddingMap: Map<string, number[]> = new Map<string, number[]>();
-
     private readonly fileChunkIds: Map<string, string[]> = new Map<string, string[]>();
     private readonly fileHashes: Map<string, string> = new Map<string, string>();
+    private readonly fileRecords: Map<string, KnowledgeBaseFileRecord> = new Map<string, KnowledgeBaseFileRecord>();
 
     // 当前索引的统计信息
     private stats: KnowledgeBaseStats = {
@@ -85,6 +77,10 @@ export class VaultKnowledgeBase {
     constructor(app: App, getSettings: () => VaultCoachSettings) {
         this.app = app;
         this.getSettings = getSettings;
+        this.parserRegistry = new DocumentParserRegistry([
+            new MarkdownDocumentParser(app),
+            new PdfDocumentParser(app, getSettings),
+        ]);
     }
 
     /**
@@ -135,6 +131,11 @@ export class VaultKnowledgeBase {
         const abstractFile = this.app.vault.getAbstractFileByPath(normalizePath(filePath));
         if (!(abstractFile instanceof TFile)) {
             return null;
+        }
+
+        if (!this.isMarkdownPath(abstractFile.path)) {
+            const chunks: IndexedChunk[] = this.getChunksForFilePath(abstractFile.path);
+            return chunks.map((chunk: IndexedChunk) => chunk.text).join("\n\n");
         }
 
         return this.app.vault.cachedRead(abstractFile);
@@ -212,19 +213,10 @@ export class VaultKnowledgeBase {
         return this.chunks.filter((chunk: IndexedChunk) => allowedFilePaths.has(chunk.filePath));
     }
 
-    getEmbeddingSnapshot(): ChunkEmbedding[] {
-        return Array.from(this.embeddingMap.entries()).map(([chunkId, vector]) => ({
-            chunkId,
-            vector: [...vector],
-        }));
-    }
-
     getFileRecords(): KnowledgeBaseFileRecord[] {
-        return Array.from(this.fileChunkIds.entries()).map(([filePath, chunkIds]) => ({
-            filePath,
-            contentHash: this.fileHashes.get(filePath) ?? "",
-            chunkIds: [...chunkIds],
-            indexedAt: this.stats.lastIndexedAt ?? Date.now(),
+        return Array.from(this.fileRecords.values()).map((record: KnowledgeBaseFileRecord) => ({
+            ...record,
+            chunkIds: [...record.chunkIds],
         }));
     }
 
@@ -233,67 +225,38 @@ export class VaultKnowledgeBase {
         return JSON.stringify({
             knowledgeScopeMode: settings.knowledgeScopeMode,
             knowledgeFolder: this.normalizeFolderPath(settings.knowledgeFolder),
+            enableMarkdownIndexing: settings.enableMarkdownIndexing,
+            enablePdfIndexing: settings.enablePdfIndexing,
+            maxPdfFileSizeMb: settings.maxPdfFileSizeMb,
+            maxPdfPageCount: settings.maxPdfPageCount,
             chunkSize: settings.chunkSize,
             chunkOverlap: settings.chunkOverlap,
+            parserLayer: "document-parser-v1",
+            chunkerVersion: DOCUMENT_CHUNKER_VERSION,
         });
-    }
-
-    /**
-     * 当前是否已经拥有向量索引。
-     */
-    hasVectorIndex(): boolean {
-        return this.embeddingMap.size > 0;
-    }
-
-    /**
-     * 清空现有的向量索引。
-     * 当文本索引重建后，旧向量已经不再可信，因此应一并清空。
-     */
-    clearVectorIndex(): void {
-        this.embeddingMap.clear();
-    }
-
-    /**
-     * 批量写入 chunk 向量。
-     * 上层 RAG 引擎会在拿到 embedding 结果后调用这个方法。
-     */
-    setEmbeddings(items: ChunkEmbedding[]): void {
-        this.embeddingMap.clear();
-
-        this.upsertEmbeddings(items);
-    }
-
-    upsertEmbeddings(items: ChunkEmbedding[]): void {
-        for (const item of items) {
-            const normalizedVector: number[] = this.normalizeVector(item.vector);
-            if (normalizedVector.length > 0) {
-                this.embeddingMap.set(item.chunkId, normalizedVector);
-            }
-        }
-    }
-
-    removeEmbeddings(chunkIds: string[]): void {
-        for (const chunkId of chunkIds) {
-            this.embeddingMap.delete(chunkId);
-        }
     }
 
     /**
      * 从磁盘快照恢复文本索引、文件级元数据与向量索引
      */
-    loadFromSnapshot(snapshot: Pick<KnowledgeBaseSnapshot, "stats" | "chunks" | "files" | "embeddings">): void {
+    loadFromSnapshot(snapshot: Pick<KnowledgeBaseSnapshot, "stats" | "chunks" | "files">): void {
         this.clearIndex();
 
         for (const record of snapshot.files) {
             this.fileChunkIds.set(record.filePath, [...record.chunkIds]);
             this.fileHashes.set(record.filePath, record.contentHash);
+            this.fileRecords.set(record.filePath, {
+                ...record,
+                documentId: record.documentId ?? createDocumentId(record.documentType ?? "markdown", record.filePath),
+                documentType: record.documentType ?? "markdown",
+                chunkIds: [...record.chunkIds],
+            });
         }
 
         for (const chunk of snapshot.chunks) {
-            this.addChunkToIndex(chunk);
+            this.addChunkToIndex(this.normalizePersistedChunk(chunk));
         }
 
-        this.upsertEmbeddings(snapshot.embeddings);
         this.stats = {
             ...snapshot.stats,
             scopeDescription: this.describeCurrentScope(),
@@ -321,26 +284,18 @@ export class VaultKnowledgeBase {
     async rebuildIndexDetailed(): Promise<KnowledgeBaseSyncResult> {
         this.clearIndex();
 
-        const targetFiles: TFile[] = this.resolveTargetMarkdownFiles();
-        const settings: VaultCoachSettings = this.getSettings();
+        const targetFiles: TFile[] = this.resolveTargetKnowledgeFiles();
         const changedChunks: IndexedChunk[] = [];
 
         for (const file of targetFiles) {
-            const fileContent: string = await this.app.vault.cachedRead(file);
-            const contentHash: string = this.hashContent(fileContent);
-            const fileChunks: IndexedChunk[] = this.chunkMarkdownFile(
-                file,
-                fileContent,
-                settings.chunkSize,
-                settings.chunkOverlap,
-            );
-
-            this.fileChunkIds.set(file.path, fileChunks.map((chunk: IndexedChunk) => chunk.id));
-            this.fileHashes.set(file.path, contentHash);
-
-            for (const chunk of fileChunks) {
-                this.addChunkToIndex(chunk);
-                changedChunks.push(chunk);
+            try {
+                const fileChunks: IndexedChunk[] = await this.parseFileToChunks(file);
+                for (const chunk of fileChunks) {
+                    this.addChunkToIndex(chunk);
+                    changedChunks.push(chunk);
+                }
+            } catch (error: unknown) {
+                console.error("[VaultCoach] 文档解析失败，已跳过：", file.path, error);
             }
         }
 
@@ -353,13 +308,13 @@ export class VaultKnowledgeBase {
         };
     }
 
-    // 新增：只同步发生改动的 Markdown 文件。
+    // 新增：只同步发生改动的知识库文件。
     async syncChangedFiles(filePaths: string[]): Promise<KnowledgeBaseSyncResult> {
         const dedupedPaths: string[] = Array.from(
             new Set(
                 filePaths
                     .map((path: string) => path.trim())
-                    .filter((path: string) => path.length > 0 && this.isMarkdownPath(path)),
+                    .filter((path: string) => path.length > 0 && this.isSupportedKnowledgePath(path)),
             ),
         );
 
@@ -372,9 +327,8 @@ export class VaultKnowledgeBase {
             };
         }
 
-        const settings: VaultCoachSettings = this.getSettings();
         const currentFiles: Map<string, TFile> = new Map<string, TFile>();
-        const targetFiles: TFile[] = this.resolveTargetMarkdownFiles();
+        const targetFiles: TFile[] = this.resolveTargetKnowledgeFiles();
         for (const file of targetFiles) {
             currentFiles.set(file.path, file);
         }
@@ -390,8 +344,7 @@ export class VaultKnowledgeBase {
                 continue;
             }
 
-            const fileContent: string = await this.app.vault.cachedRead(existingFile);
-            const contentHash: string = this.hashContent(fileContent);
+            const contentHash: string = await this.readFileContentHash(existingFile);
             const previousHash: string | undefined = this.fileHashes.get(filePath);
 
             if (previousHash === contentHash) {
@@ -400,19 +353,14 @@ export class VaultKnowledgeBase {
 
             removedChunkIds.push(...this.removeFileFromIndex(filePath));
 
-            const fileChunks: IndexedChunk[] = this.chunkMarkdownFile(
-                existingFile,
-                fileContent,
-                settings.chunkSize,
-                settings.chunkOverlap,
-            );
-
-            this.fileChunkIds.set(existingFile.path, fileChunks.map((chunk: IndexedChunk) => chunk.id));
-            this.fileHashes.set(existingFile.path, contentHash);
-
-            for (const chunk of fileChunks) {
-                this.addChunkToIndex(chunk);
-                changedChunks.push(chunk);
+            try {
+                const fileChunks: IndexedChunk[] = await this.parseFileToChunks(existingFile);
+                for (const chunk of fileChunks) {
+                    this.addChunkToIndex(chunk);
+                    changedChunks.push(chunk);
+                }
+            } catch (error: unknown) {
+                console.error("[VaultCoach] 增量解析失败，已跳过：", existingFile.path, error);
             }
         }
 
@@ -510,43 +458,6 @@ export class VaultKnowledgeBase {
 
     }
 
-    /**
-     * 对外提供的向量检索接口。
-     *
-     * 输入要求：
-     * - queryEmbedding 必须已经是“与 chunk embedding 同维度”的向量；
-     * - 如果调用者没有事先归一化，也没有关系，这里会再做一次 L2 归一化。
-     */
-    searchVector(queryEmbedding: number[], limit: number): VectorSearchHit[] {
-        if (this.embeddingMap.size === 0) {
-            return [];
-        }
-
-        const normalizeQueryVector: number[] = this.normalizeVector(queryEmbedding);
-        if (normalizeQueryVector.length === 0) {
-            return [];
-        }
-
-        const hits: VectorSearchHit[] = [];
-
-        for (const [chunkId, chunkVector] of this.embeddingMap.entries()) {
-            const chunk: IndexedChunk | undefined = this.chunkMap.get(chunkId);
-            if (!chunk) {
-                continue;
-            }
-
-            const similarity: number = this.dot(normalizeQueryVector, chunkVector);
-            hits.push({
-                chunk,
-                score: similarity,
-                similarity,
-            });
-        }
-
-        hits.sort((left: VectorSearchHit, right: VectorSearchHit) => right.score - left.score);
-        return hits.slice(0, limit);
-    } 
-
     private resolveExamFilePathsForFolders(folderPaths: string[]): string[] {
         const normalizedFolderPaths: string[] = folderPaths
             .map((folderPath: string) => this.normalizeFolderPath(folderPath))
@@ -596,10 +507,17 @@ export class VaultKnowledgeBase {
             return "File no longer exists";
         }
 
-        const frontmatter = this.app.metadataCache.getFileCache(abstractFile)?.frontmatter;
-        const examFlag: unknown = frontmatter?.["vault_coach_exam"];
-        if (examFlag === false || examFlag === "false") {
-            return "vault_coach_exam: false";
+        if (this.isMarkdownPath(abstractFile.path)) {
+            const frontmatter = this.app.metadataCache.getFileCache(abstractFile)?.frontmatter;
+            const examFlag: unknown = frontmatter?.["vault_coach_exam"];
+            if (examFlag === false || examFlag === "false") {
+                return "vault_coach_exam: false";
+            }
+        }
+
+        const fileRecord: KnowledgeBaseFileRecord | undefined = this.fileRecords.get(filePath);
+        if (fileRecord?.documentType === "pdf" && (fileRecord.extractionQuality ?? 1) < 0.35) {
+            return "Low PDF extraction quality";
         }
 
         const matchedUserRule: string | null = this.findMatchingExamExcludeRule(filePath);
@@ -758,9 +676,9 @@ export class VaultKnowledgeBase {
         this.chunks = [];
         this.chunkMap.clear();
         this.invertedIndex.clear();
-        this.embeddingMap.clear();
         this.fileChunkIds.clear();
         this.fileHashes.clear();
+        this.fileRecords.clear();
         this.stats = {
             fileCount: 0,
             chunkCount: 0,
@@ -802,11 +720,11 @@ export class VaultKnowledgeBase {
             }
 
             this.chunkMap.delete(chunkId);
-            this.embeddingMap.delete(chunkId);
         }
 
         this.fileChunkIds.delete(filePath);
         this.fileHashes.delete(filePath);
+        this.fileRecords.delete(filePath);
         this.rebuildChunkArray();
         return chunkIds;
     }
@@ -819,15 +737,16 @@ export class VaultKnowledgeBase {
     }
 
     /**
-     * 根据设置解析当前应该纳入索引的 Markdown 文件。
+     * 根据设置解析当前应该纳入索引的知识库文件。
      */
-    private resolveTargetMarkdownFiles(): TFile[] {
+    private resolveTargetKnowledgeFiles(): TFile[] {
         const settings: VaultCoachSettings = this.getSettings();
-        const allMarkdownFiles: TFile[] = this.app.vault.getMarkdownFiles()
-            .filter((file: TFile) => !this.isVaultCoachHiddenPath(file.path));
+        const allKnowledgeFiles: TFile[] = this.app.vault.getFiles()
+            .filter((file: TFile) => !this.isVaultCoachHiddenPath(file.path))
+            .filter((file: TFile) => this.isSupportedKnowledgeFile(file));
 
         if (settings.knowledgeScopeMode === "wholeVault") {
-            return allMarkdownFiles;
+            return allKnowledgeFiles.sort((left: TFile, right: TFile) => left.path.localeCompare(right.path));
         }
 
         const normalizedFolder: string = this.normalizeFolderPath(settings.knowledgeFolder);
@@ -839,7 +758,9 @@ export class VaultKnowledgeBase {
             ? normalizedFolder
             : `${normalizedFolder}/`
 
-        return allMarkdownFiles.filter((file: TFile) => file.path.startsWith(folderPrefix));
+        return allKnowledgeFiles
+            .filter((file: TFile) => file.path.startsWith(folderPrefix))
+            .sort((left: TFile, right: TFile) => left.path.localeCompare(right.path));
     }
 
     private getParentFolderPaths(filePath: string): string[] {
@@ -858,64 +779,121 @@ export class VaultKnowledgeBase {
         return folderPaths;
     }
 
-    /**
-     * 将单个 Markdown 文件切分为多个 chunk。
-     *
-     * 核心思路：
-     * 1. 先按 heading 分 section
-     * 2. 再在 section 内按自然段聚合
-     * 3. 超长内容再做字符级切分
-     *
-     * 这样生成的 chunk 更符合 Obsidian 笔记的结构特征，
-     * 也更利于后续做 heading 级跳转。
-     */
-    private chunkMarkdownFile(
-        file: TFile,
-        content: string,
-        chunkSize: number,
-        chunkOverlap: number,
-    ): IndexedChunk[] {
-        const sections: MarkdownSection[] = this.parseMarkdownSections(content);
-        const chunks: IndexedChunk[] = [];
+    private async parseFileToChunks(file: TFile): Promise<IndexedChunk[]> {
+        const parser: DocumentParser | null = this.parserRegistry.resolve(file);
+        if (!parser) {
+            return [];
+        }
 
-        if (sections.length === 0) {
+        const parsedDocument: ParsedDocument = await parser.parse(file, {});
+        const fileChunks: IndexedChunk[] = this.chunkParsedDocument(parsedDocument);
+        const chunkIds: string[] = fileChunks.map((chunk: IndexedChunk) => chunk.id);
+
+        this.fileChunkIds.set(file.path, chunkIds);
+        this.fileHashes.set(file.path, parsedDocument.metadata.contentHash ?? "");
+        this.fileRecords.set(file.path, {
+            documentId: parsedDocument.documentId,
+            documentType: parsedDocument.documentType,
+            filePath: file.path,
+            contentHash: parsedDocument.metadata.contentHash ?? "",
+            fileSize: parsedDocument.metadata.fileSize ?? file.stat.size,
+            modifiedTime: parsedDocument.metadata.modifiedTime ?? file.stat.mtime,
+            parserVersion: parsedDocument.extraction.parserVersion,
+            chunkerVersion: DOCUMENT_CHUNKER_VERSION,
+            extractionQuality: parsedDocument.extraction.qualityScore,
+            chunkIds,
+            indexedAt: Date.now(),
+        });
+
+        return fileChunks;
+    }
+
+    private chunkParsedDocument(parsedDocument: ParsedDocument): IndexedChunk[] {
+        const chunks: IndexedChunk[] = [];
+        const settings: VaultCoachSettings = this.getSettings();
+        const chunkSize: number = settings.chunkSize;
+        const chunkOverlap: number = settings.chunkOverlap;
+        const filePath: string = parsedDocument.filePath ?? "";
+        const fileName: string = filePath.split("/").pop() ?? parsedDocument.title;
+
+        if (parsedDocument.blocks.length === 0) {
             return chunks;
         }
 
         let chunkSerial: number = 0;
+        let pendingBlocks: ParsedDocumentBlock[] = [];
 
-        for (const section of sections) {
-            const sectionChunks: string[] = this.splitSectionTextIntoChunkTexts(
-                section.text,
-                chunkSize,
-                chunkOverlap,
-            );
+        const flushPendingBlocks = (): void => {
+            if (pendingBlocks.length === 0) {
+                return;
+            }
 
-            for (const chunkText of sectionChunks) {
-                const primaryHeading: string | undefined = section.headingPath[section.headingPath.length - 1];
+            const firstBlock: ParsedDocumentBlock | undefined = pendingBlocks[0];
+            const headingPath: string[] = firstBlock?.headingPath ? [...firstBlock.headingPath] : [];
+            const primaryHeading: string | undefined = headingPath[headingPath.length - 1];
+            const locator: DocumentLocator = this.mergeLocators(pendingBlocks);
+            const contentKind: ChunkContentKind = firstBlock?.contentKind ?? "native-text";
+            const extractionQuality: number | undefined = this.averageExtractionQuality(pendingBlocks);
+            const sectionText: string = pendingBlocks.map((block: ParsedDocumentBlock) => block.text).join("\n\n").trim();
+            const chunkTexts: string[] = this.splitSectionTextIntoChunkTexts(sectionText, chunkSize, chunkOverlap);
+
+            for (const chunkText of chunkTexts) {
                 const searchableTextParts: string[] = [
-                    file.basename,
-                    ...section.headingPath,
+                    parsedDocument.title,
+                    ...headingPath,
+                    this.buildLocatorSearchText(locator),
                     chunkText,
                 ];
 
                 const searchableText: string = searchableTextParts.join("\n").trim();
-                const chunkId: string = `${file.path}::${primaryHeading ?? "__root__"}::${chunkSerial} `;
+                const chunkId: string = `${parsedDocument.documentType}:${filePath}::${primaryHeading ?? "__root__"}::${chunkSerial}`;
 
                 chunks.push({
                     id: chunkId,
-                    filePath: file.path,
-                    fileName: file.name,
-                    headingPath: [...section.headingPath],
+                    documentId: parsedDocument.documentId,
+                    documentType: parsedDocument.documentType,
+                    filePath,
+                    fileName,
+                    headingPath: [...headingPath],
                     primaryHeading,
                     text: chunkText,
                     searchableText,
+                    locator,
+                    contentKind,
+                    extractionQuality,
                 });
 
                 chunkSerial += 1;
-
             }
+        };
+
+        for (const block of parsedDocument.blocks) {
+            if (block.kind === "heading") {
+                flushPendingBlocks();
+                continue;
+            }
+
+            if (pendingBlocks.length === 0) {
+                pendingBlocks.push(block);
+                continue;
+            }
+
+            const candidateBlocks: ParsedDocumentBlock[] = [...pendingBlocks, block];
+            const candidateText: string = candidateBlocks.map((item: ParsedDocumentBlock) => item.text).join("\n\n");
+            if (
+                candidateText.length <= chunkSize
+                && this.haveCompatibleHeadingPath(pendingBlocks[0], block)
+                && this.canMergeLocatorRange(candidateBlocks)
+            ) {
+                pendingBlocks.push(block);
+                continue;
+            }
+
+            flushPendingBlocks();
+            pendingBlocks.push(block);
         }
+
+        flushPendingBlocks();
         return chunks;
     }
 
@@ -941,70 +919,117 @@ export class VaultKnowledgeBase {
         }
     }
 
+    private mergeLocators(blocks: ParsedDocumentBlock[]): DocumentLocator {
+        const firstLocator: DocumentLocator | undefined = blocks[0]?.locator;
+        if (!firstLocator) {
+            return {
+                type: "markdown",
+                filePath: "",
+            };
+        }
 
-    /**
-     * 解析 Markdown 标题结构。
-     *
-     * 示例：
-     * ## 检索流程
-     * 文本...
-     * ### 混合检索
-     * 文本...
-     *
-     * 最终会得到多个 section，每个 section 都保留 headingPath。
-     */
-    private parseMarkdownSections(content: string): MarkdownSection[] {
-        const lines: string[] = content.split(/\r?\n/);
-        const sections: MarkdownSection[] = [];
-        let currentHeadingPath: string[] = [];
-        let buffer: string[] = [];
+        if (firstLocator.type !== "pdf") {
+            return firstLocator;
+        }
 
-        const flushBuffer = (): void => {
-            const text: string = buffer.join("\n").trim();
-            if (text.length > 0) {
-                sections.push({
-                    headingPath: [...currentHeadingPath],
-                    text,
-                });
-            }
-            buffer = [];
-        };
-
-        for (const rawLine of lines) {
-            const headingMatch: RegExpExecArray | null = /^\s{0,3}(#{1,6})\s+(.*?)\s*$/.exec(rawLine);
-
-            if (headingMatch) {
-                flushBuffer();
-
-                const hashes: string | undefined = headingMatch[1];
-                const rawHeadingText: string | undefined = headingMatch[2];
-
-                // 在开启 noUncheckedIndexedAccess 时，
-                // 即使 headingMatch 不为 null，捕获组也仍然可能被推断为 undefined，
-                // 因此这里需要再做一次显式保护。
-                if (!hashes || rawHeadingText === undefined) {
-                    continue;
-                }
-
-                const headingLevel: number = hashes.length;
-                const headingText: string = rawHeadingText.trim().replace(/\s+#*\s*$/, "");
-
-
-                // headingLevel 为 1 表示一级标题，因此要保留 0 个旧层级；
-                // headingLevel 为 2 表示二级标题，因此要保留 1 个旧层级，以此类推。
-                currentHeadingPath = currentHeadingPath.slice(0, Math.max(headingLevel - 1, 0));
-                currentHeadingPath[headingLevel - 1] = headingText;
+        let pageStart: number = firstLocator.pageStart;
+        let pageEnd: number = firstLocator.pageEnd ?? firstLocator.pageStart;
+        for (const block of blocks) {
+            if (block.locator.type !== "pdf") {
                 continue;
             }
 
-            buffer.push(rawLine);
+            pageStart = Math.min(pageStart, block.locator.pageStart);
+            pageEnd = Math.max(pageEnd, block.locator.pageEnd ?? block.locator.pageStart);
         }
-        flushBuffer();
 
-        // 如果整篇文件既没有标题，也没有正文，就返回空数组。
-        return sections;
+        return {
+            type: "pdf",
+            filePath: firstLocator.filePath,
+            pageStart,
+            pageEnd,
+        };
+    }
 
+    private buildLocatorSearchText(locator: DocumentLocator): string {
+        if (locator.type === "pdf") {
+            const pageEnd: number = locator.pageEnd ?? locator.pageStart;
+            return pageEnd === locator.pageStart
+                ? `第 ${locator.pageStart} 页`
+                : `第 ${locator.pageStart}-${pageEnd} 页`;
+        }
 
+        if (locator.type === "markdown") {
+            return locator.heading ?? "";
+        }
+
+        return locator.citationKey ?? locator.itemKey;
+    }
+
+    private averageExtractionQuality(blocks: ParsedDocumentBlock[]): number | undefined {
+        const values: number[] = blocks
+            .map((block: ParsedDocumentBlock) => block.extractionQuality)
+            .filter((value: number | undefined): value is number => typeof value === "number" && Number.isFinite(value));
+
+        if (values.length === 0) {
+            return undefined;
+        }
+
+        return values.reduce((sum: number, value: number) => sum + value, 0) / values.length;
+    }
+
+    private haveCompatibleHeadingPath(left: ParsedDocumentBlock | undefined, right: ParsedDocumentBlock): boolean {
+        const leftHeadingPath: string[] = left?.headingPath ?? [];
+        const rightHeadingPath: string[] = right.headingPath ?? [];
+        return leftHeadingPath.join("\u0000") === rightHeadingPath.join("\u0000");
+    }
+
+    private canMergeLocatorRange(blocks: ParsedDocumentBlock[]): boolean {
+        const firstLocator: DocumentLocator | undefined = blocks[0]?.locator;
+        if (!firstLocator || firstLocator.type !== "pdf") {
+            return true;
+        }
+
+        let pageStart: number = firstLocator.pageStart;
+        let pageEnd: number = firstLocator.pageEnd ?? firstLocator.pageStart;
+        for (const block of blocks) {
+            if (block.locator.type !== "pdf") {
+                return false;
+            }
+
+            pageStart = Math.min(pageStart, block.locator.pageStart);
+            pageEnd = Math.max(pageEnd, block.locator.pageEnd ?? block.locator.pageStart);
+        }
+
+        return pageEnd - pageStart <= 1;
+    }
+
+    private normalizePersistedChunk(chunk: IndexedChunk): IndexedChunk {
+        const documentType = chunk.documentType ?? "markdown";
+        const documentId: string = chunk.documentId ?? createDocumentId(documentType, chunk.filePath);
+        const primaryHeading: string | undefined = chunk.primaryHeading ?? chunk.headingPath[chunk.headingPath.length - 1];
+        const locator: DocumentLocator = chunk.locator ?? {
+            type: "markdown",
+            filePath: chunk.filePath,
+            heading: primaryHeading,
+        };
+
+        return {
+            ...chunk,
+            documentId,
+            documentType,
+            primaryHeading,
+            locator,
+            contentKind: chunk.contentKind ?? "native-text",
+        };
+    }
+
+    private async readFileContentHash(file: TFile): Promise<string> {
+        if (this.isPdfPath(file.path)) {
+            return hashArrayBuffer(await this.app.vault.readBinary(file));
+        }
+
+        return hashString(await this.app.vault.cachedRead(file));
     }
 
     /**
@@ -1166,50 +1191,6 @@ export class VaultKnowledgeBase {
     }
 
     /**
-     * 对向量做 L2 归一化。
-     *
-     * 归一化后的向量长度为 1，后续计算余弦相似度时可以直接使用点积。
-     * ? 不需要减去均值吗？
-     */
-    private normalizeVector(vector: number[]): number[] {
-        if (vector.length === 0 ){
-            return [];
-        }
-
-        let sumOfSquares = 0;
-        for (const value of vector) {
-            sumOfSquares += value * value;
-        }
-
-        const norm: number = Math.sqrt(sumOfSquares);
-        if (norm === 0) {
-            return [];
-        }
-
-        return vector.map((value:number) => value / norm);
-    }
-
-    /**
-     * 计算两个等长向量的点积。
-     *
-     * 注意：这里假设调用前已经保证维度兼容；
-     * 如果维度不一致，则以较短长度为准，避免运行时崩溃。
-     */
-    private dot(left: number[], right: number[]): number {
-        const length: number = Math.min(left.length, right.length);
-        let score = 0;
-
-        for (let index = 0; index < length; index+=1) {
-            const leftValue: number | undefined = left[index];
-            const rightValue: number | undefined = right[index];
-            if (leftValue != undefined && rightValue != undefined) {
-                score += leftValue * rightValue;
-            }
-        }
-        return score;
-    }
-
-    /**
      * 统一处理目录路径，避免用户输入前后空格或多余斜杠导致判断出错。
      */
     private normalizeFolderPath(folderPath: string): string {
@@ -1236,19 +1217,22 @@ export class VaultKnowledgeBase {
             : "目录：未指定";
     }
 
-    private hashContent(content: string): string {
-        let hash = 2166136261;
-
-        for (let index = 0; index < content.length; index += 1) {
-            hash ^= content.charCodeAt(index);
-            hash = Math.imul(hash, 16777619);
-        }
-
-        return `${content.length}:${(hash >>> 0).toString(16)}`;
-    }
-
     private isMarkdownPath(path: string): boolean {
         return path.toLowerCase().endsWith(".md");
+    }
+
+    private isPdfPath(path: string): boolean {
+        return path.toLowerCase().endsWith(".pdf");
+    }
+
+    private isSupportedKnowledgePath(path: string): boolean {
+        const settings: VaultCoachSettings = this.getSettings();
+        return (settings.enableMarkdownIndexing && this.isMarkdownPath(path))
+            || (settings.enablePdfIndexing && this.isPdfPath(path));
+    }
+
+    private isSupportedKnowledgeFile(file: TFile): boolean {
+        return this.isSupportedKnowledgePath(file.path) && this.parserRegistry.resolve(file) !== null;
     }
 
     private isVaultCoachHiddenPath(path: string): boolean {

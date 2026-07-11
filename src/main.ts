@@ -6,6 +6,7 @@ import { VaultKnowledgeBase } from "./knowledge-base";
 import { VaultCoachPersistentStore } from "./persistent-store";
 import { AdvancedRagEngine } from "./rag-engine";
 import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
+import { EmbeddedExactVectorStore } from "./vector-store";
 import type {
     AnswerSource,
     AssistantAnswer,
@@ -30,6 +31,7 @@ import type {
     RetrievalMode,
     StreamHandlers,
     VectorIndexStats,
+    VectorStore,
     VaultCoachSettings,
 } from "./types";
 import { VaultCoachView } from "./view";
@@ -41,6 +43,7 @@ export default class VaultCoach extends Plugin {
     private memories: MemoryItem[] = [];
 
     private knowledgeBase!: VaultKnowledgeBase;
+    private vectorStore!: VectorStore;
     private ragEngine!: AdvancedRagEngine;
     private examEngine!: ExamEngine;
     private persistentStore!: VaultCoachPersistentStore;
@@ -50,7 +53,7 @@ export default class VaultCoach extends Plugin {
     private runtimeRetrievalMode: RetrievalMode = DEFAULT_SETTINGS.defaultRetrievalMode;
 
     // 新增：自动增量同步所需的队列与计时器。
-    private readonly pendingChangedMarkdownPaths: Set<string> = new Set<string>();
+    private readonly pendingChangedKnowledgePaths: Set<string> = new Set<string>();
     private autoIndexDebounceTimer: number | null = null;
     private autoIndexMaxWaitTimer: number | null = null;
     private isSyncingKnowledgeBase = false;
@@ -65,9 +68,12 @@ export default class VaultCoach extends Plugin {
         await this.loadSettings();
 
         this.runtimeRetrievalMode = this.settings.defaultRetrievalMode;
+        this.persistentStore = new VaultCoachPersistentStore(this.app, this.manifest.id);
         this.knowledgeBase = new VaultKnowledgeBase(this.app, () => this.settings);
+        this.vectorStore = new EmbeddedExactVectorStore(this.persistentStore);
         this.ragEngine = new AdvancedRagEngine(
             this.knowledgeBase,
+            this.vectorStore,
             () => this.settings,
             () => this.runtimeRetrievalMode,
             () => this.getCloudApiKey(),
@@ -78,7 +84,6 @@ export default class VaultCoach extends Plugin {
             () => this.settings,
             () => this.getCloudApiKey(),
         );
-        this.persistentStore = new VaultCoachPersistentStore(this.app, this.manifest.id);
 
         await this.restorePersistentState();
         await this.restoreKnowledgeBaseSnapshot();
@@ -128,12 +133,6 @@ export default class VaultCoach extends Plugin {
             this.refreshAllViews();
         });
         this.registerVaultEvents();
-
-        if (!this.knowledgeBase.isReady()) {
-            await this.rebuildKnowledgeBase(false);
-        } else if (this.vectorIndexDirty && this.settings.enableVectorRetrieval) {
-            await this.rebuildVectorIndexOnly(false);
-        }
 
         this.app.workspace.onLayoutReady(() => {
             if (this.settings.openInRightSidebarOnStartup) {
@@ -186,7 +185,7 @@ export default class VaultCoach extends Plugin {
     markVectorIndexDirty(): void {
         // Embedding service/model changes do not invalidate parsed Markdown chunks or the keyword index.
         // Clear stale vectors so the UI and retrieval layer never report old embeddings as current.
-        this.knowledgeBase.clearVectorIndex();
+        void this.vectorStore.clear();
         this.ragEngine.hydrateVectorStats({
             ready: false,
             vectorCount: 0,
@@ -569,7 +568,9 @@ export default class VaultCoach extends Plugin {
 
     async openSource(source: AnswerSource): Promise<void> {
         const activeFilePath: string = this.app.workspace.getActiveFile()?.path ?? "";
-        const linkTarget: string = source.heading
+        const linkTarget: string = source.locator?.type === "pdf"
+            ? `${source.filePath}#page=${source.locator.pageStart}`
+            : source.heading
             ? `${source.filePath}#${source.heading}`
             : source.filePath;
 
@@ -578,11 +579,11 @@ export default class VaultCoach extends Plugin {
 
     private registerVaultEvents(): void {
         const queuePath = (path: string): void => {
-            if (!this.isMarkdownPath(path) || this.isVaultCoachHiddenPath(path)) {
+            if (!this.isKnowledgePath(path) || this.isVaultCoachHiddenPath(path)) {
                 return;
             }
 
-            this.pendingChangedMarkdownPaths.add(path);
+            this.pendingChangedKnowledgePaths.add(path);
             this.knowledgeBaseDirty = true;
             this.vectorIndexDirty = true;
             this.refreshAllViews();
@@ -613,7 +614,7 @@ export default class VaultCoach extends Plugin {
             return;
         }
 
-        if (this.pendingChangedMarkdownPaths.size >= this.settings.autoIndexFileThreshold) {
+        if (this.pendingChangedKnowledgePaths.size >= this.settings.autoIndexFileThreshold) {
             void this.flushPendingKnowledgeBaseSync(false);
             return;
         }
@@ -639,13 +640,13 @@ export default class VaultCoach extends Plugin {
             return;
         }
 
-        const filePaths: string[] = Array.from(this.pendingChangedMarkdownPaths);
+        const filePaths: string[] = Array.from(this.pendingChangedKnowledgePaths);
         if (filePaths.length === 0) {
             return;
         }
 
         this.isSyncingKnowledgeBase = true;
-        this.pendingChangedMarkdownPaths.clear();
+        this.pendingChangedKnowledgePaths.clear();
         this.clearAutoIndexTimers();
 
         try {
@@ -730,9 +731,10 @@ export default class VaultCoach extends Plugin {
         this.knowledgeBaseDirty = false;
 
         const currentEmbeddingModel: string | null = this.getEmbeddingIndexSignature();
+        const needsVectorStoreMigration: boolean = (snapshot.version ?? 0) < 2;
 
-        if (snapshot.embeddingModel !== currentEmbeddingModel) {
-            this.knowledgeBase.clearVectorIndex();
+        if (needsVectorStoreMigration || snapshot.embeddingModel !== currentEmbeddingModel) {
+            await this.vectorStore.clear();
             this.ragEngine.hydrateVectorStats({
                 ready: false,
                 vectorCount: 0,
@@ -770,13 +772,12 @@ export default class VaultCoach extends Plugin {
 
     private async persistKnowledgeBaseSnapshot(): Promise<void> {
         const snapshot: KnowledgeBaseSnapshot = {
-            version: 1,
+            version: 2,
             settingsSignature: this.knowledgeBase.getSettingsSignature(),
             embeddingModel: this.getEmbeddingIndexSignature(),
             stats: this.knowledgeBase.getStats(),
             vectorStats: this.ragEngine.getVectorIndexStats(),
             chunks: this.knowledgeBase.getAllChunks(),
-            embeddings: this.knowledgeBase.getEmbeddingSnapshot(),
             files: this.knowledgeBase.getFileRecords(),
         };
         await this.persistentStore.saveKnowledgeBaseSnapshot(snapshot);
@@ -1235,6 +1236,12 @@ export default class VaultCoach extends Plugin {
 
     private isMarkdownPath(path: string): boolean {
         return path.toLowerCase().endsWith(".md");
+    }
+
+    private isKnowledgePath(path: string): boolean {
+        const lowerPath: string = path.toLowerCase();
+        return (this.settings.enableMarkdownIndexing && lowerPath.endsWith(".md"))
+            || (this.settings.enablePdfIndexing && lowerPath.endsWith(".pdf"));
     }
 
     private isExamResultPath(path: string): boolean {

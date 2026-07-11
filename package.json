@@ -23,5 +23,8 @@
 		"tslib": "2.4.0",
 		"typescript": "^5.8.3",
 		"typescript-eslint": "8.35.1"
+	},
+	"dependencies": {
+		"pdfjs-dist": "^2.16.105"
 	}
 }
