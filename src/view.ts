@@ -16,6 +16,7 @@ import type {
     ExamScopeSnapshot,
     ExamScopeOption,
     ExamSession,
+    KnowledgeIndexBusyState,
     KnowledgeBaseStats,
     RetrievalMode,
     VectorIndexStats,
@@ -243,13 +244,20 @@ export class VaultCoachView extends ItemView {
 
         const textStats: KnowledgeBaseStats = this.plugin.getKnowledgeBaseStats();
         const vectorStats: VectorIndexStats = this.plugin.getVectorIndexStats();
+        const indexBusyState: KnowledgeIndexBusyState = this.plugin.getKnowledgeIndexBusyState();
         const infoListEl: HTMLDivElement = headerEl.createDiv({cls: "vault-coach-header-info-grid"});
 
-        const textIndexStatusText: string = this.plugin.isTextIndexDirty()
+        const textIndexStatusText: string = indexBusyState.busy && indexBusyState.phase === "vector"
+            ? (textStats.lastIndexedAt ? this.t("view.indexStatus.ready") : this.t("view.indexStatus.building"))
+            : indexBusyState.busy
+            ? this.t("view.indexStatus.building")
+            : this.plugin.isTextIndexDirty()
             ? this.t("view.indexStatus.dirty")
             : (textStats.lastIndexedAt ? this.t("view.indexStatus.ready") : this.t("view.indexStatus.notBuilt"));
 
-        const vectorIndexStatusText: string = this.getVectorIndexStatusText(vectorStats);
+        const vectorIndexStatusText: string = indexBusyState.busy && indexBusyState.phase === "vector"
+            ? this.t("view.indexStatus.building")
+            : this.getVectorIndexStatusText(vectorStats);
 
         this.renderHeaderStat(infoListEl, this.t("view.stat.knowledgeScope"), this.plugin.getLocalizedKnowledgeScopeDescription());
         this.renderHeaderStat(infoListEl, this.t("view.stat.textIndex"), textIndexStatusText);
@@ -258,21 +266,80 @@ export class VaultCoachView extends ItemView {
         this.renderHeaderStat(infoListEl, this.t("view.stat.chunks"), String(textStats.chunkCount));
         this.renderHeaderStat(infoListEl, this.t("view.stat.memory"), this.t("view.stat.memoryValue", { count: this.plugin.getMemoryCount() }));
 
+        if (indexBusyState.busy) {
+            this.renderIndexBusyState(headerEl, indexBusyState);
+        }
+
         const toolbarEl: HTMLDivElement = headerEl.createDiv({ cls: "vault-coach-toolbar" });
 
         if (this.activeInteractionMode === "qa") {
-            this.renderQaToolbar(toolbarEl);
+            this.renderQaToolbar(toolbarEl, indexBusyState.busy);
         }
 
         const rebuildButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
-            text: this.t("view.rebuildIndex"),
+            text: indexBusyState.busy ? this.t("view.rebuildIndexBusy") : this.t("view.rebuildIndex"),
         });
+        rebuildButtonEl.disabled = indexBusyState.busy || this.isBusy;
         rebuildButtonEl.addEventListener("click", () => {
             void this.handleRebuildIndex();
         });
+
+        const clearIndexButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
+            text: this.t("view.clearIndex"),
+            cls: "vault-coach-danger-button",
+            attr: {
+                type: "button",
+            },
+        });
+        clearIndexButtonEl.disabled = indexBusyState.busy || this.isBusy;
+        clearIndexButtonEl.addEventListener("click", () => {
+            void this.handleClearIndex();
+        });
     }
 
-    private renderQaToolbar(toolbarEl: HTMLDivElement): void {
+    private renderIndexBusyState(containerEl: HTMLDivElement, state: KnowledgeIndexBusyState): void {
+        const busyEl: HTMLDivElement = containerEl.createDiv({
+            cls: "vault-coach-index-busy",
+            attr: {
+                "aria-live": "polite",
+                role: "status",
+            },
+        });
+
+        busyEl.createSpan({ cls: "vault-coach-thinking-spinner vault-coach-index-busy-spinner" });
+        busyEl.createSpan({
+            cls: "vault-coach-index-busy-text",
+            text: this.getIndexBusyText(state),
+        });
+        const stopButtonEl: HTMLButtonElement = busyEl.createEl("button", {
+            text: this.t("view.stopIndexBuild"),
+            cls: "vault-coach-danger-button vault-coach-index-stop-button",
+            attr: {
+                type: "button",
+            },
+        });
+        stopButtonEl.addEventListener("click", () => {
+            this.plugin.abortKnowledgeIndexBuild(true);
+        });
+    }
+
+    private getIndexBusyText(state: KnowledgeIndexBusyState): string {
+        if (state.phase === "rebuilding") {
+            return this.t("view.indexBusy.rebuilding");
+        }
+
+        if (state.phase === "syncing") {
+            return this.t("view.indexBusy.syncing");
+        }
+
+        if (state.phase === "vector") {
+            return this.t("view.indexBusy.vector");
+        }
+
+        return this.t("view.indexBusy.generic");
+    }
+
+    private renderQaToolbar(toolbarEl: HTMLDivElement, indexBusy: boolean): void {
         const retrievalGroupEl: HTMLDivElement = toolbarEl.createDiv({ cls: "vault-coach-retrieval-group"});
         retrievalGroupEl.createSpan({text: `${this.t("view.retrievalModeLabel")} `});
         this.retrievalModeSelectEl = retrievalGroupEl.createEl("select");
@@ -280,6 +347,7 @@ export class VaultCoachView extends ItemView {
         this.addRetrievalOption("vector", this.t("view.retrieval.vector"));
         this.addRetrievalOption("hybrid", this.t("view.retrieval.hybrid"));
         this.retrievalModeSelectEl.value = this.plugin.getRuntimeRetrievalMode();
+        this.retrievalModeSelectEl.disabled = this.isBusy || indexBusy;
         this.retrievalModeSelectEl.addEventListener("change", () => {
             const value: string = this.retrievalModeSelectEl.value;
             if (value === "keyword" || value === "vector" || value === "hybrid" ) {
@@ -290,6 +358,7 @@ export class VaultCoachView extends ItemView {
         const resetButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
             text: this.t("view.resetConversation"),
         });
+        resetButtonEl.disabled = this.isBusy;
         resetButtonEl.addEventListener("click", () => {
             this.plugin.resetConversation();
             void this.renderMessages();
@@ -1278,6 +1347,7 @@ export class VaultCoachView extends ItemView {
      * 
      */
     private renderInputArea(rootEl: HTMLDivElement): void {
+        const indexBusy: boolean = this.plugin.getKnowledgeIndexBusyState().busy;
         const inputAreaEl: HTMLDivElement = rootEl.createDiv({ cls: "vault-coach-input-area"});
         this.inputEl = inputAreaEl.createEl("textarea", {
             cls: "vault-coach-input",
@@ -1286,6 +1356,7 @@ export class VaultCoachView extends ItemView {
                 rows: "4",
             },
         });
+        this.inputEl.disabled = this.isBusy || indexBusy;
 
         const buttonRowEl: HTMLDivElement = inputAreaEl.createDiv({ cls: "vault-coach-button-row"});
 
@@ -1293,10 +1364,12 @@ export class VaultCoachView extends ItemView {
             text: this.t("view.send"),
             cls: "mod-cta",
         });
+        this.sendButtonEl.disabled = this.isBusy || indexBusy;
 
         const clearButtonEl: HTMLButtonElement = buttonRowEl.createEl("button", {
             text: this.t("view.clear"),
         });
+        clearButtonEl.disabled = this.isBusy;
 
         this.stopButtonEl = buttonRowEl.createEl("button", {
             text: this.t("view.stopGenerating"),
@@ -1969,7 +2042,7 @@ export class VaultCoachView extends ItemView {
         const userText: string = this.inputEl.value.trim();
 
         // 用户什么都没输入，就不发送
-        if (!userText || this.isBusy) {
+        if (!userText || this.isBusy || this.plugin.getKnowledgeIndexBusyState().busy) {
             return;
         }
 
@@ -2054,7 +2127,7 @@ export class VaultCoachView extends ItemView {
      * 手动重建索引
      */
     private async handleRebuildIndex(): Promise<void> {
-        if (this.isBusy) {
+        if (this.isBusy || this.plugin.getKnowledgeIndexBusyState().busy) {
             return;
         }
 
@@ -2072,6 +2145,14 @@ export class VaultCoachView extends ItemView {
                 this.focusInput();
             }
         }
+    }
+
+    private async handleClearIndex(): Promise<void> {
+        if (this.isBusy || this.plugin.getKnowledgeIndexBusyState().busy) {
+            return;
+        }
+
+        await this.plugin.clearKnowledgeIndex(true);
     }
 
     /**

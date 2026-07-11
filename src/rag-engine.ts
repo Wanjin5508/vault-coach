@@ -5,7 +5,6 @@ import type {
     AnswerSource,
     AssistantAnswer,
     ChatMessage,
-    ChunkEmbedding,
     ExamBlueprint,
     ExamBlueprintItem,
     ExamEvaluation,
@@ -25,7 +24,11 @@ import type {
     RerankResultItem,
     StreamHandlers,
     VectorIndexStats,
+    VectorRecord,
     VectorSearchHit,
+    VectorStore,
+    VectorStoreHit,
+    VectorStoreStats,
     VaultCoachSettings,
 } from "./types";
 
@@ -70,6 +73,7 @@ interface ExamEvaluationPayload {
 
 export class AdvancedRagEngine {
     private readonly knowledgeBase: VaultKnowledgeBase;
+    private readonly vectorStore: VectorStore;
     private readonly getSettings: () => VaultCoachSettings;
     private readonly getRuntimeRetrievalMode: () => RetrievalMode;
     private readonly client: LocalModelClient;
@@ -83,11 +87,13 @@ export class AdvancedRagEngine {
 
     constructor(
         knowledgeBase: VaultKnowledgeBase,
+        vectorStore: VectorStore,
         getSettings: () => VaultCoachSettings,
         getRuntimeRetrievalMode: () => RetrievalMode,
         getCloudApiKey: () => string | null,
     ) {
         this.knowledgeBase = knowledgeBase;
+        this.vectorStore = vectorStore;
         this.getSettings = getSettings;
         this.getRuntimeRetrievalMode = getRuntimeRetrievalMode;
         this.client = new LocalModelClient(getSettings, getCloudApiKey);
@@ -106,21 +112,21 @@ export class AdvancedRagEngine {
         this.vectorStats = { ...vectorStats };
     }
 
-    // 新增：根据当前知识库中的向量快照重新计算统计信息。
-    refreshVectorStatsFromKnowledgeBase(): VectorIndexStats {
-        const embeddings: ChunkEmbedding[] = this.knowledgeBase.getEmbeddingSnapshot();
+    async refreshVectorStatsFromStore(): Promise<VectorIndexStats> {
+        const stats: VectorStoreStats = await this.vectorStore.getStats();
         this.vectorStats = {
-            ready: embeddings.length > 0,
-            vectorCount: embeddings.length,
-            dimension: embeddings[0]?.vector.length ?? null,
-            lastBuiltAt: embeddings.length > 0 ? Date.now() : null,
+            ready: stats.vectorCount > 0,
+            vectorCount: stats.vectorCount,
+            dimension: stats.dimension,
+            lastBuiltAt: stats.lastUpdatedAt,
         };
         return this.getVectorIndexStats();
     }
 
-    async rebuildVectorIndex(): Promise<VectorIndexStats> {
+    async rebuildVectorIndex(signal?: AbortSignal): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
-        this.knowledgeBase.clearVectorIndex();
+        signal?.throwIfAborted();
+        await this.vectorStore.clear();
         this.vectorStats = {
             ready: false,
             vectorCount: 0,
@@ -137,24 +143,21 @@ export class AdvancedRagEngine {
             return this.getVectorIndexStats();
         }
 
-        const items: ChunkEmbedding[] = await this.buildChunkEmbeddings(chunks);
-        this.knowledgeBase.setEmbeddings(items);
-        this.vectorStats = {
-            ready: items.length > 0,
-            vectorCount: items.length,
-            dimension: items[0]?.vector.length ?? null,
-            lastBuiltAt: Date.now(),
-        };
+        const items: VectorRecord[] = await this.buildChunkEmbeddings(chunks, signal);
+        signal?.throwIfAborted();
+        await this.vectorStore.upsert(items);
+        await this.refreshVectorStatsFromStore();
 
         return this.getVectorIndexStats();
     }
 
     // 新增：增量同步时只为发生变化的 chunk 重算 embedding。
-    async syncVectorIndex(syncResult: KnowledgeBaseSyncResult): Promise<VectorIndexStats> {
+    async syncVectorIndex(syncResult: KnowledgeBaseSyncResult, signal?: AbortSignal): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
+        signal?.throwIfAborted();
 
         if (!settings.enableVectorRetrieval || this.getActiveEmbeddingModel(settings).length === 0) {
-            this.knowledgeBase.clearVectorIndex();
+            await this.vectorStore.clear();
             this.vectorStats = {
                 ready: false,
                 vectorCount: 0,
@@ -165,21 +168,17 @@ export class AdvancedRagEngine {
         }
 
         if (syncResult.removedChunkIds.length > 0) {
-            this.knowledgeBase.removeEmbeddings(syncResult.removedChunkIds);
+            signal?.throwIfAborted();
+            await this.vectorStore.remove(syncResult.removedChunkIds);
         }
 
         if (syncResult.changedChunks.length > 0) {
-            const items: ChunkEmbedding[] = await this.buildChunkEmbeddings(syncResult.changedChunks);
-            this.knowledgeBase.upsertEmbeddings(items);
+            const items: VectorRecord[] = await this.buildChunkEmbeddings(syncResult.changedChunks, signal);
+            signal?.throwIfAborted();
+            await this.vectorStore.upsert(items);
         }
 
-        const embeddings: ChunkEmbedding[] = this.knowledgeBase.getEmbeddingSnapshot();
-        this.vectorStats = {
-            ready: embeddings.length > 0,
-            vectorCount: embeddings.length,
-            dimension: embeddings[0]?.vector.length ?? null,
-            lastBuiltAt: Date.now(),
-        };
+        await this.refreshVectorStatsFromStore();
 
         return this.getVectorIndexStats();
     }
@@ -981,7 +980,7 @@ export class AdvancedRagEngine {
             return "keyword";
         }
 
-        if (!settings.enableVectorRetrieval || !this.knowledgeBase.hasVectorIndex()) {
+        if (!settings.enableVectorRetrieval || !this.vectorStats.ready) {
             return "keyword";
         }
 
@@ -1024,7 +1023,29 @@ export class AdvancedRagEngine {
             return [];
         }
 
-        return this.knowledgeBase.searchVector(queryEmbedding, this.getSettings().vectorSearchTopK);
+        const vectorHits: VectorStoreHit[] = await this.vectorStore.search(
+            new Float32Array(queryEmbedding),
+            { topK: this.getSettings().vectorSearchTopK },
+        );
+        const chunksById: Map<string, IndexedChunk> = new Map<string, IndexedChunk>(
+            this.knowledgeBase.getExamChunksByIds(vectorHits.map((hit: VectorStoreHit) => hit.chunkId))
+                .map((chunk: IndexedChunk) => [chunk.id, chunk]),
+        );
+
+        return vectorHits
+            .map((hit: VectorStoreHit) => {
+                const chunk: IndexedChunk | undefined = chunksById.get(hit.chunkId);
+                if (!chunk) {
+                    return null;
+                }
+
+                return {
+                    chunk,
+                    score: hit.score,
+                    similarity: hit.similarity,
+                };
+            })
+            .filter((hit: VectorSearchHit | null): hit is VectorSearchHit => hit !== null);
     }
 
     private buildCandidatesFromKeywordHits(hits: KeywordSearchHit[]): RetrievalCandidate[] {
@@ -1274,6 +1295,7 @@ export class AdvancedRagEngine {
                 `### 上下文 ${index + 1}`,
                 `- 文件：${candidate.chunk.filePath}`,
                 `- 标题路径：${headingLabel}`,
+                `- 来源位置：${this.formatLocatorLabel(candidate.chunk)}`,
                 `- 召回通道：${candidate.retrievalChannels.join(", ")}`,
                 "```text",
                 candidate.chunk.text,
@@ -1291,7 +1313,9 @@ export class AdvancedRagEngine {
 
         for (const candidate of candidates) {
             const source: AnswerSource = this.convertChunkToSource(candidate.chunk);
-            const uniqueKey: string = `${source.filePath}::${source.heading ?? "__root__"}`;
+            const uniqueKey: string = source.locator?.type === "pdf"
+                ? `${source.filePath}::page:${source.pageStart ?? 0}-${source.pageEnd ?? source.pageStart ?? 0}`
+                : `${source.filePath}::${source.heading ?? "__root__"}`;
 
             if (seenKeys.has(uniqueKey)) {
                 continue;
@@ -1357,16 +1381,44 @@ export class AdvancedRagEngine {
     }
 
     private convertChunkToSource(chunk: IndexedChunk): AnswerSource {
+        if (chunk.locator.type === "pdf") {
+            const pageEnd: number = chunk.locator.pageEnd ?? chunk.locator.pageStart;
+            const pageLabel: string = pageEnd === chunk.locator.pageStart
+                ? `第 ${chunk.locator.pageStart} 页`
+                : `第 ${chunk.locator.pageStart}-${pageEnd} 页`;
+
+            return {
+                filePath: chunk.filePath,
+                locator: chunk.locator,
+                pageStart: chunk.locator.pageStart,
+                pageEnd,
+                displayLink: `[[${chunk.filePath}#page=${chunk.locator.pageStart}|${chunk.fileName} · ${pageLabel}]]`,
+                excerpt: this.createExcerpt(chunk.text, 180),
+            };
+        }
+
         const displayLink: string = chunk.primaryHeading
             ? `[[${chunk.filePath}#${chunk.primaryHeading}]]`
             : `[[${chunk.filePath}]]`;
 
         return {
             filePath: chunk.filePath,
+            locator: chunk.locator,
             heading: chunk.primaryHeading,
             displayLink,
             excerpt: this.createExcerpt(chunk.text, 180),
         };
+    }
+
+    private formatLocatorLabel(chunk: IndexedChunk): string {
+        if (chunk.locator.type === "pdf") {
+            const pageEnd: number = chunk.locator.pageEnd ?? chunk.locator.pageStart;
+            return pageEnd === chunk.locator.pageStart
+                ? `PDF 第 ${chunk.locator.pageStart} 页`
+                : `PDF 第 ${chunk.locator.pageStart}-${pageEnd} 页`;
+        }
+
+        return chunk.primaryHeading ?? "（无标题）";
     }
 
     private buildRerankDocument(chunk: IndexedChunk): string {
@@ -1432,14 +1484,16 @@ export class AdvancedRagEngine {
         return text.toLowerCase().replace(/\s+/g, " ").trim();
     }
 
-    private async buildChunkEmbeddings(chunks: IndexedChunk[]): Promise<ChunkEmbedding[]> {
+    private async buildChunkEmbeddings(chunks: IndexedChunk[], signal?: AbortSignal): Promise<VectorRecord[]> {
         const batchSize = 16;
-        const items: ChunkEmbedding[] = [];
+        const items: VectorRecord[] = [];
 
         for (let start = 0; start < chunks.length; start += batchSize) {
+            signal?.throwIfAborted();
             const batchChunks: IndexedChunk[] = chunks.slice(start, start + batchSize);
             const batchTexts: string[] = batchChunks.map((chunk: IndexedChunk) => chunk.searchableText);
             const embeddings: number[][] = await this.client.embedTexts(batchTexts);
+            signal?.throwIfAborted();
 
             const pairCount: number = Math.min(batchChunks.length, embeddings.length);
             for (let index = 0; index < pairCount; index += 1) {
@@ -1447,9 +1501,18 @@ export class AdvancedRagEngine {
                 const vector: number[] | undefined = embeddings[index];
 
                 if (chunk && vector) {
+                    const pageStart: number | undefined = chunk.locator.type === "pdf" ? chunk.locator.pageStart : undefined;
+                    const pageEnd: number | undefined = chunk.locator.type === "pdf" ? chunk.locator.pageEnd : undefined;
                     items.push({
                         chunkId: chunk.id,
-                        vector,
+                        vector: new Float32Array(vector),
+                        metadata: {
+                            documentId: chunk.documentId,
+                            documentType: chunk.documentType,
+                            filePath: chunk.filePath,
+                            pageStart,
+                            pageEnd,
+                        },
                     });
                 }
             }

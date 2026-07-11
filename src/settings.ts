@@ -9,6 +9,8 @@ import {
     DEFAULT_CHUNK_OVERLAP,
     DEFAULT_CHUNK_SIZE,
     DEFAULT_CONTEXT_TOP_K,
+    DEFAULT_ENABLE_MARKDOWN_INDEXING,
+    DEFAULT_ENABLE_PDF_INDEXING,
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_ENABLE_AUTO_INDEX_SYNC,
     DEFAULT_ENABLE_LONG_TERM_MEMORY,
@@ -24,6 +26,8 @@ import {
     DEFAULT_MEMORY_MAX_ITEMS,
     DEFAULT_MEMORY_TOP_K,
     DEFAULT_MODEL_PROVIDER,
+    DEFAULT_MAX_PDF_FILE_SIZE_MB,
+    DEFAULT_MAX_PDF_PAGE_COUNT,
     DEFAULT_OLLAMA_BASE_URL,
     DEFAULT_RERANK_TOP_K,
     DEFAULT_SOURCE_LIMIT,
@@ -39,6 +43,10 @@ import type { VaultCoachSettings } from "./types";
  */
 export function createDefaultSettings(): VaultCoachSettings {
     return {
+        enableMarkdownIndexing: DEFAULT_ENABLE_MARKDOWN_INDEXING,
+        enablePdfIndexing: DEFAULT_ENABLE_PDF_INDEXING,
+        maxPdfFileSizeMb: DEFAULT_MAX_PDF_FILE_SIZE_MB,
+        maxPdfPageCount: DEFAULT_MAX_PDF_PAGE_COUNT,
         assistantName: "VaultCoach",
         defaultGreeting: getDefaultGreeting(),
         openInRightSidebarOnStartup: true,
@@ -237,6 +245,60 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     .setValue(this.plugin.settings.knowledgeFolder)
                     .onChange(async (value: string) => {
                         this.plugin.settings.knowledgeFolder = this.normalizeFolderPath(value);
+                        await this.plugin.saveSettings();
+                        this.plugin.markKnowledgeBaseDirty();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName(this.t("settings.markdownIndexing.name"))
+            .setDesc(this.t("settings.markdownIndexing.desc"))
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.enableMarkdownIndexing)
+                    .onChange(async (value: boolean) => {
+                        this.plugin.settings.enableMarkdownIndexing = value;
+                        await this.plugin.saveSettings();
+                        this.plugin.markKnowledgeBaseDirty();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName(this.t("settings.pdfIndexing.name"))
+            .setDesc(this.t("settings.pdfIndexing.desc"))
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.enablePdfIndexing)
+                    .onChange(async (value: boolean) => {
+                        this.plugin.settings.enablePdfIndexing = value;
+                        await this.plugin.saveSettings();
+                        this.plugin.markKnowledgeBaseDirty();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName(this.t("settings.maxPdfFileSize.name"))
+            .setDesc(this.t("settings.maxPdfFileSize.desc"))
+            .addText((text) =>
+                text
+                    .setPlaceholder(String(DEFAULT_MAX_PDF_FILE_SIZE_MB))
+                    .setValue(String(this.plugin.settings.maxPdfFileSizeMb))
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.maxPdfFileSizeMb = this.parsePositiveInteger(value, DEFAULT_MAX_PDF_FILE_SIZE_MB);
+                        await this.plugin.saveSettings();
+                        this.plugin.markKnowledgeBaseDirty();
+                    }),
+            );
+
+        new Setting(containerEl)
+            .setName(this.t("settings.maxPdfPageCount.name"))
+            .setDesc(this.t("settings.maxPdfPageCount.desc"))
+            .addText((text) =>
+                text
+                    .setPlaceholder(String(DEFAULT_MAX_PDF_PAGE_COUNT))
+                    .setValue(String(this.plugin.settings.maxPdfPageCount))
+                    .onChange(async (value: string) => {
+                        this.plugin.settings.maxPdfPageCount = this.parsePositiveInteger(value, DEFAULT_MAX_PDF_PAGE_COUNT);
                         await this.plugin.saveSettings();
                         this.plugin.markKnowledgeBaseDirty();
                     }),
