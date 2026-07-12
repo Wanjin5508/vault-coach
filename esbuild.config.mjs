@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from 'node:module';
+import { readFile } from "node:fs/promises";
 
 const banner =
 `/*
@@ -10,6 +11,29 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === "production");
+
+const disabledPdfjsLoadScriptSnippet = `function loadScript(src, removeScriptElement = false) {
+  return Promise.reject(new Error("Vault Coach disables pdf.js dynamic script loading."));
+}`;
+
+const pdfjsLoadScriptPattern = /function loadScript\(src, removeScriptElement = false\) \{\n  return new Promise\(\(resolve, reject\) => \{\n    const script = document\.createElement\("script"\);[\s\S]*?\n  \}\);\n\}/;
+
+const disablePdfjsDynamicScriptLoadingPlugin = {
+	name: "disable-pdfjs-dynamic-script-loading",
+	setup(build) {
+		build.onLoad({ filter: /[\\/]pdfjs-dist[\\/]build[\\/]pdf\.js$/ }, async (args) => {
+			const source = await readFile(args.path, "utf8");
+			if (!pdfjsLoadScriptPattern.test(source)) {
+				throw new Error("Unable to patch pdf.js loadScript helper.");
+			}
+
+			return {
+				contents: source.replace(pdfjsLoadScriptPattern, disabledPdfjsLoadScriptSnippet),
+				loader: "js",
+			};
+		});
+	},
+};
 
 const context = await esbuild.context({
 	banner: {
@@ -39,6 +63,9 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
+	plugins: [
+		disablePdfjsDynamicScriptLoadingPlugin,
+	],
 });
 
 if (prod) {
