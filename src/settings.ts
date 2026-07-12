@@ -112,10 +112,6 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         this.renderSettings();
     }
 
-    refresh(): void {
-        this.renderSettings();
-    }
-
     private renderSettings(): void {
         const { containerEl } = this;
         containerEl.empty();

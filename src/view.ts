@@ -5,6 +5,7 @@ import type VaultCoach  from "./main";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import type {
     AnswerSource,
+    AssistantAnswer,
     ChatMessage,
     ExamContentProfile,
     ExamEvaluationItem,
@@ -1545,7 +1546,7 @@ export class VaultCoachView extends ItemView {
             const linkMarkdownEl: HTMLSpanElement = linkButtonEl.createSpan({
                 cls: "vault-coach-source-link-markdown markdown-rendered",
             });
-            await this.renderSourceMarkdown(source.displayLink, linkMarkdownEl, sourcePath);
+            await this.renderSourceMarkdown(this.formatSourceDisplayLink(source), linkMarkdownEl, sourcePath);
 
             linkButtonEl.addEventListener("click", () => {
                 void this.plugin.openSource(source);
@@ -1569,6 +1570,21 @@ export class VaultCoachView extends ItemView {
             containerEl.empty();
             containerEl.setText(markdown);
         }
+    }
+
+    private formatSourceDisplayLink(source: AnswerSource): string {
+        if (source.locator?.type !== "pdf" || source.pageStart === undefined) {
+            return source.displayLink;
+        }
+
+        const pageStart: number = source.pageStart;
+        const pageEnd: number = source.pageEnd ?? source.pageStart;
+        const pageLabel: string = pageEnd === pageStart
+            ? this.t("view.source.pdfPage", { page: pageStart })
+            : this.t("view.source.pdfPages", { start: pageStart, end: pageEnd });
+        const fileName: string = source.filePath.split("/").pop() ?? source.filePath;
+
+        return `[[${source.filePath}#page=${pageStart}|${fileName} · ${pageLabel}]]`;
     }
 
     private sanitizeSourceMarkdown(markdown: string): string {
@@ -1660,6 +1676,32 @@ export class VaultCoachView extends ItemView {
         this.streamingWrapperEl = null;
         this.streamingBubbleEl = null;
         this.streamingText = "";
+    }
+
+    private async finalizeStreamingAssistantBubble(answer: AssistantAnswer): Promise<void> {
+        const wrapperEl: HTMLDivElement | null = this.streamingWrapperEl;
+        const bubbleEl: HTMLDivElement | null = this.streamingBubbleEl;
+        if (!wrapperEl || !bubbleEl) {
+            await this.renderMessages();
+            return;
+        }
+
+        bubbleEl.removeClass("vault-coach-streaming-bubble");
+        bubbleEl.removeClass("vault-coach-thinking-bubble");
+        bubbleEl.addClass("markdown-rendered");
+        bubbleEl.empty();
+
+        const sourcePath: string = this.app.workspace.getActiveFile()?.path ?? "";
+        await MarkdownRenderer.render(this.app, normalizeObsidianMarkdown(answer.text), bubbleEl, sourcePath, this);
+
+        if (answer.sources.length > 0) {
+            await this.renderSources(wrapperEl, answer.sources);
+        }
+
+        this.streamingWrapperEl = null;
+        this.streamingBubbleEl = null;
+        this.streamingText = "";
+        this.scrollMessagesToBottom();
     }
 
     private abortActiveAssistantTurn(): void {
@@ -1963,9 +2005,36 @@ export class VaultCoachView extends ItemView {
     }
 
     private updateExamProgress(progress: ExamGenerationProgress): void {
-        this.examProgressLabel = progress.label;
+        this.examProgressLabel = this.formatExamProgressLabel(progress);
         if (this.examPhase === "generating") {
             this.renderPreservingExamScroll();
+        }
+    }
+
+    private formatExamProgressLabel(progress: ExamGenerationProgress): string {
+        switch (progress.phase) {
+            case "resolving-scope":
+                return this.t("exam.progress.resolvingScope");
+            case "rule-filtering":
+                return this.t("exam.progress.ruleFiltering");
+            case "semantic-filtering":
+                return progress.current !== undefined && progress.total !== undefined
+                    ? this.t("exam.progress.semanticFilteringCount", { current: progress.current, total: progress.total })
+                    : this.t("exam.progress.semanticFiltering");
+            case "planning":
+                return this.t("exam.progress.planning");
+            case "generating":
+                return progress.current !== undefined && progress.total !== undefined
+                    ? this.t("exam.progress.generatingCount", { current: progress.current, total: progress.total })
+                    : this.t("exam.progress.generating");
+            case "validating":
+                return this.t("exam.progress.validating");
+            case "repairing":
+                return this.t("exam.progress.repairing");
+            case "completed":
+                return this.t("exam.progress.completed");
+            default:
+                return progress.label;
         }
     }
 
@@ -2073,7 +2142,7 @@ export class VaultCoachView extends ItemView {
             // 5. 把助手回复加入对话
             // this.plugin.addAssistantMessage(answer.text, answer.sources);
 
-            await this.plugin.streamAssistantTurn(userText, {
+            const answer: AssistantAnswer = await this.plugin.streamAssistantTurn(userText, {
                 onToken: (token: string) => {
                     this.appendStreamingToken(token);
                 },
@@ -2084,10 +2153,8 @@ export class VaultCoachView extends ItemView {
                 new Notice(this.t("view.generationStopped"));
             }
 
-            this.clearStreamingAssistantBubble();
-
-            // 6. 再次刷新消息区域
-            await this.renderMessages();
+            // 6. 直接把当前流式气泡升级为最终 Markdown 气泡，避免整区重绘造成视觉闪回。
+            await this.finalizeStreamingAssistantBubble(answer);
 
         } catch (error: unknown) {
             if (this.isAbortError(error)) {

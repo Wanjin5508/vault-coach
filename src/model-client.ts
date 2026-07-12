@@ -6,6 +6,7 @@ import type {
     StreamHandlers,
     VaultCoachSettings,
 } from "./types"
+import { detectQuestionLanguage, type QuestionLanguage } from "./question-language";
 
 interface OllamaChatResponse {
     message?: {
@@ -169,27 +170,14 @@ export class LocalModelClient {
             };
         }
 
-        // TODO 替换成支持双语的提示词
-        const systemPrompt = [
-            "你是一名专门为本地知识库检索服务的 query rewrite 助手。",
-            "你的任务不是回答问题，而是把用户问题改写成更适合检索的中文查询。",
-            "要求：",
-            "1. 保留原始意图，不要虚构新信息；",
-            "2. 如果用户问题中存在代词、省略或上下文指代，可结合对话上下文补全；",
-            "3. 优先产出适合在 Obsidian Markdown 笔记中检索的关键词短句；",
-            "4. 输出严格 JSON，格式为 {\"rewritten_query\": \"...\"}。",
-        ].join("\n");
-
-        const userPrompt = [
-            `当前知识库范围：${scopeDescription}`,
-            "",
-            "最近对话上下文：",
-            conversationContext || "（无）",
-            "",
-            `原始问题：${originalQuery}`,
-            "",
-            "请只输出 JSON。",
-        ].join("\n");
+        const questionLanguage: QuestionLanguage = detectQuestionLanguage(originalQuery);
+        const systemPrompt: string = this.buildQueryRewriteSystemPrompt(questionLanguage);
+        const userPrompt: string = this.buildQueryRewriteUserPrompt(
+            originalQuery,
+            conversationContext,
+            scopeDescription,
+            questionLanguage,
+        );
 
         try {
             const content: string = await this.chat({
@@ -227,6 +215,65 @@ export class LocalModelClient {
             rewrittenQuery: originalQuery,
             useRewrite: false,
         };
+    }
+
+    private buildQueryRewriteSystemPrompt(questionLanguage: QuestionLanguage): string {
+        if (questionLanguage === "en") {
+            return [
+                "You are a query rewrite assistant for local knowledge-base retrieval.",
+                "Your task is not to answer the question. Rewrite the user question into a concise retrieval query.",
+                "Requirements:",
+                "1. Preserve the original intent and do not invent new facts.",
+                "2. If the user question contains pronouns, ellipsis, or references to recent context, resolve them using the conversation context.",
+                "3. Prefer keywords and short phrases that work well for searching Obsidian Markdown notes.",
+                "4. Preserve the user's question language. Do not force the query into Chinese.",
+                "5. Keep important technical terms, abbreviations, and common aliases. Bilingual aliases are allowed when helpful for retrieval.",
+                "6. Output strict JSON in this format: {\"rewritten_query\": \"...\"}.",
+            ].join("\n");
+        }
+
+        return [
+            "你是一名专门为本地知识库检索服务的 query rewrite 助手。",
+            "你的任务不是回答问题，而是把用户问题改写成更适合检索的查询。",
+            "要求：",
+            "1. 保留原始意图，不要虚构新信息；",
+            "2. 如果用户问题中存在代词、省略或上下文指代，可结合对话上下文补全；",
+            "3. 优先产出适合在 Obsidian Markdown 笔记中检索的关键词短句；",
+            "4. 保持用户问题的语言，不要强制改成英文；",
+            "5. 保留重要技术术语、缩写和常见别名；为了提高检索召回，可以保留必要的中英文技术别名。",
+            "6. 输出严格 JSON，格式为 {\"rewritten_query\": \"...\"}。",
+        ].join("\n");
+    }
+
+    private buildQueryRewriteUserPrompt(
+        originalQuery: string,
+        conversationContext: string,
+        scopeDescription: string,
+        questionLanguage: QuestionLanguage,
+    ): string {
+        if (questionLanguage === "en") {
+            return [
+                `Current knowledge base scope: ${scopeDescription}`,
+                "",
+                "Recent conversation context:",
+                conversationContext || "(None)",
+                "",
+                `Original question: ${originalQuery}`,
+                "",
+                "Output JSON only.",
+            ].join("\n");
+        }
+
+        return [
+            `当前知识库范围：${scopeDescription}`,
+            "",
+            "最近对话上下文：",
+            conversationContext || "（无）",
+            "",
+            `原始问题：${originalQuery}`,
+            "",
+            "请只输出 JSON。",
+        ].join("\n");
     }
 
     // 使用同一个聊天模型抽取可长期保存的记忆事实。
