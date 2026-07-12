@@ -153,10 +153,6 @@ export default class VaultCoach extends Plugin {
         });
 
         this.addSettingTab(new VaultCoachSettingTab(this.app, this));
-        this.registerDomEvent(window, "languagechange", () => {
-            this.refreshBuiltInDefaultGreeting();
-            this.refreshAllViews();
-        });
         this.registerVaultEvents();
 
         this.app.workspace.onLayoutReady(() => {
@@ -185,10 +181,18 @@ export default class VaultCoach extends Plugin {
         await this.saveData(this.settings);
     }
 
-    private refreshBuiltInDefaultGreeting(): void {
+    private refreshBuiltInDefaultGreeting(): boolean {
         if (this.settings.defaultGreeting.trim().length === 0 || isBuiltInDefaultGreeting(this.settings.defaultGreeting)) {
-            this.settings.defaultGreeting = getDefaultGreeting();
+            const nextDefaultGreeting: string = getDefaultGreeting();
+            if (this.settings.defaultGreeting === nextDefaultGreeting) {
+                return false;
+            }
+
+            this.settings.defaultGreeting = nextDefaultGreeting;
+            return true;
         }
+
+        return false;
     }
 
     getCloudApiKey(): string | null {

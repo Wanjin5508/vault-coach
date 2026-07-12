@@ -2,6 +2,7 @@ import { DEFAULT_RRF_K } from "./constants";
 import { VaultKnowledgeBase } from "./knowledge-base";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { LocalModelClient } from "./model-client";
+import { detectQuestionLanguage, type QuestionLanguage } from "./question-language";
 import type {
     AnswerSource,
     AssistantAnswer,
@@ -952,7 +953,8 @@ export class AdvancedRagEngine {
 
         const rerankedCandidates: RerankedCandidate[] = await this.rerankCandidates(retrievalQuery, candidates);
         const finalContextCandidates: RerankedCandidate[] = rerankedCandidates.slice(0, settings.contextTopK);
-        const sources: AnswerSource[] = this.buildAnswerSources(rerankedCandidates);
+        const answerLanguage: QuestionLanguage = detectQuestionLanguage(userText);
+        const sources: AnswerSource[] = this.buildAnswerSources(rerankedCandidates, answerLanguage);
         const promptMessages: LocalChatMessage[] = this.buildAnswerMessages(
             userText,
             rewriteResult,
@@ -1244,11 +1246,45 @@ export class AdvancedRagEngine {
         scopeDescription: string,
         memoryContext: string,
     ): LocalChatMessage[] {
-        const systemPrompt: string = [
+        const answerLanguage: QuestionLanguage = detectQuestionLanguage(userText);
+        const systemPrompt: string = this.buildAnswerSystemPrompt(answerLanguage);
+        const userPrompt: string = this.buildAnswerUserPrompt(
+            userText,
+            rewriteResult,
+            conversationMessages,
+            contextCandidates,
+            scopeDescription,
+            memoryContext,
+            answerLanguage,
+        );
+
+        return [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+        ];
+    }
+
+    private buildAnswerSystemPrompt(answerLanguage: QuestionLanguage): string {
+        if (answerLanguage === "en") {
+            return [
+                "You are a local knowledge-base assistant running inside Obsidian.",
+                "Your answer must be strictly grounded in the provided retrieval context. Do not invent facts that are not present in the knowledge base context.",
+                "Answer requirements:",
+                "1. Answer in English because the current user question is in English. Ignore the Obsidian UI language, retrieval query language, context language, and memory language when choosing the answer language.",
+                "2. Use Markdown to organize the answer.",
+                "3. Give the direct conclusion first, then add necessary explanation.",
+                "4. If the context is not sufficient, explicitly say: \"Based on the current knowledge-base snippets, there is not enough information.\"",
+                "5. Do not fabricate source numbers in the body because clickable sources are shown separately below the answer.",
+                "6. If the question involves code, configuration, commands, or paths, use Markdown code blocks when appropriate.",
+                "7. If the answer includes math formulas, use Obsidian/KaTeX-compatible syntax: inline math uses `$...$`, block math uses standalone `$$` fences; do not wrap formulas with standalone `[` and `]` or `\\[` and `\\]`.",
+            ].join("\n");
+        }
+
+        return [
             "你是一个运行在 Obsidian 中的本地知识库助手。",
             "你的回答必须严格基于给定的检索上下文，不能虚构知识库中不存在的事实。",
             "回答要求：",
-            "1. 使用中文回答；",
+            "1. 使用中文回答，因为用户当前问题是中文。不要因为 Obsidian 界面语言、检索查询语言、上下文语言或长期记忆语言而改变回答语言。",
             "2. 使用 Markdown 格式组织内容；",
             "3. 优先给出直接结论，再给出必要解释；",
             "4. 如果上下文不足以支撑结论，必须明确说明“根据当前知识库片段，信息不足”；",
@@ -1256,8 +1292,39 @@ export class AdvancedRagEngine {
             "6. 如果问题涉及代码、配置、命令或路径，请尽量使用 Markdown 代码块。",
             "7. 如果回答包含数学公式，必须使用 Obsidian/KaTeX 兼容语法：行内公式使用 `$...$`，块级公式使用独立成行的 `$$` 包裹；不要使用单独的 `[`、`]` 或 `\\[`、`\\]` 包裹公式。",
         ].join("\n");
+    }
 
-        const userPrompt: string = [
+    private buildAnswerUserPrompt(
+        userText: string,
+        rewriteResult: QueryRewriteResult,
+        conversationMessages: ChatMessage[],
+        contextCandidates: RerankedCandidate[],
+        scopeDescription: string,
+        memoryContext: string,
+        answerLanguage: QuestionLanguage,
+    ): string {
+        if (answerLanguage === "en") {
+            return [
+                "Final answer language: English. This is determined only by the current user question.",
+                `Knowledge base scope: ${scopeDescription}`,
+                `Original question: ${userText}`,
+                `Retrieval query: ${rewriteResult.rewrittenQuery}`,
+                "",
+                "Long-term memory (only a small amount relevant to the current question):",
+                memoryContext || "(No relevant long-term memory)",
+                "",
+                "Recent conversation (only a small amount, used to resolve references):",
+                this.buildConversationContext(conversationMessages) || "(None)",
+                "",
+                "Retrieved context:",
+                this.buildContextBlock(contextCandidates, answerLanguage),
+                "",
+                "Answer the user's question based on the context above and keep the structure clear.",
+            ].join("\n");
+        }
+
+        return [
+            "最终回答语言：中文。这个判断只由用户当前问题决定。",
             `知识库范围：${scopeDescription}`,
             `原始问题：${userText}`,
             `检索查询：${rewriteResult.rewrittenQuery}`,
@@ -1269,18 +1336,13 @@ export class AdvancedRagEngine {
             this.buildConversationContext(conversationMessages) || "（无）",
             "",
             "检索上下文如下：",
-            this.buildContextBlock(contextCandidates),
+            this.buildContextBlock(contextCandidates, answerLanguage),
             "",
             "请基于以上上下文回答用户问题，并保持结构清晰。",
         ].join("\n");
-
-        return [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-        ];
     }
 
-    private buildContextBlock(contextCandidates: RerankedCandidate[]): string {
+    private buildContextBlock(contextCandidates: RerankedCandidate[], answerLanguage: QuestionLanguage): string {
         const blocks: string[] = [];
 
         for (let index = 0; index < contextCandidates.length; index += 1) {
@@ -1291,13 +1353,27 @@ export class AdvancedRagEngine {
 
             const headingLabel: string = candidate.chunk.headingPath.length > 0
                 ? candidate.chunk.headingPath.join(" > ")
-                : "（无标题）";
+                : answerLanguage === "en" ? "(No heading)" : "（无标题）";
+
+            if (answerLanguage === "en") {
+                blocks.push([
+                    `### Context ${index + 1}`,
+                    `- File: ${candidate.chunk.filePath}`,
+                    `- Heading path: ${headingLabel}`,
+                    `- Source location: ${this.formatLocatorLabel(candidate.chunk, answerLanguage)}`,
+                    `- Retrieval channels: ${candidate.retrievalChannels.join(", ")}`,
+                    "```text",
+                    candidate.chunk.text,
+                    "```",
+                ].join("\n"));
+                continue;
+            }
 
             blocks.push([
                 `### 上下文 ${index + 1}`,
                 `- 文件：${candidate.chunk.filePath}`,
                 `- 标题路径：${headingLabel}`,
-                `- 来源位置：${this.formatLocatorLabel(candidate.chunk)}`,
+                `- 来源位置：${this.formatLocatorLabel(candidate.chunk, answerLanguage)}`,
                 `- 召回通道：${candidate.retrievalChannels.join(", ")}`,
                 "```text",
                 candidate.chunk.text,
@@ -1308,13 +1384,13 @@ export class AdvancedRagEngine {
         return blocks.join("\n\n");
     }
 
-    private buildAnswerSources(candidates: RerankedCandidate[]): AnswerSource[] {
+    private buildAnswerSources(candidates: RerankedCandidate[], answerLanguage: QuestionLanguage): AnswerSource[] {
         const uniqueSources: AnswerSource[] = [];
         const seenKeys: Set<string> = new Set<string>();
         const settings: VaultCoachSettings = this.getSettings();
 
         for (const candidate of candidates) {
-            const source: AnswerSource = this.convertChunkToSource(candidate.chunk);
+            const source: AnswerSource = this.convertChunkToSource(candidate.chunk, answerLanguage);
             const uniqueKey: string = source.locator?.type === "pdf"
                 ? `${source.filePath}::page:${source.pageStart ?? 0}-${source.pageEnd ?? source.pageStart ?? 0}`
                 : `${source.filePath}::${source.heading ?? "__root__"}`;
@@ -1340,7 +1416,19 @@ export class AdvancedRagEngine {
         retrievalModeUsed: RetrievalMode,
         candidates: RerankedCandidate[],
     ): string {
+        const answerLanguage: QuestionLanguage = detectQuestionLanguage(userText);
         if (candidates.length === 0) {
+            if (answerLanguage === "en") {
+                return [
+                    "## No Relevant Content Found",
+                    "",
+                    `Current retrieval mode: \`${retrievalModeUsed}\`.`,
+                    `Retrieval query: ${rewriteResult.rewrittenQuery}`,
+                    "",
+                    "Try using more specific keywords, or rebuild the index first.",
+                ].join("\n");
+            }
+
             return [
                 "## 未检索到相关内容",
                 "",
@@ -1349,6 +1437,38 @@ export class AdvancedRagEngine {
                 "",
                 "你可以尝试换更具体的关键词，或先手动重建索引。",
             ].join("\n");
+        }
+
+        if (answerLanguage === "en") {
+            const lines: string[] = [
+                "## Retrieval Result Summary",
+                "",
+                `- Original question: ${userText}`,
+                `- Retrieval query: ${rewriteResult.rewrittenQuery}`,
+                `- Retrieval mode: \`${retrievalModeUsed}\``,
+                "",
+                "The local chat model is unavailable, so this is a summary built from the retrieved results:",
+                "",
+            ];
+
+            for (let index = 0; index < candidates.length; index += 1) {
+                const candidate: RerankedCandidate | undefined = candidates[index];
+                if (!candidate) {
+                    continue;
+                }
+
+                const title: string = candidate.chunk.primaryHeading
+                    ? `${candidate.chunk.fileName} > ${candidate.chunk.primaryHeading}`
+                    : candidate.chunk.fileName;
+
+                lines.push(`### ${index + 1}. ${title}`);
+                lines.push("");
+                lines.push(this.createExcerpt(candidate.chunk.text, 220));
+                lines.push("");
+            }
+
+            lines.push("Check the local chat model URL and model name, or use these retrieval results to locate the relevant notes.");
+            return lines.join("\n");
         }
 
         const lines: string[] = [
@@ -1382,12 +1502,10 @@ export class AdvancedRagEngine {
         return lines.join("\n");
     }
 
-    private convertChunkToSource(chunk: IndexedChunk): AnswerSource {
+    private convertChunkToSource(chunk: IndexedChunk, answerLanguage: QuestionLanguage): AnswerSource {
         if (chunk.locator.type === "pdf") {
             const pageEnd: number = chunk.locator.pageEnd ?? chunk.locator.pageStart;
-            const pageLabel: string = pageEnd === chunk.locator.pageStart
-                ? `第 ${chunk.locator.pageStart} 页`
-                : `第 ${chunk.locator.pageStart}-${pageEnd} 页`;
+            const pageLabel: string = this.formatPdfSourcePageLabel(chunk.locator.pageStart, pageEnd, answerLanguage);
 
             return {
                 filePath: chunk.filePath,
@@ -1412,15 +1530,33 @@ export class AdvancedRagEngine {
         };
     }
 
-    private formatLocatorLabel(chunk: IndexedChunk): string {
+    private formatPdfSourcePageLabel(pageStart: number, pageEnd: number, answerLanguage: QuestionLanguage): string {
+        if (answerLanguage === "en") {
+            return pageEnd === pageStart
+                ? `page ${pageStart}`
+                : `pages ${pageStart}-${pageEnd}`;
+        }
+
+        return pageEnd === pageStart
+            ? `第 ${pageStart} 页`
+            : `第 ${pageStart}-${pageEnd} 页`;
+    }
+
+    private formatLocatorLabel(chunk: IndexedChunk, answerLanguage: QuestionLanguage): string {
         if (chunk.locator.type === "pdf") {
             const pageEnd: number = chunk.locator.pageEnd ?? chunk.locator.pageStart;
+            if (answerLanguage === "en") {
+                return pageEnd === chunk.locator.pageStart
+                    ? `PDF page ${chunk.locator.pageStart}`
+                    : `PDF pages ${chunk.locator.pageStart}-${pageEnd}`;
+            }
+
             return pageEnd === chunk.locator.pageStart
                 ? `PDF 第 ${chunk.locator.pageStart} 页`
                 : `PDF 第 ${chunk.locator.pageStart}-${pageEnd} 页`;
         }
 
-        return chunk.primaryHeading ?? "（无标题）";
+        return chunk.primaryHeading ?? (answerLanguage === "en" ? "(No heading)" : "（无标题）");
     }
 
     private buildRerankDocument(chunk: IndexedChunk): string {

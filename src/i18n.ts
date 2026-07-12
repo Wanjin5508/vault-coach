@@ -1,3 +1,5 @@
+import { getLanguage } from "obsidian";
+
 export type SupportedLocale = "zh" | "en";
 
 const ZH_TRANSLATIONS = {
@@ -70,6 +72,8 @@ const ZH_TRANSLATIONS = {
     "view.noMessages": "暂无消息",
     "view.you": "你",
     "view.sources": "来源：{{count}}",
+    "view.source.pdfPage": "第 {{page}} 页",
+    "view.source.pdfPages": "第 {{start}}-{{end}} 页",
     "view.thinking": "思考中",
     "view.sendFailed": "发送失败：{{message}}",
     "view.sourceMarkdownFallback": "[VaultCoachView] 来源 Markdown 渲染失败，已回退到纯文本。",
@@ -109,6 +113,16 @@ const ZH_TRANSLATIONS = {
     "exam.cancelling": "正在取消",
     "exam.generating": "正在基于知识库生成测试题",
     "exam.evaluating": "正在评分",
+    "exam.progress.resolvingScope": "正在收集考试文件",
+    "exam.progress.ruleFiltering": "正在应用目录、文件和规则过滤",
+    "exam.progress.semanticFiltering": "正在分析内容",
+    "exam.progress.semanticFilteringCount": "正在分析内容 {{current}} / {{total}}",
+    "exam.progress.planning": "正在规划知识点",
+    "exam.progress.generating": "正在生成题目",
+    "exam.progress.generatingCount": "正在生成题目 {{current}} / {{total}}",
+    "exam.progress.validating": "正在检查题目质量",
+    "exam.progress.repairing": "正在修复模型输出",
+    "exam.progress.completed": "已完成",
     "exam.analysis.running": "正在分析考试范围",
     "exam.analysis.complete": "范围分析完成",
     "exam.analysis.totalFiles": "总文件",
@@ -377,6 +391,8 @@ const EN_TRANSLATIONS: Record<TranslationKey, string> = {
     "view.noMessages": "No messages yet",
     "view.you": "You",
     "view.sources": "Sources: {{count}}",
+    "view.source.pdfPage": "page {{page}}",
+    "view.source.pdfPages": "pages {{start}}-{{end}}",
     "view.thinking": "Thinking",
     "view.sendFailed": "Send failed: {{message}}",
     "view.sourceMarkdownFallback": "[VaultCoachView] Source Markdown render failed. Falling back to plain text.",
@@ -416,6 +432,16 @@ const EN_TRANSLATIONS: Record<TranslationKey, string> = {
     "exam.cancelling": "Cancelling",
     "exam.generating": "Generating questions from the knowledge base",
     "exam.evaluating": "Grading",
+    "exam.progress.resolvingScope": "Collecting exam files",
+    "exam.progress.ruleFiltering": "Applying folder, file, and rule filters",
+    "exam.progress.semanticFiltering": "Analyzing content",
+    "exam.progress.semanticFilteringCount": "Analyzing content {{current}} / {{total}}",
+    "exam.progress.planning": "Planning knowledge coverage",
+    "exam.progress.generating": "Generating questions",
+    "exam.progress.generatingCount": "Generating questions {{current}} / {{total}}",
+    "exam.progress.validating": "Checking question quality",
+    "exam.progress.repairing": "Repairing model output",
+    "exam.progress.completed": "Completed",
     "exam.analysis.running": "Analyzing exam scope",
     "exam.analysis.complete": "Scope analysis complete",
     "exam.analysis.totalFiles": "Total files",
@@ -646,28 +672,55 @@ const LEGACY_DEFAULT_GREETINGS: string[] = [
     ].join("\n"),
 ];
 
+export function detectObsidianLocale(): SupportedLocale {
+    const obsidianLanguage: string | null = readObsidianLanguage();
+    if (obsidianLanguage !== null) {
+        return languageToSupportedLocale(obsidianLanguage);
+    }
+
+    return detectBrowserLocale();
+}
+
 export function detectSystemLocale(): SupportedLocale {
-    const languages: string[] = [];
+    return detectObsidianLocale();
+}
 
-    if (typeof navigator !== "undefined") {
-        for (const language of navigator.languages) {
-            if (language.trim().length > 0) {
-                languages.push(language);
-            }
-        }
+function readObsidianLanguage(): string | null {
+    try {
+        const language: string = getLanguage();
+        return language.trim().length > 0 ? language : null;
+    } catch {
+        return null;
+    }
+}
 
-        if (navigator.language.trim().length > 0) {
-            languages.push(navigator.language);
+function detectBrowserLocale(): SupportedLocale {
+    const language: string | null = getFirstBrowserLanguage();
+    return language === null ? "en" : languageToSupportedLocale(language);
+}
+
+function getFirstBrowserLanguage(): string | null {
+    if (typeof navigator === "undefined") {
+        return null;
+    }
+
+    for (const language of navigator.languages) {
+        if (language.trim().length > 0) {
+            return language;
         }
     }
 
-    return languages.some((language: string) => isChineseLocale(language)) ? "zh" : "en";
+    return navigator.language.trim().length > 0 ? navigator.language : null;
+}
+
+function languageToSupportedLocale(language: string): SupportedLocale {
+    return isChineseLocale(language) ? "zh" : "en";
 }
 
 export function translate(
     key: TranslationKey,
     replacements: Record<string, string | number> = {},
-    locale: SupportedLocale = detectSystemLocale(),
+    locale: SupportedLocale = detectObsidianLocale(),
 ): string {
     const template: string = TRANSLATIONS[locale][key] ?? ZH_TRANSLATIONS[key];
     let result: string = template;
@@ -687,7 +740,7 @@ export function translate(
     return result;
 }
 
-export function getDefaultGreeting(locale: SupportedLocale = detectSystemLocale()): string {
+export function getDefaultGreeting(locale: SupportedLocale = detectObsidianLocale()): string {
     return DEFAULT_GREETINGS[locale];
 }
 
