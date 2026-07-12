@@ -628,6 +628,24 @@ const DEFAULT_GREETINGS: Record<SupportedLocale, string> = {
     ].join("\n"),
 };
 
+const LEGACY_DEFAULT_GREETINGS: string[] = [
+    [
+        "# 你好，我是 VaultCoach",
+        "",
+        "当前版本已经支持：",
+        "- Markdown 知识库扫描与标题切块；",
+        "- 关键词检索；",
+        "- Query rewrite；",
+        "- Embedding / 向量检索；",
+        "- Hybrid merge；",
+        "- Rerank；",
+        "- Markdown 格式回答渲染；",
+        "- 对话持久化；",
+        "- 本地长期记忆；",
+        "- 自动增量索引同步。",
+    ].join("\n"),
+];
+
 export function detectSystemLocale(): SupportedLocale {
     const languages: string[] = [];
 
@@ -676,7 +694,8 @@ export function getDefaultGreeting(locale: SupportedLocale = detectSystemLocale(
 export function isBuiltInDefaultGreeting(value: string): boolean {
     const normalizedValue: string = normalizeGreeting(value);
     return normalizeGreeting(DEFAULT_GREETINGS.zh) === normalizedValue
-        || normalizeGreeting(DEFAULT_GREETINGS.en) === normalizedValue;
+        || normalizeGreeting(DEFAULT_GREETINGS.en) === normalizedValue
+        || LEGACY_DEFAULT_GREETINGS.some((greeting: string) => normalizeGreeting(greeting) === normalizedValue);
 }
 
 function isChineseLocale(language: string): boolean {

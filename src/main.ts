@@ -3,6 +3,7 @@ import { EXAM_RESULTS_DIR_PATH, VAULT_COACH_HIDDEN_DIR_PATH, VIEW_TYPE_VAULT_COA
 import { ExamEngine } from "./exam/exam-engine";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { VaultKnowledgeBase } from "./knowledge-base";
+import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { VaultCoachPersistentStore } from "./persistent-store";
 import { AdvancedRagEngine } from "./rag-engine";
 import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
@@ -515,7 +516,7 @@ export default class VaultCoach extends Plugin {
     addAssistantMessage(text: string, sources: AnswerSource[]): void {
         this.messages.push({
             role: "assistant",
-            text,
+            text: normalizeObsidianMarkdown(text),
             createdAt: Date.now(),
             sources,
         });
@@ -911,8 +912,30 @@ export default class VaultCoach extends Plugin {
         this.messages = state.messages ?? [];
         this.memories = state.memories ?? [];
         this.lastAutoIndexAt = state.lastAutoIndexAt ?? null;
+        const restoredGreeting: boolean = this.refreshRestoredDefaultGreeting();
         this.trimMessages();
         this.trimMemories();
+        if (restoredGreeting) {
+            await this.persistRuntimeState();
+        }
+    }
+
+    private refreshRestoredDefaultGreeting(): boolean {
+        const firstMessage: ChatMessage | undefined = this.messages[0];
+        if (!firstMessage || firstMessage.role !== "assistant" || !isBuiltInDefaultGreeting(firstMessage.text)) {
+            return false;
+        }
+
+        const effectiveGreeting: string = this.getEffectiveDefaultGreeting();
+        if (firstMessage.text === effectiveGreeting) {
+            return false;
+        }
+
+        this.messages[0] = {
+            ...firstMessage,
+            text: effectiveGreeting,
+        };
+        return true;
     }
 
     private async restoreKnowledgeBaseSnapshot(): Promise<void> {

@@ -1,5 +1,6 @@
 import { DEFAULT_RRF_K } from "./constants";
 import { VaultKnowledgeBase } from "./knowledge-base";
+import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { LocalModelClient } from "./model-client";
 import type {
     AnswerSource,
@@ -204,12 +205,12 @@ export class AdvancedRagEngine {
 
         if (prepared.noCandidates) {
             return {
-                text: this.buildFallbackMarkdownAnswer(
+                text: normalizeObsidianMarkdown(this.buildFallbackMarkdownAnswer(
                     prepared.originalUserText,
                     prepared.rewriteResult,
                     prepared.retrievalModeUsed,
                     prepared.rerankedCandidates,
-                ),
+                )),
                 sources: [],
                 retrievalModeUsed: prepared.retrievalModeUsed,
                 queryRewrite: prepared.rewriteResult,
@@ -223,7 +224,7 @@ export class AdvancedRagEngine {
             );
 
             return {
-                text: markdownAnswer,
+                text: normalizeObsidianMarkdown(markdownAnswer),
                 sources: prepared.sources,
                 retrievalModeUsed: prepared.retrievalModeUsed,
                 queryRewrite: prepared.rewriteResult,
@@ -232,12 +233,12 @@ export class AdvancedRagEngine {
             console.error("[VaultCoach] 生成回答失败，将回退到检索结果摘要。", error);
 
             return {
-                text: this.buildFallbackMarkdownAnswer(
+                text: normalizeObsidianMarkdown(this.buildFallbackMarkdownAnswer(
                     prepared.originalUserText,
                     prepared.rewriteResult,
                     prepared.retrievalModeUsed,
                     prepared.rerankedCandidates,
-                ),
+                )),
                 sources: prepared.sources,
                 retrievalModeUsed: prepared.retrievalModeUsed,
                 queryRewrite: prepared.rewriteResult,
@@ -262,12 +263,12 @@ export class AdvancedRagEngine {
 
         if (prepared.noCandidates) {
             return {
-                text: this.buildFallbackMarkdownAnswer(
+                text: normalizeObsidianMarkdown(this.buildFallbackMarkdownAnswer(
                     prepared.originalUserText,
                     prepared.rewriteResult,
                     prepared.retrievalModeUsed,
                     prepared.rerankedCandidates,
-                ),
+                )),
                 sources: [],
                 retrievalModeUsed: prepared.retrievalModeUsed,
                 queryRewrite: prepared.rewriteResult,
@@ -282,7 +283,7 @@ export class AdvancedRagEngine {
             );
 
             return {
-                text: markdownAnswer,
+                text: normalizeObsidianMarkdown(markdownAnswer),
                 sources: prepared.sources,
                 retrievalModeUsed: prepared.retrievalModeUsed,
                 queryRewrite: prepared.rewriteResult,
@@ -306,7 +307,7 @@ export class AdvancedRagEngine {
                 handlers?.onDone?.();
 
                 return {
-                    text: markdownAnswer,
+                    text: normalizeObsidianMarkdown(markdownAnswer),
                     sources: prepared.sources,
                     retrievalModeUsed: prepared.retrievalModeUsed,
                     queryRewrite: prepared.rewriteResult,
@@ -316,12 +317,12 @@ export class AdvancedRagEngine {
                 handlers?.onError?.(error);
 
                 return {
-                    text: this.buildFallbackMarkdownAnswer(
+                    text: normalizeObsidianMarkdown(this.buildFallbackMarkdownAnswer(
                         prepared.originalUserText,
                         prepared.rewriteResult,
                         prepared.retrievalModeUsed,
                         prepared.rerankedCandidates,
-                    ),
+                    )),
                     sources: prepared.sources,
                     retrievalModeUsed: prepared.retrievalModeUsed,
                     queryRewrite: prepared.rewriteResult,
@@ -1253,6 +1254,7 @@ export class AdvancedRagEngine {
             "4. 如果上下文不足以支撑结论，必须明确说明“根据当前知识库片段，信息不足”；",
             "5. 不要在正文中伪造来源编号，因为插件会在回答下方单独展示可点击来源。",
             "6. 如果问题涉及代码、配置、命令或路径，请尽量使用 Markdown 代码块。",
+            "7. 如果回答包含数学公式，必须使用 Obsidian/KaTeX 兼容语法：行内公式使用 `$...$`，块级公式使用独立成行的 `$$` 包裹；不要使用单独的 `[`、`]` 或 `\\[`、`\\]` 包裹公式。",
         ].join("\n");
 
         const userPrompt: string = [

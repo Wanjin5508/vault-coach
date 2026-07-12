@@ -2,6 +2,7 @@
 
 import { ItemView, WorkspaceLeaf, Notice, MarkdownRenderer } from "obsidian";
 import type VaultCoach  from "./main";
+import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import type {
     AnswerSource,
     ChatMessage,
@@ -1506,7 +1507,7 @@ export class VaultCoachView extends ItemView {
         // bubbleEl.style.whiteSpace = "pre-wrap";
         // bubbleEl.setText(message.text);
         const sourcePath: string = this.app.workspace.getActiveFile()?.path ?? "";
-        await MarkdownRenderer.render(this.app, message.text, bubbleEl, sourcePath, this)
+        await MarkdownRenderer.render(this.app, normalizeObsidianMarkdown(message.text), bubbleEl, sourcePath, this)
 
         // 如果是助手消息，并且携带来源，则在下方渲染折叠来源区域
         if (message.role == "assistant" && message.sources && message.sources.length > 0) {
@@ -1559,7 +1560,7 @@ export class VaultCoachView extends ItemView {
     }
 
     private async renderSourceMarkdown(markdown: string, containerEl: HTMLElement, sourcePath: string): Promise<void> {
-        const safeMarkdown: string = this.sanitizeSourceMarkdown(markdown);
+        const safeMarkdown: string = this.sanitizeSourceMarkdown(normalizeObsidianMarkdown(markdown));
 
         try {
             await MarkdownRenderer.render(this.app, safeMarkdown, containerEl, sourcePath, this);
@@ -2138,8 +2139,7 @@ export class VaultCoachView extends ItemView {
             await this.plugin.rebuildKnowledgeBase(true);
         } finally {
             this.isBusy = false;
-            this.sendButtonEl?.removeAttribute("disabled");
-            this.retrievalModeSelectEl?.removeAttribute("disabled");
+            this.refresh();
             if (this.activeInteractionMode === "qa") {
                 this.focusInput();
             }
