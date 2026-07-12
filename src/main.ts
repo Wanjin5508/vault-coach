@@ -3,6 +3,7 @@ import { EXAM_RESULTS_DIR_PATH, VAULT_COACH_HIDDEN_DIR_PATH, VIEW_TYPE_VAULT_COA
 import { ExamEngine } from "./exam/exam-engine";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { VaultKnowledgeBase } from "./knowledge-base";
+import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { VaultCoachPersistentStore } from "./persistent-store";
 import { AdvancedRagEngine } from "./rag-engine";
 import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
@@ -515,7 +516,7 @@ export default class VaultCoach extends Plugin {
     addAssistantMessage(text: string, sources: AnswerSource[]): void {
         this.messages.push({
             role: "assistant",
-            text,
+            text: normalizeObsidianMarkdown(text),
             createdAt: Date.now(),
             sources,
         });
