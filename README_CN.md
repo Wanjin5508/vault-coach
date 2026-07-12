@@ -12,7 +12,7 @@ Vault Coach 可以把你的 Obsidian vault 变成本地优先的学习和研究�
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 
-<!-- 图片建议：在这里插入一张宽幅主图，例如 `assets/screenshots/vault-coach-qa.png`。画面最好展示 Vault Coach 侧边栏正在回答问题，并展开了 Markdown/PDF 引用来源。 -->
+![alt text](assets/screenshots/vault-coach-qa.png.png)
 
 ## 为什么使用 Vault Coach
 
@@ -39,7 +39,7 @@ Vault Coach 不是简单的聊天窗口，而是围绕 Obsidian 知识库设计�
 - 关键词 + 向量混合检索
 - 可选 rerank 服务，未配置时使用本地启发式 rerank
 
-<!-- 图片建议：在这里插入 `assets/screenshots/retrieval-sources.png`。建议展示一条回答，下方同时有 Markdown 笔记来源和 PDF 页码来源，最好包含展开与折叠状态。 -->
+![alt text](assets/screenshots/retrieval-sources.png.png)
 
 ### 文本型 PDF 支持
 
@@ -60,7 +60,8 @@ Vault Coach 可以索引 vault 中带原生文本层的 PDF。插件会提取 PD
 - 复杂表格、图表和视觉公式不会被完整还原。
 - 双栏论文的阅读顺序通过启发式方式改善，但不能保证所有版式都完全正确。
 
-<!-- 图片建议：在这里插入 `assets/screenshots/pdf-source-page.png`。建议展示一个来自 PDF 的回答来源，并让用户能看到它跳转到 Obsidian PDF 预览中的具体页码。 -->
+![alt text](assets/screenshots/pdf-source-page.png.png)
+
 
 ### 考试模式
 
@@ -79,7 +80,10 @@ Vault Coach 可以索引 vault 中带原生文本层的 PDF。插件会提取 PD
 
 适合用于面试准备、课程复习、论文阅读、项目交接和技术笔记自测。
 
-<!-- 图片建议：在这里插入 `assets/screenshots/exam-mode-scope.png`。建议展示考试模式的范围选择、智能筛选结果和生成后的题目预览。 -->
+![alt text](assets/screenshots/exam-mode-scope.png.png)
+
+用户同样可以手动管理测试题目的范围：
+![alt text](assets/screenshots/exam-mode-scope-m.png)
 
 ### 长期记忆
 
