@@ -460,11 +460,15 @@ export class ExamQuestionGenerator {
                 .join("；");
         }
 
-        if (value !== null && typeof value === "object") {
-            return Object.values(value as Record<string, unknown>)
-                .map((item: unknown) => this.normalizeTextValue(item))
-                .filter((item: string) => item.length > 0)
-                .join("；");
+        if (this.isRecord(value)) {
+            const normalizedItems: string[] = [];
+            for (const key of Object.keys(value)) {
+                const normalizedItem: string = this.normalizeTextValue(value[key]);
+                if (normalizedItem.length > 0) {
+                    normalizedItems.push(normalizedItem);
+                }
+            }
+            return normalizedItems.join("；");
         }
 
         return normalizeWhitespace(value);
@@ -498,9 +502,9 @@ export class ExamQuestionGenerator {
         }
 
         const normalizedKeys: Set<string> = new Set<string>(keys.map((key: string) => key.toLowerCase()));
-        for (const [recordKey, value] of Object.entries(record)) {
+        for (const recordKey of Object.keys(record)) {
             if (normalizedKeys.has(recordKey.toLowerCase())) {
-                return value;
+                return record[recordKey];
             }
         }
 
@@ -508,9 +512,11 @@ export class ExamQuestionGenerator {
     }
 
     private asRecord(value: unknown): Record<string, unknown> {
-        return value !== null && typeof value === "object"
-            ? value as Record<string, unknown>
-            : {};
+        return this.isRecord(value) ? value : {};
+    }
+
+    private isRecord(value: unknown): value is Record<string, unknown> {
+        return value !== null && typeof value === "object" && !Array.isArray(value);
     }
 
     private convertCandidateToQuestion(

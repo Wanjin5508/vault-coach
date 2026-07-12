@@ -25,6 +25,11 @@
 		"typescript-eslint": "8.35.1"
 	},
 	"dependencies": {
-		"pdfjs-dist": "^2.16.105"
+		"pdfjs-dist": "^4.2.67"
+	},
+	"overrides": {
+		"brace-expansion": "^1.1.16",
+		"minimatch": "^3.1.4",
+		"tar": "^7.5.16"
 	}
 }

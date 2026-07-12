@@ -1324,8 +1324,7 @@ export class VaultCoachView extends ItemView {
             return null;
         }
 
-        const nodeLikeTarget: Partial<Node> = target as Partial<Node>;
-        return nodeLikeTarget.nodeType === Node.ELEMENT_NODE ? target as Element : null;
+        return target instanceof Element ? target : null;
     }
 
     private renderExamReviewBlock(containerEl: HTMLElement, label: string, text: string): void {

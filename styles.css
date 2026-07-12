@@ -391,7 +391,7 @@
     display: block;
     color: var(--text-normal);
     font-size: var(--font-ui-small);
-    font-weight: 700 !important;
+    font-weight: 700;
 }
 
 .vault-coach-exam-scope-list {

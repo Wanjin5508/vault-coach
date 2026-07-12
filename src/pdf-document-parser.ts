@@ -1,6 +1,6 @@
 import { App, TFile } from "obsidian";
 import * as pdfjsLib from "pdfjs-dist";
-import * as pdfjsWorker from "pdfjs-dist/build/pdf.worker.js";
+import * as pdfjsWorker from "pdfjs-dist/build/pdf.worker.mjs";
 import { createDocumentId, hashArrayBuffer, type DocumentParser } from "./document-parser";
 import type {
     DocumentParseContext,
@@ -56,12 +56,12 @@ interface PageExtraction {
 const PDF_PARSER_VERSION = "pdf-native-text-parser-v1";
 const LOW_TEXT_PAGE_CHARACTER_THRESHOLD = 40;
 
-const globalScopeWithPdfJsWorker = globalThis as typeof globalThis & {
+const windowWithPdfJsWorker = window as Window & {
     pdfjsWorker?: unknown;
 };
 
-if (!globalScopeWithPdfJsWorker.pdfjsWorker) {
-    globalScopeWithPdfJsWorker.pdfjsWorker = pdfjsWorker;
+if (!windowWithPdfJsWorker.pdfjsWorker) {
+    windowWithPdfJsWorker.pdfjsWorker = pdfjsWorker;
 }
 
 export class PdfDocumentParser implements DocumentParser {
@@ -94,6 +94,7 @@ export class PdfDocumentParser implements DocumentParser {
             stopAtErrors: false,
             useSystemFonts: true,
             useWorkerFetch: false,
+            isEvalSupported: false,
             verbosity: pdfjsLib.VerbosityLevel.ERRORS,
         });
 
@@ -119,7 +120,6 @@ export class PdfDocumentParser implements DocumentParser {
                 const page = await pdfDocument.getPage(pageNumber);
                 const textContent = await page.getTextContent({
                     includeMarkedContent: false,
-                    disableCombineTextItems: false,
                 });
                 const pdfTextItems: PdfTextItem[] = [];
                 for (const item of textContent.items) {
