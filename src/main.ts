@@ -1,7 +1,7 @@
-import { Notice, normalizePath, Plugin, TAbstractFile, WorkspaceLeaf, type ListedFiles, type Stat } from "obsidian";
+import { Notice, normalizePath, Plugin, TAbstractFile, WorkspaceLeaf, type Command, type ListedFiles, type Stat } from "obsidian";
 import { EXAM_RESULTS_DIR_PATH, VAULT_COACH_HIDDEN_DIR_PATH, VIEW_TYPE_VAULT_COACH } from "./constants";
 import { ExamEngine } from "./exam/exam-engine";
-import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
+import { detectObsidianLocale, getDefaultGreeting, isBuiltInDefaultGreeting, translate, type SupportedLocale, type TranslationKey } from "./i18n";
 import { VaultKnowledgeBase } from "./knowledge-base";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { VaultCoachPersistentStore } from "./persistent-store";
@@ -50,10 +50,14 @@ export default class VaultCoach extends Plugin {
     private ragEngine!: AdvancedRagEngine;
     private examEngine!: ExamEngine;
     private persistentStore!: VaultCoachPersistentStore;
+    private settingTab: VaultCoachSettingTab | null = null;
+    private ribbonIconEl: HTMLElement | null = null;
+    private readonly localizedCommands: Array<{ command: Command; translationKey: TranslationKey }> = [];
 
     private knowledgeBaseDirty = true;
     private vectorIndexDirty = true;
     private runtimeRetrievalMode: RetrievalMode = DEFAULT_SETTINGS.defaultRetrievalMode;
+    private activeLocale: SupportedLocale = detectObsidianLocale();
 
     // 新增：自动增量同步所需的队列与计时器。
     private readonly pendingChangedKnowledgePaths: Set<string> = new Set<string>();
@@ -106,15 +110,16 @@ export default class VaultCoach extends Plugin {
             (leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this),
         );
 
-        this.addCommand({
+        const openViewCommand: Command = this.addCommand({
             id: "open-view",
             name: this.t("command.openView"),
             callback: async () => {
                 await this.activateView();
             },
         });
+        this.localizedCommands.push({ command: openViewCommand, translationKey: "command.openView" });
 
-        this.addCommand({
+        const resetConversationCommand: Command = this.addCommand({
             id: "reset-conversation",
             name: this.t("command.resetConversation"),
             callback: () => {
@@ -123,40 +128,48 @@ export default class VaultCoach extends Plugin {
                 new Notice(this.t("notice.resetSuccess"));
             },
         });
+        this.localizedCommands.push({ command: resetConversationCommand, translationKey: "command.resetConversation" });
 
-        this.addCommand({
+        const rebuildKnowledgeIndexCommand: Command = this.addCommand({
             id: "rebuild-knowledge-index",
             name: this.t("command.rebuildKnowledgeIndex"),
             callback: async () => {
                 await this.rebuildKnowledgeBase(true);
             },
         });
+        this.localizedCommands.push({ command: rebuildKnowledgeIndexCommand, translationKey: "command.rebuildKnowledgeIndex" });
 
-        this.addCommand({
+        const stopKnowledgeIndexCommand: Command = this.addCommand({
             id: "stop-knowledge-index",
             name: this.t("command.stopKnowledgeIndex"),
             callback: () => {
                 this.abortKnowledgeIndexBuild(true);
             },
         });
+        this.localizedCommands.push({ command: stopKnowledgeIndexCommand, translationKey: "command.stopKnowledgeIndex" });
 
-        this.addCommand({
+        const clearKnowledgeIndexCommand: Command = this.addCommand({
             id: "clear-knowledge-index",
             name: this.t("command.clearKnowledgeIndex"),
             callback: async () => {
                 await this.clearKnowledgeIndex(true);
             },
         });
+        this.localizedCommands.push({ command: clearKnowledgeIndexCommand, translationKey: "command.clearKnowledgeIndex" });
 
-        this.addRibbonIcon("message-square", this.t("ribbon.openVaultCoach"), () => {
+        this.ribbonIconEl = this.addRibbonIcon("message-square", this.t("ribbon.openVaultCoach"), () => {
             void this.activateView();
         });
 
-        this.addSettingTab(new VaultCoachSettingTab(this.app, this));
+        this.activeLocale = detectObsidianLocale();
+        this.settingTab = new VaultCoachSettingTab(this.app, this);
+        this.addSettingTab(this.settingTab);
         this.registerDomEvent(window, "languagechange", () => {
-            this.refreshBuiltInDefaultGreeting();
-            this.refreshAllViews();
+            this.refreshLocaleIfChanged();
         });
+        this.registerInterval(window.setInterval(() => {
+            this.refreshLocaleIfChanged();
+        }, 2000));
         this.registerVaultEvents();
 
         this.app.workspace.onLayoutReady(() => {
@@ -185,9 +198,50 @@ export default class VaultCoach extends Plugin {
         await this.saveData(this.settings);
     }
 
-    private refreshBuiltInDefaultGreeting(): void {
+    private refreshBuiltInDefaultGreeting(): boolean {
         if (this.settings.defaultGreeting.trim().length === 0 || isBuiltInDefaultGreeting(this.settings.defaultGreeting)) {
-            this.settings.defaultGreeting = getDefaultGreeting();
+            const nextDefaultGreeting: string = getDefaultGreeting();
+            if (this.settings.defaultGreeting === nextDefaultGreeting) {
+                return false;
+            }
+
+            this.settings.defaultGreeting = nextDefaultGreeting;
+            return true;
+        }
+
+        return false;
+    }
+
+    private refreshLocaleIfChanged(): void {
+        const nextLocale: SupportedLocale = detectObsidianLocale();
+        if (nextLocale === this.activeLocale) {
+            return;
+        }
+
+        this.activeLocale = nextLocale;
+        this.refreshBuiltInDefaultGreeting();
+        const restoredGreeting: boolean = this.refreshRestoredDefaultGreeting();
+        if (restoredGreeting) {
+            void this.persistRuntimeState();
+        }
+
+        this.refreshAllViews();
+        this.refreshLocalizedStaticLabels();
+        if (this.settingTab?.containerEl.isConnected) {
+            this.settingTab.refresh();
+        }
+    }
+
+    private refreshLocalizedStaticLabels(): void {
+        for (const localizedCommand of this.localizedCommands) {
+            localizedCommand.command.name = this.t(localizedCommand.translationKey);
+        }
+
+        if (this.ribbonIconEl) {
+            const title: string = this.t("ribbon.openVaultCoach");
+            this.ribbonIconEl.setAttribute("aria-label", title);
+            this.ribbonIconEl.setAttribute("data-tooltip", title);
+            this.ribbonIconEl.setAttribute("title", title);
         }
     }
 

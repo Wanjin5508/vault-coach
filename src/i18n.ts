@@ -1,3 +1,5 @@
+import { getLanguage } from "obsidian";
+
 export type SupportedLocale = "zh" | "en";
 
 const ZH_TRANSLATIONS = {
@@ -646,28 +648,55 @@ const LEGACY_DEFAULT_GREETINGS: string[] = [
     ].join("\n"),
 ];
 
+export function detectObsidianLocale(): SupportedLocale {
+    const obsidianLanguage: string | null = readObsidianLanguage();
+    if (obsidianLanguage !== null) {
+        return languageToSupportedLocale(obsidianLanguage);
+    }
+
+    return detectBrowserLocale();
+}
+
 export function detectSystemLocale(): SupportedLocale {
-    const languages: string[] = [];
+    return detectObsidianLocale();
+}
 
-    if (typeof navigator !== "undefined") {
-        for (const language of navigator.languages) {
-            if (language.trim().length > 0) {
-                languages.push(language);
-            }
-        }
+function readObsidianLanguage(): string | null {
+    try {
+        const language: string = getLanguage();
+        return language.trim().length > 0 ? language : null;
+    } catch {
+        return null;
+    }
+}
 
-        if (navigator.language.trim().length > 0) {
-            languages.push(navigator.language);
+function detectBrowserLocale(): SupportedLocale {
+    const language: string | null = getFirstBrowserLanguage();
+    return language === null ? "en" : languageToSupportedLocale(language);
+}
+
+function getFirstBrowserLanguage(): string | null {
+    if (typeof navigator === "undefined") {
+        return null;
+    }
+
+    for (const language of navigator.languages) {
+        if (language.trim().length > 0) {
+            return language;
         }
     }
 
-    return languages.some((language: string) => isChineseLocale(language)) ? "zh" : "en";
+    return navigator.language.trim().length > 0 ? navigator.language : null;
+}
+
+function languageToSupportedLocale(language: string): SupportedLocale {
+    return isChineseLocale(language) ? "zh" : "en";
 }
 
 export function translate(
     key: TranslationKey,
     replacements: Record<string, string | number> = {},
-    locale: SupportedLocale = detectSystemLocale(),
+    locale: SupportedLocale = detectObsidianLocale(),
 ): string {
     const template: string = TRANSLATIONS[locale][key] ?? ZH_TRANSLATIONS[key];
     let result: string = template;
@@ -687,7 +716,7 @@ export function translate(
     return result;
 }
 
-export function getDefaultGreeting(locale: SupportedLocale = detectSystemLocale()): string {
+export function getDefaultGreeting(locale: SupportedLocale = detectObsidianLocale()): string {
     return DEFAULT_GREETINGS[locale];
 }
 

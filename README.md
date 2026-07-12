@@ -2,199 +2,239 @@
 
 > Language: English | [中文](./README_CN.md)
 
-Vault Coach is an [Obsidian](https://obsidian.md) plugin for asking questions over your Markdown vault with RAG (Retrieval-Augmented Generation). It is local-first with [Ollama](https://ollama.com), and can also use user-configured OpenAI-compatible cloud services for chat and embeddings.
+Vault Coach turns your Obsidian vault into a local-first study and research assistant. Ask questions across Markdown notes and text-based PDFs, inspect cited sources, and generate exams from your own knowledge base.
+
+It is designed for people who want a practical RAG workflow inside Obsidian without sending vault content to a remote service by default. Local [Ollama](https://ollama.com) is the default model provider, and OpenAI-compatible services can be configured explicitly when you need them.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
 ![Version](https://img.shields.io/badge/version-1.3.2-1E90FF)
-![Local RAG](https://img.shields.io/badge/Local-RAG-10b981)
+![Local RAG](https://img.shields.io/badge/Local--first-RAG-10b981)
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 
-## What It Does
+<!-- Image suggestion: Add a wide hero screenshot here, for example `assets/screenshots/vault-coach-qa.png`. Show the Vault Coach sidebar answering a real question with cited Markdown/PDF sources expanded. -->
 
-Vault Coach builds a searchable knowledge base from your Obsidian Markdown files, retrieves relevant notes for each question, and asks a local or configured remote model to answer with cited sources.
+## Why Vault Coach
 
-Key features:
+Vault Coach is built for repeated learning and research workflows, not just one-off chat.
 
-- Hybrid retrieval: keyword search, vector search, and hybrid fusion.
-- Query rewrite: improves retrieval queries before searching the vault.
-- Rerank: optional external rerank service, with local heuristic fallback.
-- Long-term memory: extracts durable user facts and injects relevant memories into future answers.
-- Incremental index sync: watches Markdown changes and updates the index automatically.
-- True streaming output: answer text appears as the model generates it, then renders as Markdown after completion.
-- Stop generation: interrupt a long answer while keeping any partial text already streamed.
-- Markdown sources: source excerpts render Markdown and link back to vault notes.
-- Exam mode: create knowledge-base tests with folder and file-level scope controls, smart content filtering, blueprint-based question generation, quality review, scoring, hidden history, and export.
-- Model status: shows the active chat model and embedding model beside the input controls.
-- Windows Ollama embedding fallback: retries local embeddings on CPU if Ollama GPU/CUDA embedding fails.
-- Bilingual UI: plugin view and settings follow the operating system language, currently Chinese or English.
-- Local-first privacy model: Ollama is the default; remote services are used only after explicit configuration.
+- **Ask your vault**: retrieve relevant Markdown notes and text-based PDF pages before answering.
+- **Trust the answer**: every answer can show clickable sources, excerpts, headings, and PDF page references.
+- **Study from your notes**: Exam mode turns selected folders and files into generated practice tests.
+- **Stay local by default**: Ollama is the default for chat and embeddings.
+- **Scale beyond Markdown**: text-based PDFs can be parsed, chunked, embedded, searched, and cited.
+- **Use the model stack you prefer**: local Ollama or explicit OpenAI-compatible chat and embedding providers.
+- **Use it in English or Chinese**: the plugin UI and documentation are available in both languages.
 
-## First Run
+## Highlights
 
-After enabling Vault Coach, open the plugin view from the ribbon icon or command palette. Before asking questions, review **Settings → Vault Coach** and confirm the knowledge base and model settings.
+### Knowledge Q&A
 
-Recommended first setup:
+Ask natural-language questions from the Vault Coach sidebar. The plugin retrieves relevant chunks, optionally rewrites the query, reranks candidates, and streams an answer with sources.
 
-1. In **Knowledge base**, choose whether to scan the entire vault or a specific folder.
-2. In **Models**, keep **Local Ollama** selected if you want all model calls to stay on your machine.
-3. Enter a local chat model and a local embedding model that exist in Ollama.
-4. Select **Rebuild index** in the sidebar, or wait for automatic sync after file changes.
-5. Ask a question in the Vault Coach sidebar.
+Supported retrieval modes:
 
-The first question can take longer because the plugin may need to build the text index, build or refresh embeddings, retrieve context, and call the model. During answer generation, Vault Coach streams text into the assistant bubble before rendering the final Markdown response. Use **Stop** if you need to interrupt a long generation.
+- Keyword search
+- Vector search
+- Hybrid keyword/vector search
+- Optional rerank endpoint with local heuristic fallback
 
-## Configuration Guide
+<!-- Image suggestion: Add `assets/screenshots/retrieval-sources.png`. Show an answer with collapsed and expanded source cards, including a Markdown note source and a PDF page source. -->
 
-The settings page is organized in the same order as the plugin UI.
+### Text-Based PDF Support
 
-### General
+Vault Coach can index native-text PDFs inside your vault. PDF text is extracted with page information, converted into searchable chunks, and shown as page-level sources in answers.
 
-Use this section for sidebar behavior and conversation defaults.
+What works today:
 
-| Setting | What it controls | Guidance |
-|---------|------------------|----------|
-| Assistant name | The name shown in the sidebar header and assistant message metadata. | Keep the default unless you want a custom assistant identity. |
-| Default greeting | The first assistant message after resetting the conversation. Markdown is supported. | If left as the built-in greeting, it follows the OS language. Custom text is preserved. |
-| Open right sidebar on startup | Opens Vault Coach automatically when Obsidian starts. | Disable this if you prefer opening the plugin only when needed. |
-| Default retrieval mode | The initial retrieval channel: keyword, vector, or hybrid. | Hybrid is recommended for most vaults. |
-| Collapse sources by default | Whether answer sources start collapsed. | Enable for a cleaner chat view; disable if you inspect sources often. |
+- Text-layer PDF extraction
+- PDF page count and file size limits
+- Page-aware source links, such as `paper.pdf · page 3`
+- PDF chunks in keyword, vector, hybrid, rerank, Q&A, and Exam mode
+- Basic cleanup for repeated headers, footers, page numbers, and reading order
+- Obsidian/KaTeX-compatible math block normalization for model answers when formulas are produced from PDF content
 
-### Knowledge Base
+Current limits:
 
-Use this section to decide what Markdown content enters the index and how notes are split into chunks.
+- Scanned PDFs are detected as low-text/likely scanned, but OCR is not included yet.
+- Complex tables, diagrams, and heavily visual equations are not fully reconstructed.
+- Multi-column reading order is improved with heuristics, but not guaranteed for every academic layout.
 
-| Setting | Default | What it controls | Guidance |
-|---------|---------|------------------|----------|
-| Scan scope | Entire vault | Whether Vault Coach indexes the whole vault or only one folder. | Use a specific folder for focused projects or private areas you do not want indexed. |
-| Specific folder | Empty | Folder path used when scan scope is set to a specific folder. | Use a vault-relative path, for example `Knowledge/RAG`. |
-| Chunk size | 600 | Maximum characters per chunk. | Larger chunks preserve context but increase embedding and prompt cost. |
-| Chunk overlap | 120 | Characters shared between adjacent chunks. | Keep some overlap to reduce boundary loss between chunks. |
-| Enable automatic incremental sync | On | Watches Markdown changes and syncs the index automatically. | Keep enabled for normal use. |
-| Auto-sync file threshold | 8 | Triggers sync immediately after enough files change. | Lower values update sooner; higher values reduce background work. |
-| Auto-sync debounce time | 15,000 ms | Wait time after the last file change before syncing. | Increase if you often edit many files in bursts. |
-| Auto-sync maximum wait | 120,000 ms | Forces sync after this time even if changes continue. | Prevents long editing sessions from delaying sync indefinitely. |
-| Exam mode excluded paths | Empty | Vault-relative paths or simple globs excluded only from exam generation. | Use one pattern per line, for example `TODO/**`, `Archive/**`, or `**/*.draft.md`. |
-| Smartly exclude low-quality exam content | On | Uses rules and the configured chat model to classify exam-ready files and sections, excluding TODOs, logs, link indexes, stubs, and low-value content. Results are cached locally in `.vault-coach/exam-content-profiles.json`. | Keep enabled for cleaner exams; disable if you want only manual and rule-based filtering. |
+<!-- Image suggestion: Add `assets/screenshots/pdf-source-page.png`. Show a PDF-derived answer source that links to a specific PDF page, preferably next to the opened PDF page in Obsidian. -->
 
-Changing scan scope, chunk size, or chunk overlap marks the text index dirty. Changing the embedding provider, embedding model, or vector setting marks the vector index dirty. Rebuild the index before expecting updated retrieval results.
+### Exam Mode
 
-### Models
+Exam mode helps you turn a vault, folder, or selected files into a practice test.
 
-This section chooses the actual services used for answer generation, embeddings, and optional rerank. Only the currently selected services are called.
+It supports:
 
-#### Answer Model Service
+- Full-vault, folder, and file-level exam scope selection
+- Persistent include/exclude choices for exam sources
+- Smart filtering for low-quality content such as TODO lists, logs, link indexes, stubs, and draft notes
+- Blueprint-style planning before question generation
+- Question generation from your indexed knowledge base
+- LLM-based scoring and feedback
+- Hidden local exam history
+- Manual export of exam records into visible vault folders
 
-The answer model is used for query rewrite, final answer generation, and long-term memory extraction.
+Use it for interview preparation, course review, paper reading, project onboarding, and self-checking technical notes.
 
-| Option | What it means | Required fields |
-|--------|---------------|-----------------|
-| Local Ollama | Calls the local Ollama chat API. | Local inference service URL, local chat model. |
-| OpenAI compatible | Calls a configured remote or self-hosted OpenAI-compatible chat API. | Cloud chat service URL, cloud chat model, cloud API key. |
-
-For Ollama, the base URL should normally be `http://127.0.0.1:11434`. Do not include `/api/chat` in the base URL.
-
-For OpenAI-compatible services, use the provider's base URL or `/v1` URL. Vault Coach builds the `/chat/completions` path automatically when needed.
-
-#### Embedding Model Service
-
-The embedding model is used for vector retrieval. Changing it requires rebuilding the index because existing vectors no longer match the new model.
-
-| Option | What it means | Required fields |
-|--------|---------------|-----------------|
-| Local Ollama | Calls Ollama embedding APIs locally. | Local inference service URL, local embedding model. |
-| OpenAI compatible | Calls a configured remote or self-hosted embedding API. | Cloud embedding service URL, cloud embedding model, cloud API key. |
-
-Remote embeddings may send many vault chunks to the configured provider during index building. Use remote embeddings only when you understand and accept that data flow.
-
-Windows note: if local Ollama embeddings fail with CUDA, PTX, or `llama-server` errors, update your NVIDIA driver, CUDA-related environment, and Ollama first. Vault Coach retries Ollama embeddings on CPU after GPU embedding failures, but CPU indexing is slower. If the problem continues, please open a [GitHub issue](https://github.com/Wanjin5508/vault-coach/issues) with your model names, provider settings, and developer console logs.
-
-#### Cloud API Key
-
-Vault Coach stores only the SecretStorage entry name in plugin settings. The raw API key should be stored through Obsidian SecretStorage, not in `data.json`.
-
-#### Optional Rerank Service
-
-Rerank is optional. If **Dedicated rerank service URL** or **Rerank model** is empty, Vault Coach falls back to local heuristic rerank.
-
-| Setting | What it controls |
-|---------|------------------|
-| Dedicated rerank service URL | Optional rerank endpoint, commonly a `/v1/rerank` compatible service. |
-| Rerank model | Model name used by that rerank endpoint. |
+<!-- Image suggestion: Add `assets/screenshots/exam-mode-scope.png`. Show Exam mode with scope selection, smart filtering results, and a generated test preview. -->
 
 ### Long-Term Memory
 
-Long-term memory stores useful facts extracted from previous conversations and injects relevant entries into later answers.
+Vault Coach can extract durable facts from conversations and inject relevant memories into later answers. Memories are stored locally and can be disabled from settings.
 
-| Setting | Default | What it controls | Guidance |
-|---------|---------|------------------|----------|
-| Enable long-term memory | On | Whether Vault Coach extracts and uses durable memories. | Disable if you want each session to behave independently. |
-| Memory injection count | 4 | Maximum memories injected into one answer. | Keep low to avoid distracting the model. |
-| Maximum memory items | 150 | Total memory entries retained locally. | Increase only if you rely heavily on cross-session context. |
-| Maximum persisted messages | 60 | Conversation messages saved locally. | Higher values preserve more context but grow runtime state. |
+### Streaming Answers
+
+Answers stream into the sidebar as the model generates them. You can stop a long generation and keep the partial text already produced. When generation finishes, the answer is rendered as Obsidian Markdown.
+
+## Quick Start
+
+1. Install and enable Vault Coach in Obsidian.
+2. Open the sidebar from the ribbon icon or command palette.
+3. Go to **Settings → Vault Coach**.
+4. Choose the knowledge scope: entire vault or a specific folder.
+5. Enable the file types you want to index: Markdown and, optionally, text-based PDFs.
+6. Configure models:
+   - For local use, keep **Local Ollama** and enter existing Ollama chat and embedding models.
+   - For remote/self-hosted APIs, choose **OpenAI compatible** and configure the endpoint, model, and API key.
+7. Select **Rebuild index**.
+8. Ask a question or switch to **Exam mode**.
+
+For Ollama, the base URL is usually:
+
+```text
+http://127.0.0.1:11434
+```
+
+Do not include `/api/chat`, `/api/embed`, or `/api/embeddings` in the base URL. Vault Coach appends API paths internally.
+
+## Recommended Ollama Setup
+
+Vault Coach needs one chat model and one embedding model.
+
+Example:
+
+```bash
+ollama pull qwen2.5:7b
+ollama pull nomic-embed-text
+```
+
+Then configure:
+
+| Purpose | Example |
+|---------|---------|
+| Local chat model | `qwen2.5:7b` |
+| Local embedding model | `nomic-embed-text` |
+| Local inference service URL | `http://127.0.0.1:11434` |
+
+You can use other Ollama models. Larger models may produce better answers but require more memory and slower generation.
+
+## Configuration Overview
+
+### General
+
+- Assistant name
+- Default greeting
+- Open sidebar on startup
+- Default retrieval mode
+- Collapse sources by default
+
+### Knowledge Base
+
+- Scan the whole vault or one folder
+- Enable Markdown indexing
+- Enable text-based PDF indexing
+- Set PDF file size and page limits
+- Configure chunk size and overlap
+- Enable automatic incremental sync
+- Exclude paths from Exam mode
+- Enable smart filtering for exam-ready content
+
+### Models
+
+- Local Ollama chat model
+- Local Ollama embedding model
+- OpenAI-compatible chat endpoint
+- OpenAI-compatible embedding endpoint
+- SecretStorage-backed cloud API key
+- Optional dedicated rerank service
+
+### Long-Term Memory
+
+- Enable or disable memory extraction
+- Control memory injection count
+- Limit saved memory items
+- Limit persisted conversation messages
 
 ### Advanced RAG
 
-These settings control retrieval quality and prompt construction. The defaults are intended to be conservative.
-
-| Setting | Default | What it controls | Guidance |
-|---------|---------|------------------|----------|
-| Enable query rewrite | On | Rewrites questions into retrieval-friendly queries. | Keep enabled unless rewrite quality is poor for your notes. |
-| Enable vector retrieval | On | Builds embeddings and enables vector or hybrid search. | Disable only if you want keyword-only retrieval or cannot use embeddings. |
-| Enable rerank | On | Reranks recalled candidates before prompt construction. | Keep enabled for better source ordering. |
-| Keyword top k | 10 | Number of keyword candidates. | Increase for broad queries. |
-| Vector top k | 10 | Number of vector candidates. | Increase for semantic recall at the cost of more rerank work. |
-| Hybrid candidate limit | 12 | Candidates kept after keyword/vector fusion. | Keep near the default unless retrieval misses useful notes. |
-| Rerank top k | 8 | Candidates entering rerank. | More candidates can improve recall but increase work. |
-| Context chunks | 8 | Chunks injected into the final prompt. | More is not always better; too much context can dilute the answer. |
-| Source limit | 5 | Sources shown below each answer. | Increase if you want broader citations. |
-| Generation temperature | 0.2 | Model randomness during answer generation. | Low values are better for grounded knowledge-base answers. |
-
-## Sidebar Controls
-
-The sidebar header shows current index status, file and chunk counts, vector status, and memory count in a compact grid.
-
-- **Q&A / Exam mode**: Q&A keeps a temporary, resettable chat. Exam mode creates a test from the configured knowledge-base scope, lets you choose full-vault, folder, and file-level ranges, analyzes unsuitable content, previews filtering results, generates a coverage blueprint, scores answers with the configured LLM, and can keep or export test records.
-- **Retrieval mode**: switches the current session between keyword, vector, and hybrid retrieval.
-- **Rebuild index**: rebuilds the text index and, if enabled, the vector index.
-- **Reset conversation**: clears the chat history and returns to the default greeting.
-- **Stop**: interrupts the current streaming answer.
-- **Model status**: displays the active chat and embedding models next to the input controls.
+- Query rewrite
+- Vector retrieval
+- Rerank
+- Keyword/vector/hybrid candidate counts
+- Final context chunk count
+- Source display limit
+- Generation temperature
 
 ## Privacy and Network Use
 
-Vault Coach is local-first. With the default Ollama settings, chat and embedding requests are sent to the configured local Ollama endpoint, usually `http://127.0.0.1:11434`.
+Vault Coach is local-first.
 
-Remote calls happen only when you explicitly choose an OpenAI-compatible answer or embedding provider and configure the corresponding endpoint, model, and API key.
+With the default Ollama setup, chat and embedding requests are sent only to your configured local Ollama endpoint, usually `http://127.0.0.1:11434`.
 
-When a remote answer model is enabled, the configured service may receive:
+Remote calls happen only when you explicitly select an OpenAI-compatible chat or embedding provider and configure that provider.
 
-- The current user question.
-- Retrieved Markdown chunks used as RAG context.
-- Selected exam note outlines and excerpts used for exam content filtering, blueprint planning, question generation, question quality review, scoring, generated questions, reference answers, rubrics, and user answers when using Exam mode.
-- A small amount of recent conversation context.
-- Relevant long-term memory entries if memory is enabled.
-- Model parameters such as model name and temperature.
+When remote chat is enabled, the configured service may receive:
 
-When a remote embedding provider is enabled, the configured service may receive Markdown chunks while building or refreshing the vector index.
+- Your current question
+- Retrieved Markdown chunks
+- Extracted text chunks from indexed PDFs
+- A small amount of recent conversation context
+- Relevant long-term memory entries, if enabled
+- Exam mode excerpts, generated questions, reference answers, rubrics, user answers, and grading context when using Exam mode
 
-Vault Coach does not include hidden telemetry. Exam content profile cache files are stored locally under `.vault-coach/` and do not include model reasoning traces. The plugin cannot control how a selected provider stores or processes submitted data, so review the provider's privacy and retention policy before enabling remote services.
+When remote embeddings are enabled, the configured service may receive indexed Markdown and PDF text chunks during vector index building.
 
-## Notes and Current Limits
+Vault Coach does not include hidden telemetry.
 
-- Streaming text is displayed as plain text while tokens arrive. After generation finishes, the complete answer is rendered as Markdown.
-- Source excerpts are Markdown-rendered, but Mermaid fences inside truncated excerpts are rendered as text to avoid Obsidian Mermaid errors.
-- Long-term memory search is keyword-based at the moment.
-- Exam scores are generated by the configured LLM and should be treated as study feedback, not authoritative grading.
-- Exam smart filtering and question review depend on the configured chat model. If analysis fails, use retry or continue with the manually selected scope.
+## Current Limits
+
+- PDF support is for text-based PDFs. OCR for scanned PDFs is not included yet.
+- PDF layout recovery is heuristic. Complex academic layouts, tables, diagrams, and visual formulas may need manual verification.
+- Exam scoring is generated by your configured LLM. Treat it as study feedback, not authoritative grading.
+- Long-term memory search is currently keyword-based.
+- Streaming output is shown as plain text while tokens arrive, then rendered as Markdown after completion.
+
+## Who It Is For
+
+Vault Coach is especially useful if you:
+
+- Keep technical notes, papers, and project documentation in Obsidian
+- Prepare for interviews or exams from your own notes
+- Want local-first RAG with transparent citations
+- Need Q&A over both Markdown notes and text PDFs
+- Want an Obsidian-native workflow instead of a separate chat app
 
 ## Roadmap
 
-See [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the broader development direction.
+Planned directions include OCR support, better PDF layout recovery, stronger exam workflows, improved memory retrieval, richer source inspection, and optional external vector backends.
+
+See [PROJECT_PLAN.md](./PROJECT_PLAN.md) for more details.
 
 ## Contributing
 
-Issues and PRs are welcome. For bugs, include reproduction steps, the model provider in use, relevant settings, and any console errors.
+Issues and pull requests are welcome.
+
+For bugs, include:
+
+- Reproduction steps
+- Obsidian version
+- Vault Coach version
+- Model provider and model names
+- Relevant settings
+- Console errors or screenshots
 
 ## License
 
