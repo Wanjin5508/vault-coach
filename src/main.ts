@@ -629,7 +629,7 @@ export default class VaultCoach extends Plugin {
                     throw vectorError;
                 }
                 console.error("[VaultCoach] 向量索引建立失败，将回退到关键词检索。", vectorError);
-                vectorBuildWarning = this.t("notice.index.vectorFailedWarning");
+                vectorBuildWarning = this.getVectorIndexFailureNotice(vectorError);
                 this.vectorIndexDirty = true;
             }
 
@@ -900,7 +900,7 @@ export default class VaultCoach extends Plugin {
             console.error("[VaultCoach] 向量索引重建失败", error);
             this.vectorIndexDirty = true;
             if (showNotice) {
-                new Notice(this.t("notice.index.vectorRebuildFailed"));
+                new Notice(this.getVectorIndexFailureNotice(error));
             }
         } finally {
             this.finishKnowledgeIndexOperation(operation);
@@ -988,6 +988,23 @@ export default class VaultCoach extends Plugin {
 
         this.hasShownOllamaEmbeddingCpuFallbackNotice = true;
         new Notice(this.t("notice.index.ollamaEmbeddingCpuFallback"), 14000);
+    }
+
+    private getVectorIndexFailureNotice(error: unknown): string {
+        return this.isLikelyLocalOllamaConnectionFailure(error)
+            ? this.t("notice.index.ollamaConnectionFailed")
+            : this.t("notice.index.vectorFailedWarning");
+    }
+
+    private isLikelyLocalOllamaConnectionFailure(error: unknown): boolean {
+        const message: string = this.getErrorMessage(error);
+        const isOllamaEndpoint: boolean = /\/api\/(?:embed|embeddings|chat)\b/i.test(message);
+        const isConnectionRefused: boolean = /ERR_CONNECTION_REFUSED|ECONNREFUSED|connection refused|failed to fetch|fetch failed/i.test(message);
+        return isOllamaEndpoint && isConnectionRefused;
+    }
+
+    private getErrorMessage(error: unknown): string {
+        return error instanceof Error ? error.message : String(error);
     }
 
     private async persistRuntimeState(): Promise<void> {

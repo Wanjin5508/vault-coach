@@ -1057,7 +1057,7 @@ export class LocalModelClient {
     private createRequestError(targetUrl: string, error: unknown): ModelRequestError {
         const status: number | null = this.extractStatusCode(error);
         const originalMessage: string = this.getErrorMessage(error);
-        const hint: string = this.buildRequestFailureHint(targetUrl, status);
+        const hint: string = this.buildRequestFailureHint(targetUrl, status, originalMessage);
         const messageParts: string[] = [
             `模型请求失败：POST ${targetUrl}`,
             status === null ? "" : `HTTP ${status}`,
@@ -1068,7 +1068,11 @@ export class LocalModelClient {
         return new ModelRequestError(targetUrl, status, messageParts.join("。"));
     }
 
-    private buildRequestFailureHint(targetUrl: string, status: number | null): string {
+    private buildRequestFailureHint(targetUrl: string, status: number | null, errorMessage = ""): string {
+        if (this.isConnectionRefusedMessage(errorMessage) && this.isOllamaApiUrl(targetUrl)) {
+            return "无法连接本地 Ollama 服务。请确认 Ollama 已启动，并确认本地推理服务地址只填写根地址，例如 http://127.0.0.1:11434。Windows 用户可以先打开 Ollama 应用，或在终端运行 ollama serve。";
+        }
+
         if (status !== 404) {
             return "";
         }
@@ -1090,6 +1094,14 @@ export class LocalModelClient {
         }
 
         return "请确认对应模型服务地址和接口路径是否正确。";
+    }
+
+    private isOllamaApiUrl(targetUrl: string): boolean {
+        return /\/api\/(?:chat|embed|embeddings)\b/i.test(targetUrl);
+    }
+
+    private isConnectionRefusedMessage(message: string): boolean {
+        return /ERR_CONNECTION_REFUSED|ECONNREFUSED|connection refused|failed to fetch|fetch failed/i.test(message);
     }
 
     private isNotFoundError(error: unknown): boolean {

@@ -7,7 +7,7 @@ Vault Coach turns your Obsidian vault into a local-first study and research assi
 It is designed for people who want a practical RAG workflow inside Obsidian without sending vault content to a remote service by default. Local [Ollama](https://ollama.com) is the default model provider, and OpenAI-compatible services can be configured explicitly when you need them.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.3.2-1E90FF)
+![Version](https://img.shields.io/badge/version-1.3.3-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local--first-RAG-10b981)
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
