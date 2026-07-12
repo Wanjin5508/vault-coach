@@ -12,7 +12,7 @@ It is designed for people who want a practical RAG workflow inside Obsidian with
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 
-<!-- Image suggestion: Add a wide hero screenshot here, for example `assets/screenshots/vault-coach-qa.png`. Show the Vault Coach sidebar answering a real question with cited Markdown/PDF sources expanded. -->
+![alt text](assets/screenshots/vault-coach-qa.png.png)
 
 ## Why Vault Coach
 
@@ -39,7 +39,7 @@ Supported retrieval modes:
 - Hybrid keyword/vector search
 - Optional rerank endpoint with local heuristic fallback
 
-<!-- Image suggestion: Add `assets/screenshots/retrieval-sources.png`. Show an answer with collapsed and expanded source cards, including a Markdown note source and a PDF page source. -->
+![alt text](assets/screenshots/retrieval-sources.png.png)
 
 ### Text-Based PDF Support
 
@@ -60,7 +60,8 @@ Current limits:
 - Complex tables, diagrams, and heavily visual equations are not fully reconstructed.
 - Multi-column reading order is improved with heuristics, but not guaranteed for every academic layout.
 
-<!-- Image suggestion: Add `assets/screenshots/pdf-source-page.png`. Show a PDF-derived answer source that links to a specific PDF page, preferably next to the opened PDF page in Obsidian. -->
+![alt text](assets/screenshots/pdf-source-page.png.png)
+
 
 ### Exam Mode
 
@@ -79,7 +80,10 @@ It supports:
 
 Use it for interview preparation, course review, paper reading, project onboarding, and self-checking technical notes.
 
-<!-- Image suggestion: Add `assets/screenshots/exam-mode-scope.png`. Show Exam mode with scope selection, smart filtering results, and a generated test preview. -->
+![alt text](assets/screenshots/exam-mode-scope.png)
+
+Users can also manually manage the scope of test questions:
+![alt text](assets/screenshots/exam-mode-scope-m.png)
 
 ### Long-Term Memory
 
