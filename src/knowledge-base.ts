@@ -22,6 +22,7 @@ import type {
 } from "./types";
 
 const DOCUMENT_CHUNKER_VERSION = "document-chunker-v2";
+const DOCUMENT_PARSER_LAYER_VERSION = "document-parser-v2";
 
 /**
  * VaultKnowledgeBase 负责第一阶段与第二阶段共享的“知识库底座”：
@@ -235,7 +236,7 @@ export class VaultKnowledgeBase {
             maxPdfPageCount: settings.maxPdfPageCount,
             chunkSize: settings.chunkSize,
             chunkOverlap: settings.chunkOverlap,
-            parserLayer: "document-parser-v1",
+            parserLayer: DOCUMENT_PARSER_LAYER_VERSION,
             chunkerVersion: DOCUMENT_CHUNKER_VERSION,
         });
     }

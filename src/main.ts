@@ -911,8 +911,30 @@ export default class VaultCoach extends Plugin {
         this.messages = state.messages ?? [];
         this.memories = state.memories ?? [];
         this.lastAutoIndexAt = state.lastAutoIndexAt ?? null;
+        const restoredGreeting: boolean = this.refreshRestoredDefaultGreeting();
         this.trimMessages();
         this.trimMemories();
+        if (restoredGreeting) {
+            await this.persistRuntimeState();
+        }
+    }
+
+    private refreshRestoredDefaultGreeting(): boolean {
+        const firstMessage: ChatMessage | undefined = this.messages[0];
+        if (!firstMessage || firstMessage.role !== "assistant" || !isBuiltInDefaultGreeting(firstMessage.text)) {
+            return false;
+        }
+
+        const effectiveGreeting: string = this.getEffectiveDefaultGreeting();
+        if (firstMessage.text === effectiveGreeting) {
+            return false;
+        }
+
+        this.messages[0] = {
+            ...firstMessage,
+            text: effectiveGreeting,
+        };
+        return true;
     }
 
     private async restoreKnowledgeBaseSnapshot(): Promise<void> {

@@ -14,8 +14,11 @@ const prod = (process.argv[2] === "production");
 
 const pdfjsGlobalName = "global" + "This";
 const pdfjsTopLevelAwaitSnippet = `__webpack_exports__ = ${pdfjsGlobalName}.pdfjsLib = await (${pdfjsGlobalName}.pdfjsLibPromise = __webpack_exports__);`;
-
-const pdfjsTopLevelAwaitReplacement = `__webpack_exports__ = ${pdfjsGlobalName}.pdfjsLib = __webpack_exports__;`;
+const pdfjsTopLevelAwaitReplacement = "var __vaultCoachPdfJsLibPromise = Promise.resolve(__webpack_exports__);";
+const pdfjsSourceMapComment = "\n//# sourceMappingURL=pdf.mjs.map";
+const pdfjsDefaultPromiseExport = "\nexport { __vaultCoachPdfJsLibPromise as default };";
+const pdfjsWorkerGlobalAssignmentSnippet = `var __webpack_exports__ = ${pdfjsGlobalName}.pdfjsWorker = {};`;
+const pdfjsWorkerGlobalAssignmentReplacement = "var __webpack_exports__ = {};";
 
 const patchPdfjsForObsidianPluginPlugin = {
 	name: "patch-pdfjs-for-obsidian-plugin",
@@ -25,9 +28,26 @@ const patchPdfjsForObsidianPluginPlugin = {
 			if (!source.includes(pdfjsTopLevelAwaitSnippet)) {
 				throw new Error("Unable to patch pdf.js top-level await.");
 			}
+			if (!source.includes(pdfjsSourceMapComment)) {
+				throw new Error("Unable to patch pdf.js default promise export.");
+			}
 
 			return {
-				contents: source.replace(pdfjsTopLevelAwaitSnippet, pdfjsTopLevelAwaitReplacement),
+				contents: source
+					.replace(pdfjsTopLevelAwaitSnippet, pdfjsTopLevelAwaitReplacement)
+					.replace(pdfjsSourceMapComment, `${pdfjsDefaultPromiseExport}${pdfjsSourceMapComment}`),
+				loader: "js",
+			};
+		});
+
+		build.onLoad({ filter: /[\\/]pdfjs-dist[\\/]build[\\/]pdf\.worker\.mjs$/ }, async (args) => {
+			const source = await readFile(args.path, "utf8");
+			if (!source.includes(pdfjsWorkerGlobalAssignmentSnippet)) {
+				throw new Error("Unable to patch pdf.js worker global assignment.");
+			}
+
+			return {
+				contents: source.replace(pdfjsWorkerGlobalAssignmentSnippet, pdfjsWorkerGlobalAssignmentReplacement),
 				loader: "js",
 			};
 		});

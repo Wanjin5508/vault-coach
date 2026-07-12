@@ -2138,8 +2138,7 @@ export class VaultCoachView extends ItemView {
             await this.plugin.rebuildKnowledgeBase(true);
         } finally {
             this.isBusy = false;
-            this.sendButtonEl?.removeAttribute("disabled");
-            this.retrievalModeSelectEl?.removeAttribute("disabled");
+            this.refresh();
             if (this.activeInteractionMode === "qa") {
                 this.focusInput();
             }

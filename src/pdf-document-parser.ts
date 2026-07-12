@@ -1,6 +1,4 @@
 import { App, TFile } from "obsidian";
-import * as pdfjsLib from "pdfjs-dist";
-import * as pdfjsWorker from "pdfjs-dist/build/pdf.worker.mjs";
 import { createDocumentId, hashArrayBuffer, type DocumentParser } from "./document-parser";
 import type {
     DocumentParseContext,
@@ -9,6 +7,19 @@ import type {
     PdfExtractionReport,
     VaultCoachSettings,
 } from "./types";
+
+type PdfJsLib = typeof import("pdfjs-dist");
+type PdfJsWorker = typeof import("pdfjs-dist/build/pdf.worker.mjs");
+type PdfJsWorkerInstance = InstanceType<PdfJsLib["PDFWorker"]>;
+type PdfJsLibModule = PdfJsLib | Promise<PdfJsLib> | {
+    default?: PdfJsLib | Promise<PdfJsLib>;
+    pdfjsLibPromise?: Promise<PdfJsLib>;
+};
+type PdfJsWorkerModule = PdfJsWorker | { default?: PdfJsWorker };
+type PdfWorkerFactory = {
+    new(params: { port?: null }): PdfJsWorkerInstance;
+    fromPort?: (params: { port: Worker }) => PdfJsWorkerInstance;
+};
 
 type PdfTextItem = {
     str: string;
@@ -53,16 +64,63 @@ interface PageExtraction {
     likelyMultiColumn: boolean;
 }
 
-const PDF_PARSER_VERSION = "pdf-native-text-parser-v1";
+const PDF_PARSER_VERSION = "pdf-native-text-parser-v2";
 const LOW_TEXT_PAGE_CHARACTER_THRESHOLD = 40;
 
-const windowWithPdfJsWorker = window as Window & {
-    pdfjsWorker?: unknown;
-};
-
-if (!windowWithPdfJsWorker.pdfjsWorker) {
-    windowWithPdfJsWorker.pdfjsWorker = pdfjsWorker;
+interface PromiseCapability<T> {
+    promise: Promise<T>;
+    resolve: (value: T | PromiseLike<T>) => void;
+    reject: (reason?: unknown) => void;
 }
+
+interface PromiseConstructorWithResolvers extends PromiseConstructor {
+    withResolvers?: <T>() => PromiseCapability<T>;
+}
+
+interface LoadedPdfJs {
+    pdfjsLib: PdfJsLib;
+    pdfjsWorker: PdfJsWorker;
+}
+
+type PdfJsMessageListener = (event: MessageEvent<unknown>) => void;
+
+class PdfJsLoopbackPort {
+    onmessage: PdfJsMessageListener | null = null;
+    private readonly listeners: Set<PdfJsMessageListener> = new Set<PdfJsMessageListener>();
+    private deferred: Promise<void> = Promise.resolve();
+
+    postMessage(message: unknown, transfer?: Transferable[]): void {
+        const event = {
+            data: clonePdfJsMessage(message, transfer),
+        } as MessageEvent<unknown>;
+
+        this.deferred = this.deferred.then(() => {
+            this.onmessage?.(event);
+            for (const listener of this.listeners) {
+                listener.call(this, event);
+            }
+        });
+    }
+
+    addEventListener(name: "message", listener: PdfJsMessageListener): void {
+        if (name === "message") {
+            this.listeners.add(listener);
+        }
+    }
+
+    removeEventListener(name: "message", listener: PdfJsMessageListener): void {
+        if (name === "message") {
+            this.listeners.delete(listener);
+        }
+    }
+
+    terminate(): void {
+        this.listeners.clear();
+        this.onmessage = null;
+    }
+}
+
+let pdfJsLoadPromise: Promise<LoadedPdfJs> | null = null;
 
 export class PdfDocumentParser implements DocumentParser {
     private readonly app: App;
@@ -88,6 +146,8 @@ export class PdfDocumentParser implements DocumentParser {
 
         const buffer: ArrayBuffer = await this.app.vault.readBinary(file);
         const contentHash: string = hashArrayBuffer(buffer);
+        const { pdfjsLib, pdfjsWorker }: LoadedPdfJs = await loadPdfJs();
+        const pdfWorker: PdfJsWorkerInstance = createPdfWorker(pdfjsLib, pdfjsWorker);
         const loadingTask = pdfjsLib.getDocument({
             data: new Uint8Array(buffer.slice(0)),
             disableFontFace: true,
@@ -95,7 +155,7 @@ export class PdfDocumentParser implements DocumentParser {
             useSystemFonts: true,
             useWorkerFetch: false,
             isEvalSupported: false,
-            verbosity: pdfjsLib.VerbosityLevel.ERRORS,
+            worker: pdfWorker,
         });
 
         try {
@@ -184,7 +244,11 @@ export class PdfDocumentParser implements DocumentParser {
                 },
             };
         } finally {
-            await loadingTask.destroy();
+            try {
+                await loadingTask.destroy();
+            } finally {
+                pdfWorker.destroy();
+            }
         }
     }
 
@@ -567,4 +631,159 @@ export class PdfDocumentParser implements DocumentParser {
 
         return ((finiteValues[middle - 1] ?? 1) + (finiteValues[middle] ?? 1)) / 2;
     }
+}
+
+function loadPdfJs(): Promise<LoadedPdfJs> {
+    ensurePromiseWithResolvers();
+
+    if (!pdfJsLoadPromise) {
+        pdfJsLoadPromise = Promise.all([
+            import("pdfjs-dist"),
+            import("pdfjs-dist/build/pdf.worker.mjs"),
+        ]).then(async ([pdfjsLibModule, pdfjsWorkerModule]: [PdfJsLibModule, PdfJsWorkerModule]) => {
+            const pdfjsLib: PdfJsLib = await normalizePdfJsLib(pdfjsLibModule);
+            const pdfjsWorker: PdfJsWorker = normalizePdfJsWorker(pdfjsWorkerModule);
+            clearPluginPdfWorkerGlobal(pdfjsWorker);
+            return {
+                pdfjsLib,
+                pdfjsWorker,
+            };
+        }).catch((error: unknown) => {
+            pdfJsLoadPromise = null;
+            throw error;
+        });
+    }
+
+    return pdfJsLoadPromise;
+}
+
+function createPdfWorker(pdfjsLib: PdfJsLib, pdfjsWorker: PdfJsWorker): PdfJsWorkerInstance {
+    const port: PdfJsLoopbackPort = new PdfJsLoopbackPort();
+    pdfjsWorker.WorkerMessageHandler.initializeFromPort(port);
+    const pdfWorkerFactory: PdfWorkerFactory = pdfjsLib.PDFWorker as PdfWorkerFactory;
+    try {
+        return new pdfWorkerFactory({
+            port: port as unknown as null,
+        });
+    } catch (error: unknown) {
+        if (typeof pdfWorkerFactory.fromPort === "function") {
+            return pdfWorkerFactory.fromPort({
+                port: port as unknown as Worker,
+            });
+        }
+
+        throw error;
+    }
+}
+
+async function normalizePdfJsLib(value: PdfJsLibModule): Promise<PdfJsLib> {
+    const resolvedValue: unknown = await Promise.resolve(value);
+    if (isPdfJsLib(resolvedValue)) {
+        return resolvedValue;
+    }
+
+    const defaultValue: unknown = isIndexable(resolvedValue) ? resolvedValue["default"] : undefined;
+    const resolvedDefaultValue: unknown = await Promise.resolve(defaultValue);
+    if (isPdfJsLib(resolvedDefaultValue)) {
+        return resolvedDefaultValue;
+    }
+
+    const promiseValue: unknown = isIndexable(resolvedValue) ? resolvedValue["pdfjsLibPromise"] : undefined;
+    const resolvedPromiseValue: unknown = await Promise.resolve(promiseValue);
+    if (isPdfJsLib(resolvedPromiseValue)) {
+        return resolvedPromiseValue;
+    }
+
+    throw new Error("Unable to load pdf.js API exports.");
+}
+
+function normalizePdfJsWorker(value: PdfJsWorkerModule): PdfJsWorker {
+    if (isPdfJsWorker(value)) {
+        return value;
+    }
+
+    const defaultValue: unknown = isIndexable(value) ? value["default"] : undefined;
+    if (isPdfJsWorker(defaultValue)) {
+        return defaultValue;
+    }
+
+    throw new Error("Unable to load pdf.js worker exports.");
+}
+
+function isPdfJsLib(value: unknown): value is PdfJsLib {
+    if (!isIndexable(value)) {
+        return false;
+    }
+
+    return typeof value["getDocument"] === "function"
+        && typeof value["PDFWorker"] === "function";
+}
+
+function isPdfJsWorker(value: unknown): value is PdfJsWorker {
+    if (!isIndexable(value)) {
+        return false;
+    }
+
+    const workerMessageHandler: unknown = value["WorkerMessageHandler"];
+    return isIndexable(workerMessageHandler)
+        && typeof workerMessageHandler["initializeFromPort"] === "function";
+}
+
+function clearPluginPdfWorkerGlobal(pdfjsWorker: PdfJsWorker): void {
+    const windowWithPdfJsWorker = window as Window & {
+        pdfjsWorker?: unknown;
+    };
+    if (
+        windowWithPdfJsWorker.pdfjsWorker === pdfjsWorker
+        || isPdfJsWorkerVersion(windowWithPdfJsWorker.pdfjsWorker, "4.2.67")
+    ) {
+        delete windowWithPdfJsWorker.pdfjsWorker;
+    }
+}
+
+function isPdfJsWorkerVersion(value: unknown, version: string): boolean {
+    if (!isIndexable(value)) {
+        return false;
+    }
+
+    const workerMessageHandler: unknown = value["WorkerMessageHandler"];
+    if (!isIndexable(workerMessageHandler)) {
+        return false;
+    }
+
+    const createDocumentHandler: unknown = workerMessageHandler["createDocumentHandler"];
+    return typeof createDocumentHandler === "function"
+        && Function.prototype.toString.call(createDocumentHandler).includes(`"${version}"`);
+}
+
+function isIndexable(value: unknown): value is Record<string, unknown> {
+    return value !== null && (typeof value === "object" || typeof value === "function");
+}
+
+function clonePdfJsMessage(message: unknown, transfer?: Transferable[]): unknown {
+    return typeof structuredClone === "function"
+        ? structuredClone(message, transfer ? { transfer } : undefined)
+        : message;
+}
+
+function ensurePromiseWithResolvers(): void {
+    const promiseConstructor = Promise as PromiseConstructorWithResolvers;
+    if (typeof promiseConstructor.withResolvers === "function") {
+        return;
+    }
+
+    promiseConstructor.withResolvers = <T>(): PromiseCapability<T> => {
+        let resolveCapability: (value: T | PromiseLike<T>) => void = () => undefined;
+        let rejectCapability: (reason?: unknown) => void = () => undefined;
+        const promise: Promise<T> = new Promise<T>((resolve, reject) => {
+            resolveCapability = resolve;
+            rejectCapability = reject;
+        });
+
+        return {
+            promise,
+            resolve: resolveCapability,
+            reject: rejectCapability,
+        };
+    };
 }
