@@ -1,4 +1,9 @@
-// 默认设置值以及设置页的 UI以及持久化入口
+/**
+ * 设置模块。
+ *
+ * 定义默认设置值和 Obsidian 设置页 UI。设置页只负责读取/写入配置与触发必要的索引失效，
+ * 不直接执行检索、模型调用或考试生成逻辑。
+ */
 
 import { App, DropdownComponent, PluginSettingTab, SecretComponent, Setting, normalizePath } from "obsidian";
 import {
@@ -34,7 +39,7 @@ import {
     DEFAULT_VECTOR_TOP_K,
 } from "./constants"
 import { getDefaultGreeting, translate, type TranslationKey } from "./i18n";
-import type VaultCoach from "./main"; // 默认导出，不使用花括号
+import type VaultCoach from "./main";
 import type { VaultCoachSettings } from "./types";
 
 /**
@@ -91,10 +96,14 @@ export function createDefaultSettings(): VaultCoachSettings {
     };
 }
 
+/**
+ * 当前进程内使用的默认设置快照。
+ */
 export const DEFAULT_SETTINGS: VaultCoachSettings = createDefaultSettings();
 
-// 插件的设置页类
-// 设置 -> 社区插件 -> VaultCoach
+/**
+ * Obsidian 设置页：Settings -> Community plugins -> VaultCoach。
+ */
 export class VaultCoachSettingTab extends PluginSettingTab {
     plugin: VaultCoach;
 
@@ -103,21 +112,27 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         this.plugin = plugin;
     }
 
+    /**
+     * 获取本地化文案。
+     */
     private t(key: TranslationKey, replacements?: Record<string, string | number>): string {
         return translate(key, replacements);
     }
 
-    // display 用于渲染设置页界面，每次打开设置页的时候，Obsidian 都会调用这个方法
+    /**
+     * Obsidian 每次打开设置页时调用，用于渲染完整设置界面。
+     */
     display(): void {
         this.renderSettings();
     }
 
+    /**
+     * 渲染设置页根结构和所有分区。
+     */
     private renderSettings(): void {
         const { containerEl } = this;
         containerEl.empty();
 
-        // 设置页标题
-        // containerEl.createEl("h2", {text: "VaultCoach 设置"});
         new Setting(containerEl)
             .setHeading()
             .setName(this.t("settings.title"));
@@ -168,7 +183,6 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName(this.t("settings.openOnStartup.name"))
-            // .setDesc("开启后，obsidian 布局准备完成时会自动打开 vaultcoach。")
             .addToggle((toggle) =>
                 toggle
                     .setValue(this.plugin.settings.openInRightSidebarOnStartup)
@@ -220,7 +234,6 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName(this.t("settings.scope.name"))
-            // .setDesc("wholeVault 表示索引整个 vault；specificFolder 表示只索引某个指定目录。")
             .addDropdown((dropdown) =>
                 dropdown
                     .addOption("wholeVault", this.t("settings.scope.wholeVault"))
@@ -334,7 +347,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     }),
             );
 
-        // 新增：自动增量重建相关设置。
+        // 自动增量同步相关设置。
         new Setting(containerEl)
             .setName(this.t("settings.autoSync.name"))
             .setDesc(this.t("settings.autoSync.desc"))
@@ -388,6 +401,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 
     }
 
+    /**
+     * 考试模式设置。
+     */
     private renderExamSection(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setHeading()
@@ -422,7 +438,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
-    // 新增：长期记忆与对话持久化设置分区。
+    /**
+     * 长期记忆与对话持久化设置。
+     */
     private renderMemorySection(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setHeading()
@@ -618,6 +636,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
+    /**
+     * 模型服务设置。
+     */
     private renderModelSection(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setHeading()
@@ -680,6 +701,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         this.renderRerankSettings(containerEl);
     }
 
+    /**
+     * 本地聊天模型设置。
+     */
     private renderLocalChatSettings(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setName(this.t("settings.localChatModel.name"))
@@ -695,6 +719,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
+    /**
+     * 云端聊天模型设置。
+     */
     private renderCloudChatSettings(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setName(this.t("settings.cloudChatBaseUrl.name"))
@@ -723,6 +750,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
+    /**
+     * 本地 embedding 模型设置。
+     */
     private renderLocalEmbeddingSettings(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setName(this.t("settings.localEmbeddingModel.name"))
@@ -739,6 +769,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
+    /**
+     * 云端 embedding 模型设置。
+     */
     private renderCloudEmbeddingSettings(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setName(this.t("settings.cloudEmbeddingBaseUrl.name"))
@@ -769,6 +802,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
+    /**
+     * 本地推理服务地址设置。
+     */
     private renderLocalServiceAddressSetting(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setName(this.t("settings.localServiceBaseUrl.name"))
@@ -787,6 +823,11 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
+    /**
+     * 云端 API key 设置。
+     *
+     * 使用 Obsidian SecretComponent，避免把密钥明文写入普通设置 JSON。
+     */
     private renderCloudApiKeySetting(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setName(this.t("settings.cloudApiKey.name"))
@@ -801,6 +842,9 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
+    /**
+     * 独立 rerank 服务设置。
+     */
     private renderRerankSettings(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setName(this.t("settings.rerankBaseUrl.name"))
@@ -829,11 +873,17 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             );
     }
 
+    /**
+     * 当前配置是否使用任意云端模型服务。
+     */
     private usesCloudModel(): boolean {
         return this.plugin.settings.modelProvider === "openai-compatible"
             || this.plugin.settings.embeddingProvider === "openai-compatible";
     }
 
+    /**
+     * 当前配置是否使用任意本地模型服务。
+     */
     private usesLocalModel(): boolean {
         return this.plugin.settings.modelProvider === "ollama"
             || this.plugin.settings.embeddingProvider === "ollama";

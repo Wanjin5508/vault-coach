@@ -8,6 +8,13 @@ import type {
     VaultCoachSettings,
 } from "./types";
 
+/**
+ * PDF 文档解析模块。
+ *
+ * 通过 pdf.js 提取文本层，恢复阅读顺序，过滤重复页眉页脚，并输出统一 ParsedDocument。
+ * 当前仅支持文本型 PDF；扫描件会通过质量报告标记为低覆盖率，暂不做 OCR。
+ */
+
 type PdfJsLib = typeof import("pdfjs-dist");
 type PdfJsWorker = typeof import("pdfjs-dist/build/pdf.worker.mjs");
 type PdfJsWorkerInstance = InstanceType<PdfJsLib["PDFWorker"]>;
@@ -84,11 +91,20 @@ interface LoadedPdfJs {
 
 type PdfJsMessageListener = (event: MessageEvent<unknown>) => void;
 
+/**
+ * pdf.js worker 的同线程回环端口。
+ *
+ * Obsidian 插件环境下直接启动 worker 可能受打包和 CSP 影响；这里用 loopback port
+ * 让 pdf.js 的 worker message handler 在同线程内工作，保持 API 行为一致。
+ */
 class PdfJsLoopbackPort {
     onmessage: PdfJsMessageListener | null = null;
     private readonly listeners: Set<PdfJsMessageListener> = new Set<PdfJsMessageListener>();
     private deferred: Promise<void> = Promise.resolve();
 
+    /**
+     * 模拟 Worker.postMessage，并按顺序异步派发 message 事件。
+     */
     postMessage(message: unknown, transfer?: Transferable[]): void {
         const event = {
             data: clonePdfJsMessage(message, transfer),
@@ -102,18 +118,27 @@ class PdfJsLoopbackPort {
         });
     }
 
+    /**
+     * 注册 pdf.js 需要的 message 事件监听器。
+     */
     addEventListener(name: "message", listener: PdfJsMessageListener): void {
         if (name === "message") {
             this.listeners.add(listener);
         }
     }
 
+    /**
+     * 移除 message 事件监听器。
+     */
     removeEventListener(name: "message", listener: PdfJsMessageListener): void {
         if (name === "message") {
             this.listeners.delete(listener);
         }
     }
 
+    /**
+     * 清理所有监听器。
+     */
     terminate(): void {
         this.listeners.clear();
         this.onmessage = null;
@@ -122,6 +147,9 @@ class PdfJsLoopbackPort {
 
 let pdfJsLoadPromise: Promise<LoadedPdfJs> | null = null;
 
+/**
+ * PDF 文件解析器。
+ */
 export class PdfDocumentParser implements DocumentParser {
     private readonly app: App;
     private readonly getSettings: () => VaultCoachSettings;
@@ -131,10 +159,18 @@ export class PdfDocumentParser implements DocumentParser {
         this.getSettings = getSettings;
     }
 
+    /**
+     * 仅处理 `.pdf` 文件。
+     */
     supports(file: TFile): boolean {
         return file.extension.toLowerCase() === "pdf";
     }
 
+    /**
+     * 读取 PDF 二进制内容并提取结构化文本块。
+     *
+     * 解析过程会遵守文件大小、页数上限和 AbortSignal，避免长时间阻塞插件。
+     */
     async parse(file: TFile, context: DocumentParseContext): Promise<ParsedDocument> {
         context.signal?.throwIfAborted();
 
@@ -252,6 +288,9 @@ export class PdfDocumentParser implements DocumentParser {
         }
     }
 
+    /**
+     * 判断 pdf.js 返回项是否是可用文本项。
+     */
     private isPdfTextItem(value: unknown): value is PdfTextItem {
         if (!value || typeof value !== "object") {
             return false;
@@ -264,6 +303,9 @@ export class PdfDocumentParser implements DocumentParser {
             && typeof record.height === "number";
     }
 
+    /**
+     * 将 pdf.js 文本项转换为带页面和坐标信息的内部结构。
+     */
     private toExtractedTextItem(item: PdfTextItem, pageNumber: number): ExtractedTextItem {
         const x: number = this.readTransformNumber(item.transform, 4);
         const y: number = this.readTransformNumber(item.transform, 5);
@@ -283,11 +325,17 @@ export class PdfDocumentParser implements DocumentParser {
         };
     }
 
+    /**
+     * 从 PDF transform 数组中安全读取数值。
+     */
     private readTransformNumber(transform: unknown[], index: number): number {
         const value: unknown = transform[index];
         return typeof value === "number" && Number.isFinite(value) ? value : 0;
     }
 
+    /**
+     * 按坐标把文本项聚合成行。
+     */
     private buildLines(items: ExtractedTextItem[]): TextLine[] {
         const sortedItems: ExtractedTextItem[] = [...items].sort((left: ExtractedTextItem, right: ExtractedTextItem) => {
             const yDelta: number = right.y - left.y;
@@ -332,6 +380,9 @@ export class PdfDocumentParser implements DocumentParser {
         }).filter((line: TextLine) => line.text.length > 0);
     }
 
+    /**
+     * 拼接同一行内的文本项，并根据横向间距补空格。
+     */
     private joinLineItems(items: ExtractedTextItem[]): string {
         let text = "";
         let previousItem: ExtractedTextItem | null = null;
@@ -351,6 +402,9 @@ export class PdfDocumentParser implements DocumentParser {
         return text.replace(/\s+/g, " ").trim();
     }
 
+    /**
+     * 检测跨页面重复出现的页眉/页脚文本。
+     */
     private detectRepeatedHeaderFooterLines(linesByPage: TextLine[][]): Set<string> {
         const counts: Map<string, number> = new Map<string, number>();
         for (const lines of linesByPage) {
@@ -379,6 +433,11 @@ export class PdfDocumentParser implements DocumentParser {
         );
     }
 
+    /**
+     * 恢复页面阅读顺序。
+     *
+     * 单栏页面按从上到下、从左到右排序；疑似双栏页面先输出跨栏标题，再输出左栏和右栏。
+     */
     private restoreReadingOrder(lines: TextLine[]): TextLine[] {
         if (!this.isLikelyMultiColumn(lines)) {
             return [...lines].sort((left: TextLine, right: TextLine) => {
@@ -416,6 +475,9 @@ export class PdfDocumentParser implements DocumentParser {
         ];
     }
 
+    /**
+     * 基于左右两侧文本分布估计页面是否为双栏。
+     */
     private isLikelyMultiColumn(lines: TextLine[]): boolean {
         if (lines.length < 12) {
             return false;
@@ -433,6 +495,9 @@ export class PdfDocumentParser implements DocumentParser {
             && medianWidth < (maxX - minX) * 0.72;
     }
 
+    /**
+     * 根据垂直间距、缩进和标题特征把文本行合并为段落。
+     */
     private buildParagraphs(lines: TextLine[]): TextParagraph[] {
         const paragraphs: TextParagraph[] = [];
         let currentLines: TextLine[] = [];
@@ -480,6 +545,9 @@ export class PdfDocumentParser implements DocumentParser {
         return paragraphs;
     }
 
+    /**
+     * 拼接段落内的多行文本，并处理英文断词连字符。
+     */
     private joinParagraphLines(lines: TextLine[]): string {
         let text = "";
         for (const line of lines) {
@@ -500,6 +568,9 @@ export class PdfDocumentParser implements DocumentParser {
         return text.replace(/\s+/g, " ").trim();
     }
 
+    /**
+     * 汇总 PDF 提取质量报告。
+     */
     private buildExtractionReport(totalPages: number, pages: PageExtraction[]): PdfExtractionReport {
         const nativeTextPages: number = pages.filter((page: PageExtraction) => page.characterCount >= LOW_TEXT_PAGE_CHARACTER_THRESHOLD).length;
         const lowTextPages: number = pages.filter((page: PageExtraction) => {
@@ -538,6 +609,9 @@ export class PdfDocumentParser implements DocumentParser {
         };
     }
 
+    /**
+     * 将页面段落转换为统一 ParsedDocumentBlock。
+     */
     private buildBlocks(file: TFile, pages: PageExtraction[], report: PdfExtractionReport): ParsedDocumentBlock[] {
         const blocks: ParsedDocumentBlock[] = [];
         let currentHeadingPath: string[] = [];
@@ -587,6 +661,9 @@ export class PdfDocumentParser implements DocumentParser {
         return blocks;
     }
 
+    /**
+     * 通过字号、长度和编号模式判断段落是否像标题。
+     */
     private looksLikeHeading(paragraph: TextParagraph, medianFontSize: number): boolean {
         const text: string = paragraph.text.trim();
         if (text.length === 0 || text.length > 160) {
@@ -602,6 +679,9 @@ export class PdfDocumentParser implements DocumentParser {
         return numberedHeading || (paragraph.fontSize >= Math.max(1, medianFontSize) * 1.18 && !hasSentenceEnding);
     }
 
+    /**
+     * 判断某一行是否像独立标题，用于段落切分。
+     */
     private looksLikeStandaloneHeading(line: TextLine): boolean {
         const text: string = line.text.trim();
         return text.length > 0
@@ -610,14 +690,23 @@ export class PdfDocumentParser implements DocumentParser {
             && line.width < 420;
     }
 
+    /**
+     * 过滤只有页码的段落。
+     */
     private isPageNumberOnly(text: string): boolean {
         return /^\s*(?:page\s*)?\d+\s*$/i.test(text);
     }
 
+    /**
+     * 归一化结构性行文本，用于跨页页眉页脚去重。
+     */
     private normalizeStructuralLine(text: string): string {
         return text.toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
     }
 
+    /**
+     * 计算数值数组中位数。
+     */
     private median(values: number[]): number {
         const finiteValues: number[] = values.filter((value: number) => Number.isFinite(value)).sort((left: number, right: number) => left - right);
         if (finiteValues.length === 0) {
@@ -633,6 +722,9 @@ export class PdfDocumentParser implements DocumentParser {
     }
 }
 
+/**
+ * 懒加载 pdf.js 主模块和 worker 模块。
+ */
 function loadPdfJs(): Promise<LoadedPdfJs> {
     ensurePromiseWithResolvers();
 
@@ -657,6 +749,9 @@ function loadPdfJs(): Promise<LoadedPdfJs> {
     return pdfJsLoadPromise;
 }
 
+/**
+ * 基于同线程 loopback port 创建 pdf.js worker 实例。
+ */
 function createPdfWorker(pdfjsLib: PdfJsLib, pdfjsWorker: PdfJsWorker): PdfJsWorkerInstance {
     const port: PdfJsLoopbackPort = new PdfJsLoopbackPort();
     pdfjsWorker.WorkerMessageHandler.initializeFromPort(port);
@@ -676,6 +771,9 @@ function createPdfWorker(pdfjsLib: PdfJsLib, pdfjsWorker: PdfJsWorker): PdfJsWor
     }
 }
 
+/**
+ * 兼容不同打包形态下的 pdf.js 主模块导出。
+ */
 async function normalizePdfJsLib(value: PdfJsLibModule): Promise<PdfJsLib> {
     const resolvedValue: unknown = await Promise.resolve(value);
     if (isPdfJsLib(resolvedValue)) {
@@ -697,6 +795,9 @@ async function normalizePdfJsLib(value: PdfJsLibModule): Promise<PdfJsLib> {
     throw new Error("Unable to load pdf.js API exports.");
 }
 
+/**
+ * 兼容不同打包形态下的 pdf.js worker 导出。
+ */
 function normalizePdfJsWorker(value: PdfJsWorkerModule): PdfJsWorker {
     if (isPdfJsWorker(value)) {
         return value;
@@ -710,6 +811,9 @@ function normalizePdfJsWorker(value: PdfJsWorkerModule): PdfJsWorker {
     throw new Error("Unable to load pdf.js worker exports.");
 }
 
+/**
+ * 判断对象是否包含 pdf.js 主模块所需 API。
+ */
 function isPdfJsLib(value: unknown): value is PdfJsLib {
     if (!isIndexable(value)) {
         return false;
@@ -719,6 +823,9 @@ function isPdfJsLib(value: unknown): value is PdfJsLib {
         && typeof value["PDFWorker"] === "function";
 }
 
+/**
+ * 判断对象是否包含 pdf.js worker message handler。
+ */
 function isPdfJsWorker(value: unknown): value is PdfJsWorker {
     if (!isIndexable(value)) {
         return false;
@@ -729,6 +836,11 @@ function isPdfJsWorker(value: unknown): value is PdfJsWorker {
         && typeof workerMessageHandler["initializeFromPort"] === "function";
 }
 
+/**
+ * 清理 pdf.js worker 在 window 上留下的全局引用。
+ *
+ * 这样可以避免插件内置 worker 与 Obsidian/其他插件加载的 pdf.js 版本互相污染。
+ */
 function clearPluginPdfWorkerGlobal(pdfjsWorker: PdfJsWorker): void {
     const windowWithPdfJsWorker = window as Window & {
         pdfjsWorker?: unknown;
@@ -741,6 +853,9 @@ function clearPluginPdfWorkerGlobal(pdfjsWorker: PdfJsWorker): void {
     }
 }
 
+/**
+ * 判断 window 上的 worker 是否为指定 pdf.js 版本。
+ */
 function isPdfJsWorkerVersion(value: unknown, version: string): boolean {
     if (!isIndexable(value)) {
         return false;
@@ -756,16 +871,27 @@ function isPdfJsWorkerVersion(value: unknown, version: string): boolean {
         && Function.prototype.toString.call(createDocumentHandler).includes(`"${version}"`);
 }
 
+/**
+ * 判断 unknown 值是否可按对象属性访问。
+ */
 function isIndexable(value: unknown): value is Record<string, unknown> {
     return value !== null && (typeof value === "object" || typeof value === "function");
 }
 
+/**
+ * 克隆 pdf.js worker 消息。
+ */
 function clonePdfJsMessage(message: unknown, transfer?: Transferable[]): unknown {
     return typeof structuredClone === "function"
         ? structuredClone(message, transfer ? { transfer } : undefined)
         : message;
 }
 
+/**
+ * 为缺少 Promise.withResolvers 的运行环境补 polyfill。
+ *
+ * pdf.js 4.x 在部分路径中依赖该 API，而 Obsidian 内嵌运行时不一定提供。
+ */
 function ensurePromiseWithResolvers(): void {
     const promiseConstructor = Promise as PromiseConstructorWithResolvers;
     if (typeof promiseConstructor.withResolvers === "function") {

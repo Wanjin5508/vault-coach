@@ -1,15 +1,20 @@
-// 用于存放项目中的常量，避免字符串硬编码
+/**
+ * 全局常量模块。
+ *
+ * 集中维护插件视图标识、默认配置值和本地持久化路径，避免业务模块散落硬编码。
+ * 这些值会被设置页、主插件生命周期、索引持久化和考试模式共同引用。
+ */
 
 
-// 自定义视图的唯一类型 ID，这个值不能和已有的视图类型 ID 重复
+// 自定义视图的唯一类型 ID；Obsidian 通过它创建和恢复右侧边栏视图。
 export const VIEW_TYPE_VAULT_COACH = "value-coach-view";
 
 
-// 显示给用户看的视图名称
+// 显示给用户看的视图名称，通常出现在标签页标题和视图列表中。
 export const VIEW_NAME_VAULT_COACH = "ValueCoach";
 
 // ---------------------------
-// 第一阶段沿用的默认值
+// 文本索引和关键词检索默认值
 // ---------------------------
 export const DEFAULT_CHUNK_SIZE = 600;
 export const DEFAULT_CHUNK_OVERLAP = 120;
@@ -20,10 +25,7 @@ export const DEFAULT_ENABLE_PDF_INDEXING = false;
 export const DEFAULT_MAX_PDF_FILE_SIZE_MB = 50;
 export const DEFAULT_MAX_PDF_PAGE_COUNT = 300;
 
-// ---------------------------
-// 第二阶段新增的默认值
-// ---------------------------
-// 向量召回时默认取多少个候选。
+// 向量召回时默认保留的候选数。
 export const DEFAULT_VECTOR_TOP_K = 10;
 
 // 混合检索合并后的候选上限。
@@ -41,7 +43,7 @@ export const DEFAULT_GENERATION_TEMPERATURE = 0.2;
 // 与 Ollama 本地服务对接时常见的默认地址。
 export const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 
-// API 调用云端
+// 默认模型提供方。默认使用本地 Ollama，用户可在设置页切换为 OpenAI-compatible 服务。
 export const DEFAULT_MODEL_PROVIDER = "ollama";
 export const DEFAULT_EMBEDDING_PROVIDER = "ollama";
 export const DEFAULT_CLOUD_BASE_URL = "https://api.deepseek.com/"
@@ -70,7 +72,7 @@ export const DEFAULT_AUTO_INDEX_DEBOUNCE_MS = 15000;
 export const DEFAULT_AUTO_INDEX_MAX_WAIT_MS = 120000;
 export const DEFAULT_AUTO_INDEX_FILE_THRESHOLD = 8;
 
-// 本地持久化文件名
+// 插件根目录下的本地持久化文件名。
 export const RUNTIME_STATE_FILE_NAME = "runtime-state.json"
 export const INDEX_SNAPSHOT_FILE_NAME = "index-snapshot.json"
 export const EXAM_CONTENT_PROFILE_CACHE_FILE_NAME = "exam-content-profiles.json"

@@ -21,6 +21,12 @@ import { ExamProfileStore } from "./exam-profile-store";
 import { ExamResolvedScope, ExamScopeService } from "./exam-scope-service";
 import { throwIfAborted } from "./exam-utils";
 
+/**
+ * 考试模式编排引擎。
+ *
+ * 负责串联范围分析、内容画像、蓝图规划、题目生成和诊断信息收集。
+ * 具体模型调用、题目校验和缓存读写分别下放到对应服务，避免主插件入口承载考试业务细节。
+ */
 export class ExamEngine {
     private readonly knowledgeBase: VaultKnowledgeBase;
     private readonly getSettings: () => VaultCoachSettings;
@@ -51,6 +57,11 @@ export class ExamEngine {
         );
     }
 
+    /**
+     * 分析当前考试范围。
+     *
+     * 该方法先应用目录/文件规则，再按配置决定是否运行语义内容画像，最终返回可出题 chunk 和摘要统计。
+     */
     async analyzeScope(
         selection: ExamScopeSelection,
         options: ExamGenerationOptions = {},
@@ -133,6 +144,11 @@ export class ExamEngine {
         return result;
     }
 
+    /**
+     * 根据已选范围创建一次考试会话。
+     *
+     * 如果调用方已经传入分析结果，会复用该结果，避免重复运行智能筛选。
+     */
     async createExamSession(
         scopeLabel: string,
         selection: ExamScopeSelection,
@@ -270,10 +286,16 @@ export class ExamEngine {
         };
     }
 
+    /**
+     * 清空考试内容画像缓存。
+     */
     async clearProfileCache(): Promise<void> {
         await this.profileStore.clear();
     }
 
+    /**
+     * 判断本次生成是否启用语义筛选。
+     */
     private shouldUseSemanticFiltering(options: ExamGenerationOptions): boolean {
         if (options.skipSemanticFiltering) {
             return false;
@@ -282,6 +304,11 @@ export class ExamEngine {
         return this.getSettings().enableExamSmartFiltering;
     }
 
+    /**
+     * 构造仅基于手动范围的画像。
+     *
+     * 当用户关闭智能筛选或跳过语义分析时，候选文件默认全部 include。
+     */
     private buildManualOnlyProfiles(resolvedScope: ExamResolvedScope): ExamContentProfile[] {
         return resolvedScope.candidateFiles.map((fileOption) => {
             const chunks: IndexedChunk[] = this.knowledgeBase.getExamFileChunks(fileOption.filePath);
@@ -298,6 +325,9 @@ export class ExamEngine {
         });
     }
 
+    /**
+     * 从 chunk 标题中推断文件主题，用于手动画像和诊断展示。
+     */
     private inferTopics(fileName: string, chunks: IndexedChunk[]): string[] {
         const topics: string[] = [];
         for (const chunk of chunks) {
@@ -314,6 +344,9 @@ export class ExamEngine {
         return Array.from(new Set(topics)).slice(0, 8);
     }
 
+    /**
+     * 生成稳定的考试 ID。
+     */
     private createExamId(timestamp: number): string {
         return `exam_${new Date(timestamp).toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
     }

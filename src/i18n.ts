@@ -1,5 +1,15 @@
 import { getLanguage } from "obsidian";
 
+/**
+ * 国际化文案模块。
+ *
+ * 统一维护中英文 UI 文案、通知文案和默认欢迎语。业务代码应通过 translate
+ * 或 VaultCoach/VaultCoachView 内部的 t 方法取文案，避免直接硬编码用户可见文本。
+ */
+
+/**
+ * 当前支持的语言。
+ */
 export type SupportedLocale = "zh" | "en";
 
 const ZH_TRANSLATIONS = {
@@ -674,6 +684,9 @@ const LEGACY_DEFAULT_GREETINGS: string[] = [
     ].join("\n"),
 ];
 
+/**
+ * 检测 Obsidian 当前界面语言。
+ */
 export function detectObsidianLocale(): SupportedLocale {
     const obsidianLanguage: string | null = readObsidianLanguage();
     if (obsidianLanguage !== null) {
@@ -683,10 +696,18 @@ export function detectObsidianLocale(): SupportedLocale {
     return detectBrowserLocale();
 }
 
+/**
+ * 检测系统语言。
+ *
+ * 当前等同于 Obsidian 语言检测，保留独立函数便于后续扩展。
+ */
 export function detectSystemLocale(): SupportedLocale {
     return detectObsidianLocale();
 }
 
+/**
+ * 安全读取 Obsidian 语言设置。
+ */
 function readObsidianLanguage(): string | null {
     try {
         const language: string = getLanguage();
@@ -696,11 +717,17 @@ function readObsidianLanguage(): string | null {
     }
 }
 
+/**
+ * 在无法读取 Obsidian 语言时回退到浏览器语言。
+ */
 function detectBrowserLocale(): SupportedLocale {
     const language: string | null = getFirstBrowserLanguage();
     return language === null ? "en" : languageToSupportedLocale(language);
 }
 
+/**
+ * 获取浏览器首选语言。
+ */
 function getFirstBrowserLanguage(): string | null {
     if (typeof navigator === "undefined") {
         return null;
@@ -715,10 +742,16 @@ function getFirstBrowserLanguage(): string | null {
     return navigator.language.trim().length > 0 ? navigator.language : null;
 }
 
+/**
+ * 将任意语言标记映射为插件支持的语言。
+ */
 function languageToSupportedLocale(language: string): SupportedLocale {
     return isChineseLocale(language) ? "zh" : "en";
 }
 
+/**
+ * 根据 key 获取本地化文案，并替换 `{{name}}` 形式的占位符。
+ */
 export function translate(
     key: TranslationKey,
     replacements: Record<string, string | number> = {},
@@ -742,10 +775,18 @@ export function translate(
     return result;
 }
 
+/**
+ * 获取对应语言的默认欢迎语。
+ */
 export function getDefaultGreeting(locale: SupportedLocale = detectObsidianLocale()): string {
     return DEFAULT_GREETINGS[locale];
 }
 
+/**
+ * 判断用户保存的欢迎语是否仍是内置默认文案。
+ *
+ * 用于语言切换或版本升级后自动刷新默认欢迎语，同时不覆盖用户自定义内容。
+ */
 export function isBuiltInDefaultGreeting(value: string): boolean {
     const normalizedValue: string = normalizeGreeting(value);
     return normalizeGreeting(DEFAULT_GREETINGS.zh) === normalizedValue
@@ -753,15 +794,24 @@ export function isBuiltInDefaultGreeting(value: string): boolean {
         || LEGACY_DEFAULT_GREETINGS.some((greeting: string) => normalizeGreeting(greeting) === normalizedValue);
 }
 
+/**
+ * 判断语言标签是否为中文区域。
+ */
 function isChineseLocale(language: string): boolean {
     const normalizedLanguage: string = language.toLowerCase().replace("_", "-");
     return normalizedLanguage === "zh" || normalizedLanguage.startsWith("zh-");
 }
 
+/**
+ * 归一化欢迎语，便于比较不同版本中的内置文案。
+ */
 function normalizeGreeting(value: string): string {
     return value.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * 转义用户传入的占位符 key，安全拼接到正则表达式中。
+ */
 function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

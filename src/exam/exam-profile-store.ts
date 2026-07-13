@@ -9,6 +9,11 @@ import type {
 
 const EXAM_PROFILE_CACHE_VERSION = 1;
 
+/**
+ * 考试内容画像缓存存储。
+ *
+ * 缓存键包含文件路径、内容哈希、模型提供方、模型名和 prompt 版本，确保模型或提示词变化后不会误用旧画像。
+ */
 export class ExamProfileStore {
     private readonly app: App;
     private cache: ExamContentProfileCache | null = null;
@@ -17,6 +22,9 @@ export class ExamProfileStore {
         this.app = app;
     }
 
+    /**
+     * 根据缓存键读取内容画像。
+     */
     async getProfile(key: ExamContentProfileCacheKey): Promise<ExamContentProfile | null> {
         const cache: ExamContentProfileCache = await this.loadCache();
         const record: ExamContentProfileCacheRecord | undefined = cache.records.find((item: ExamContentProfileCacheRecord) => {
@@ -26,6 +34,9 @@ export class ExamProfileStore {
         return record?.profile ?? null;
     }
 
+    /**
+     * 保存内容画像，并限制缓存记录数量避免隐藏目录无限增长。
+     */
     async saveProfile(key: ExamContentProfileCacheKey, profile: ExamContentProfile): Promise<void> {
         const cache: ExamContentProfileCache = await this.loadCache();
         const nextRecord: ExamContentProfileCacheRecord = {
@@ -46,6 +57,9 @@ export class ExamProfileStore {
         await this.writeCache(this.cache);
     }
 
+    /**
+     * 清空画像缓存。
+     */
     async clear(): Promise<void> {
         this.cache = {
             version: EXAM_PROFILE_CACHE_VERSION,
@@ -54,6 +68,9 @@ export class ExamProfileStore {
         await this.writeCache(this.cache);
     }
 
+    /**
+     * 比较缓存记录与当前缓存键是否完全一致。
+     */
     private cacheKeyEquals(record: ExamContentProfileCacheRecord, key: ExamContentProfileCacheKey): boolean {
         return record.filePath === key.filePath
             && record.contentHash === key.contentHash
@@ -62,6 +79,11 @@ export class ExamProfileStore {
             && record.promptVersion === key.promptVersion;
     }
 
+    /**
+     * 懒加载缓存文件。
+     *
+     * 读取失败时使用空缓存，避免损坏缓存阻断考试模式。
+     */
     private async loadCache(): Promise<ExamContentProfileCache> {
         if (this.cache) {
             return this.cache;
@@ -98,6 +120,9 @@ export class ExamProfileStore {
         }
     }
 
+    /**
+     * 过滤缓存文件中结构明显无效的记录。
+     */
     private normalizeCacheRecords(value: unknown): ExamContentProfileCacheRecord[] {
         if (!Array.isArray(value)) {
             return [];
@@ -108,6 +133,9 @@ export class ExamProfileStore {
         });
     }
 
+    /**
+     * 写入缓存文件，并确保隐藏目录存在。
+     */
     private async writeCache(cache: ExamContentProfileCache): Promise<void> {
         const hiddenDirPath: string = normalizePath(VAULT_COACH_HIDDEN_DIR_PATH);
         if (!(await this.app.vault.adapter.exists(hiddenDirPath))) {

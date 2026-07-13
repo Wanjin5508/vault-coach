@@ -11,6 +11,16 @@ import type {
 import { generateParsedJsonAnswer, normalizeWhitespace, throwIfAborted } from "./exam-utils";
 import { ExamCandidateValidation, ExamQuestionValidator } from "./exam-question-validator";
 
+/**
+ * 考试题目生成模块。
+ *
+ * 根据蓝图分批调用模型生成题目，再交给校验器过滤质量问题。
+ * 对于模型失败或结构不可用的题目，会基于来源 chunk 生成确定性兜底题。
+ */
+
+/**
+ * 模型返回的题目候选结构。
+ */
 interface GeneratedExamQuestionPayload {
     [key: string]: unknown;
     id?: unknown;
@@ -22,12 +32,18 @@ interface GeneratedExamQuestionPayload {
     evidence_excerpt_ids?: unknown;
 }
 
+/**
+ * 题目生成结果及诊断计数。
+ */
 export interface ExamQuestionGenerationResult {
     questions: ExamQuestion[];
     firstPassQuestions: number;
     repairedQuestions: number;
 }
 
+/**
+ * 考试题目生成器。
+ */
 export class ExamQuestionGenerator {
     private readonly client: LocalModelClient;
     private readonly validator: ExamQuestionValidator;
@@ -43,6 +59,9 @@ export class ExamQuestionGenerator {
         this.getSettings = getSettings;
     }
 
+    /**
+     * 根据蓝图生成最终考试题列表。
+     */
     async generateQuestions(
         blueprint: ExamBlueprint,
         chunks: IndexedChunk[],
@@ -125,6 +144,9 @@ export class ExamQuestionGenerator {
         };
     }
 
+    /**
+     * 对一批蓝图项调用模型生成题目候选。
+     */
     private async generateCandidateBatch(
         blueprint: ExamBlueprint,
         items: ExamBlueprintItem[],
@@ -173,6 +195,11 @@ export class ExamQuestionGenerator {
         return this.normalizeQuestionPayloads(payloadQuestions, items);
     }
 
+    /**
+     * 从模型返回中提取题目数组。
+     *
+     * 兼容常见英文、驼峰和中文字段名，提高不同模型输出的容错性。
+     */
     private extractQuestionPayloads(payload: unknown): GeneratedExamQuestionPayload[] {
         const rawQuestions: unknown = Array.isArray(payload)
             ? payload
@@ -190,6 +217,9 @@ export class ExamQuestionGenerator {
         });
     }
 
+    /**
+     * 输出校验失败统计，便于开发调试题目质量。
+     */
     private logValidationSummary(attempt: number, validationResults: ExamCandidateValidation[]): void {
         const failedResults: ExamCandidateValidation[] = validationResults.filter((result: ExamCandidateValidation) => !result.review.passed);
         if (failedResults.length === 0) {
@@ -211,6 +241,9 @@ export class ExamQuestionGenerator {
         });
     }
 
+    /**
+     * 将模型返回字段归一化为内部题目候选。
+     */
     private normalizeQuestionPayloads(
         payloadQuestions: GeneratedExamQuestionPayload[],
         items: ExamBlueprintItem[],
@@ -307,6 +340,9 @@ export class ExamQuestionGenerator {
         return candidates;
     }
 
+    /**
+     * 归一化来源 chunk ID，只保留蓝图允许的来源。
+     */
     private normalizeSourceChunkIds(rawValue: unknown, fallback: string[]): string[] {
         const fallbackSet: Set<string> = new Set(fallback);
         const rawValues: unknown[] = this.normalizeRawArray(rawValue);
@@ -321,6 +357,9 @@ export class ExamQuestionGenerator {
         return values.length > 0 ? Array.from(new Set(values)) : [...fallback];
     }
 
+    /**
+     * 归一化字符串数组字段。
+     */
     private normalizeStringArray(rawValue: unknown, fallback: string[]): string[] {
         const rawValues: unknown[] = this.normalizeRawArray(rawValue);
         if (rawValues.length === 0) {
@@ -334,6 +373,11 @@ export class ExamQuestionGenerator {
         return values.length > 0 ? Array.from(new Set(values)) : [...fallback];
     }
 
+    /**
+     * 选择可接受的候选题。
+     *
+     * 完全通过校验的候选优先；结构基本可用的候选次之；否则使用确定性兜底题。
+     */
     private selectAcceptedCandidate(
         item: ExamBlueprintItem,
         validationResult: ExamCandidateValidation | undefined,
@@ -350,6 +394,9 @@ export class ExamQuestionGenerator {
         return this.buildDeterministicCandidate(item, chunksById);
     }
 
+    /**
+     * 判断候选题是否至少具备可展示和可评分的基本结构。
+     */
     private isStructurallyUsableCandidate(
         candidate: GeneratedExamQuestionCandidate,
         chunksById: Map<string, IndexedChunk>,
@@ -361,6 +408,9 @@ export class ExamQuestionGenerator {
             && normalizedCandidate.referenceAnswer.length >= 8;
     }
 
+    /**
+     * 确保题目在本场考试内不重复。
+     */
     private ensureUniqueQuestion(
         candidate: GeneratedExamQuestionCandidate,
         item: ExamBlueprintItem,
@@ -388,6 +438,9 @@ export class ExamQuestionGenerator {
         return uniqueCandidate;
     }
 
+    /**
+     * 基于蓝图和来源 chunk 生成兜底题目候选。
+     */
     private buildDeterministicCandidate(
         item: ExamBlueprintItem,
         chunksById: Map<string, IndexedChunk>,
@@ -415,6 +468,9 @@ export class ExamQuestionGenerator {
         };
     }
 
+    /**
+     * 根据题型生成确定性题干。
+     */
     private buildDeterministicQuestion(item: ExamBlueprintItem, topic: string): string {
         switch (item.questionType) {
             case "comparison":
@@ -431,6 +487,9 @@ export class ExamQuestionGenerator {
         }
     }
 
+    /**
+     * 从来源 chunk 构造兜底参考答案。
+     */
     private buildSourceAnswerText(sourceChunks: IndexedChunk[], topic: string): string {
         const sourceText: string = normalizeWhitespace(sourceChunks.map((chunk: IndexedChunk) => chunk.text).join(" "));
         const excerpt: string = sourceText.length > 520
@@ -444,6 +503,9 @@ export class ExamQuestionGenerator {
         return `应围绕「${topic}」说明来源中的核心概念、关键步骤、适用条件和结论，并保持答案与考试范围一致。`;
     }
 
+    /**
+     * 获取题目去重时用于区分来源的标签。
+     */
     private getSourceLabel(item: ExamBlueprintItem, chunksById: Map<string, IndexedChunk>): string {
         const chunk: IndexedChunk | undefined = chunksById.get(item.sourceChunkIds[0] ?? "");
         return chunk?.primaryHeading
@@ -452,6 +514,9 @@ export class ExamQuestionGenerator {
             || item.id;
     }
 
+    /**
+     * 将模型可能返回的字符串、数组或对象归一化为文本。
+     */
     private normalizeTextValue(value: unknown): string {
         if (Array.isArray(value)) {
             return value
@@ -474,6 +539,9 @@ export class ExamQuestionGenerator {
         return normalizeWhitespace(value);
     }
 
+    /**
+     * 将字符串或数组形式的模型字段统一转为数组。
+     */
     private normalizeRawArray(rawValue: unknown): unknown[] {
         if (Array.isArray(rawValue)) {
             return rawValue;
@@ -486,6 +554,9 @@ export class ExamQuestionGenerator {
         return [];
     }
 
+    /**
+     * 从字符串或对象中提取类似 ID 的字段。
+     */
     private extractIdLikeValue(value: unknown): string {
         if (value !== null && typeof value === "object") {
             return normalizeWhitespace(this.readRecordValue(this.asRecord(value), ["id", "chunk_id", "chunkId", "excerpt_id", "excerptId"]));
@@ -494,6 +565,9 @@ export class ExamQuestionGenerator {
         return normalizeWhitespace(value);
     }
 
+    /**
+     * 按多个候选 key 读取对象字段，并兼容大小写差异。
+     */
     private readRecordValue(record: Record<string, unknown>, keys: string[]): unknown {
         for (const key of keys) {
             if (Object.prototype.hasOwnProperty.call(record, key)) {
@@ -511,14 +585,23 @@ export class ExamQuestionGenerator {
         return undefined;
     }
 
+    /**
+     * 将 unknown 安全转换为 record。
+     */
     private asRecord(value: unknown): Record<string, unknown> {
         return this.isRecord(value) ? value : {};
     }
 
+    /**
+     * 判断 unknown 是否为普通对象。
+     */
     private isRecord(value: unknown): value is Record<string, unknown> {
         return value !== null && typeof value === "object" && !Array.isArray(value);
     }
 
+    /**
+     * 将内部候选转换为最终考试题。
+     */
     private convertCandidateToQuestion(
         candidate: GeneratedExamQuestionCandidate,
         chunksById: Map<string, IndexedChunk>,
@@ -539,6 +622,9 @@ export class ExamQuestionGenerator {
         };
     }
 
+    /**
+     * 构造单个蓝图项的模型输入块。
+     */
     private buildBlueprintItemGenerationBlock(
         item: ExamBlueprintItem,
         chunksById: Map<string, IndexedChunk>,
@@ -569,6 +655,9 @@ export class ExamQuestionGenerator {
         ].filter((line: string) => line.length > 0).join("\n");
     }
 
+    /**
+     * 生成题目 JSON schema 文本。
+     */
     private buildQuestionSchema(): string {
         return [
             "{",
@@ -587,11 +676,17 @@ export class ExamQuestionGenerator {
         ].join("\n");
     }
 
+    /**
+     * 根据模型提供方决定每批生成多少题。
+     */
     private getBatchSize(): number {
         const settings: VaultCoachSettings = this.getSettings();
         return settings.modelProvider === "openai-compatible" ? 6 : 5;
     }
 
+    /**
+     * 截断来源文本，避免单个批次 prompt 过长。
+     */
     private truncateSourceText(value: string, maxLength: number): string {
         const normalizedValue: string = normalizeWhitespace(value);
         return normalizedValue.length > maxLength
@@ -599,6 +694,9 @@ export class ExamQuestionGenerator {
             : normalizedValue;
     }
 
+    /**
+     * 将数组按固定大小切成批次。
+     */
     private chunkArray<T>(items: T[], size: number): T[][] {
         const batches: T[][] = [];
         for (let index = 0; index < items.length; index += size) {
@@ -607,6 +705,9 @@ export class ExamQuestionGenerator {
         return batches;
     }
 
+    /**
+     * 判断错误是否来自取消操作。
+     */
     private isAbortError(error: unknown): boolean {
         if (error instanceof DOMException) {
             return error.name === "AbortError";
