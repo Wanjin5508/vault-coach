@@ -8,6 +8,17 @@ import type {
 } from "./types"
 import { detectQuestionLanguage, type QuestionLanguage } from "./question-language";
 
+/**
+ * 模型客户端模块。
+ *
+ * 统一封装本地 Ollama 与 OpenAI-compatible 服务调用，包括聊天、流式回答、
+ * embedding、rerank、query rewrite 和长期记忆抽取。
+ * 上层 RAG 引擎只依赖本客户端提供的语义能力，不直接拼接 HTTP 请求。
+ */
+
+/**
+ * Ollama 非流式聊天响应。
+ */
 interface OllamaChatResponse {
     message?: {
         content?: string;
@@ -15,16 +26,25 @@ interface OllamaChatResponse {
     error?: string;
 }
 
+/**
+ * Ollama 新版 /api/embed 响应。
+ */
 interface OllamaEmbedResponse {
     embeddings?: number[][];
     error?: string;
 }
 
+/**
+ * Ollama 旧版 /api/embeddings 响应。
+ */
 interface OllamaLegacyEmbeddingResponse {
     embedding?: number[];
     error?: string;
 }
 
+/**
+ * Ollama 流式聊天的单行 JSON chunk。
+ */
 interface OllamaStreamChunk {
     message?: {
         content?: string;
@@ -33,16 +53,25 @@ interface OllamaStreamChunk {
     error?: string;
 }
 
+/**
+ * Rerank 服务响应。
+ */
 interface RerankResponse {
     results?: RerankResultItem[];
 }
 
+/**
+ * 聊天调用参数。
+ */
 interface ChatOptions {
     messages: LocalChatMessage[];
     temperature: number;
     format?: "json";
 }
 
+/**
+ * OpenAI-compatible 非流式聊天响应。
+ */
 interface CloudChatCompletionResponse {
     choices?: Array<{
         message?: {
@@ -55,6 +84,9 @@ interface CloudChatCompletionResponse {
     };
 }
 
+/**
+ * OpenAI-compatible SSE 流式聊天响应 chunk。
+ */
 interface CloudChatCompletionStreamChunk {
     choices?: Array<{
         delta?: {
@@ -67,6 +99,9 @@ interface CloudChatCompletionStreamChunk {
     };
 }
 
+/**
+ * OpenAI-compatible embedding 响应。
+ */
 interface CloudEmbeddingResponse {
     data?: Array<{
         embedding?: number[];
@@ -77,6 +112,11 @@ interface CloudEmbeddingResponse {
     };
 }
 
+/**
+ * 模型请求错误。
+ *
+ * 保留目标 URL 和 HTTP 状态码，便于上层判断是否需要 fallback 或展示具体提示。
+ */
 class ModelRequestError extends Error {
     readonly status: number | null;
     readonly url: string;
@@ -103,11 +143,9 @@ class ModelRequestError extends Error {
  */
 
 export class LocalModelClient {
-    // 函数类型的成员变量，主要是为了拿到当前最新的设置，
-    // 而不是构造 LocalModelClient 时的一份旧快照。
-    // 是一种常见的依赖注入写法
+    // 使用函数注入设置读取器，避免持有构造时的旧配置快照。
     private readonly getSettings: () => VaultCoachSettings;
-    private readonly getCloudApiKey: () => string | null;  // 只读，成员变量不能被重新赋值
+    private readonly getCloudApiKey: () => string | null;
 
     // 这两个字段只影响本插件会话内的 Ollama embedding。
     // fallbackUsed 用于向 UI 发一次 Notice；preferCpu 用于后续 batch 直接走 CPU，避免反复触发 GPU 崩溃。
@@ -119,27 +157,41 @@ export class LocalModelClient {
         this.getCloudApiKey = getCloudApiKey;
     }
 
-    // 新增两个 helper 方法：以后判断聊天模型是否存在时，不再只看 settings.chatModel，而是根据当前 provider 判断。
+    /**
+     * 根据聊天 provider 获取当前有效模型名。
+     */
     private getActiveChatModel(settings: VaultCoachSettings): string {
         return settings.modelProvider === "openai-compatible"
             ? settings.cloudChatModel.trim()
             : settings.chatModel.trim();
     }
 
+    /**
+     * 判断聊天请求是否走 OpenAI-compatible 服务。
+     */
     private shouldUseCloudChat(settings: VaultCoachSettings): boolean {
         return settings.modelProvider === "openai-compatible"
     }
 
+    /**
+     * 根据 embedding provider 获取当前有效模型名。
+     */
     private getActiveEmbeddingModel(settings: VaultCoachSettings): string {
         return settings.embeddingProvider === "openai-compatible"
             ? settings.cloudEmbeddingModel.trim()
             : settings.embeddingModel.trim();
     }
 
+    /**
+     * 判断 embedding 请求是否走 OpenAI-compatible 服务。
+     */
     private shouldUseCloudEmbedding(settings: VaultCoachSettings): boolean {
         return settings.embeddingProvider === "openai-compatible";
     }
 
+    /**
+     * 消费本轮会话中的 Ollama embedding CPU fallback 标记。
+     */
     consumeOllamaEmbeddingCpuFallbackUsed(): boolean {
         const fallbackWasUsed: boolean = this.ollamaEmbeddingCpuFallbackUsed;
         this.ollamaEmbeddingCpuFallbackUsed = false;
@@ -186,7 +238,8 @@ export class LocalModelClient {
                     {role: "system", content: systemPrompt},
                     {role: "user", content: userPrompt},
                 ],
-                temperature: 0, // TODO 即使温度设为 0，输出仍然会有扰动，原因在于 Transformer 架构中的不确定性
+                // query rewrite 需要尽量稳定，因此使用最低温度。
+                temperature: 0,
                 format: "json",
             });
 
@@ -217,6 +270,9 @@ export class LocalModelClient {
         };
     }
 
+    /**
+     * 构造 query rewrite 的系统提示词。
+     */
     private buildQueryRewriteSystemPrompt(questionLanguage: QuestionLanguage): string {
         if (questionLanguage === "en") {
             return [
@@ -245,6 +301,9 @@ export class LocalModelClient {
         ].join("\n");
     }
 
+    /**
+     * 构造 query rewrite 的用户提示词。
+     */
     private buildQueryRewriteUserPrompt(
         originalQuery: string,
         conversationContext: string,
@@ -276,7 +335,9 @@ export class LocalModelClient {
         ].join("\n");
     }
 
-    // 使用同一个聊天模型抽取可长期保存的记忆事实。
+    /**
+     * 使用聊天模型抽取可长期保存的记忆事实。
+     */
     async extractMemoryStatements(
         conversationContext: string,
         latestUserText: string,
@@ -360,6 +421,11 @@ export class LocalModelClient {
         });
     }
 
+    /**
+     * 流式生成 Markdown 回答。
+     *
+     * 根据当前聊天 provider 分发到 Ollama 或 OpenAI-compatible SSE 实现。
+     */
     async streamMarkdownAnswer(
         messages: LocalChatMessage[],
         temperature: number,
@@ -379,6 +445,9 @@ export class LocalModelClient {
         }
     }
 
+    /**
+     * 调用 Ollama /api/chat 的流式接口。
+     */
     private async streamOllamaMarkdownAnswer(
         settings: VaultCoachSettings,
         messages: LocalChatMessage[],
@@ -464,6 +533,9 @@ export class LocalModelClient {
         return finalText;
     }
 
+    /**
+     * 调用 OpenAI-compatible /chat/completions SSE 流式接口。
+     */
     private async streamCloudMarkdownAnswer(
         settings: VaultCoachSettings,
         messages: LocalChatMessage[],
@@ -567,7 +639,6 @@ export class LocalModelClient {
      *
      * Ollama 的 /api/embed 支持 string 或 string[] 输入，
      * 因此这里直接一次发送一个小批次，避免为每个 chunk 单独发请求。
-     * ? 嵌入的格式是怎样的？ 性能如何？
      */
     async embedTexts(texts: string[]): Promise<number[][]> {
         const settings: VaultCoachSettings = this.getSettings();
@@ -615,6 +686,9 @@ export class LocalModelClient {
         }
     }
 
+    /**
+     * 调用 Ollama 新版 /api/embed 批量生成向量。
+     */
     private async embedTextsWithModernOllamaApi(
         settings: VaultCoachSettings,
         texts: string[],
@@ -643,6 +717,9 @@ export class LocalModelClient {
         return embeddings;
     }
 
+    /**
+     * 在 Ollama GPU embedding 失败后强制使用 CPU 重试新版接口。
+     */
     private async embedTextsWithModernOllamaApiOnCpu(
         settings: VaultCoachSettings,
         texts: string[],
@@ -656,6 +733,9 @@ export class LocalModelClient {
         return embeddings;
     }
 
+    /**
+     * 调用 OpenAI-compatible /embeddings 接口生成向量。
+     */
     private async embedTextsWithCloudApi(
         settings: VaultCoachSettings,
         texts: string[],
@@ -698,6 +778,9 @@ export class LocalModelClient {
         return embeddings;
     }
 
+    /**
+     * 调用 Ollama 旧版 /api/embeddings 接口逐条生成向量。
+     */
     private async embedTextsWithLegacyOllamaApi(
         settings: VaultCoachSettings,
         texts: string[],
@@ -731,6 +814,9 @@ export class LocalModelClient {
         return embeddings;
     }
 
+    /**
+     * 在 Ollama GPU embedding 失败后强制使用 CPU 重试旧版接口。
+     */
     private async embedTextsWithLegacyOllamaApiOnCpu(
         settings: VaultCoachSettings,
         texts: string[],
@@ -779,8 +865,7 @@ export class LocalModelClient {
     }
 
     /**
-     * 替换原有的 chat 方法，改为 provider 分发
-     * 
+     * 统一聊天入口，根据 provider 分发到本地或云端实现。
      */
     private async chat(options: ChatOptions): Promise<string> {
         const settings = this.getSettings();
@@ -833,6 +918,9 @@ export class LocalModelClient {
 
     return content;
 }
+    /**
+     * 与 OpenAI-compatible 聊天接口交互。
+     */
     private async chatCloud(options: ChatOptions): Promise<string> {
         const settings: VaultCoachSettings = this.getSettings();
         const apiKey: string | null = this.getCloudApiKey();
@@ -868,6 +956,9 @@ export class LocalModelClient {
         return content;
     }
 
+    /**
+     * 根据用户配置的云端 baseUrl 推导聊天接口路径。
+     */
     private getCloudChatCompletionsPath(baseUrl: string): string {
         const normalizedBase: string = baseUrl.trim().replace(/\/+$/, "");
 
@@ -882,6 +973,9 @@ export class LocalModelClient {
         return "/v1/chat/completions";
     }
 
+    /**
+     * 根据用户配置的云端 baseUrl 推导 embedding 接口路径。
+     */
     private getCloudEmbeddingsPath(baseUrl: string): string {
         const normalizedBase: string = baseUrl.trim().replace(/\/+$/, "");
 
@@ -896,6 +990,11 @@ export class LocalModelClient {
         return "/v1/embeddings";
     }
 
+    /**
+     * 发送可读取增量 token 的 JSON 流式请求。
+     *
+     * requestUrl 会缓冲响应体，因此流式场景必须使用 window.fetch。
+     */
     private async fetchJsonStream(
         targetUrl: string,
         payload: unknown,
@@ -943,6 +1042,9 @@ export class LocalModelClient {
         }
     }
 
+    /**
+     * 逐块读取 Response.body 文本流。
+     */
     private async readTextStream(
         response: Response,
         onChunk: (chunk: string) => void,
@@ -978,6 +1080,9 @@ export class LocalModelClient {
         }
     }
 
+    /**
+     * 如果 abortSignal 已取消，则抛出标准 AbortError。
+     */
     private throwIfAborted(abortSignal?: AbortSignal): void {
         if (!abortSignal?.aborted) {
             return;
@@ -1027,9 +1132,12 @@ export class LocalModelClient {
         }
     }
 
+    /**
+     * 从 fetch Response 构造统一模型请求错误。
+     */
     private createHttpResponseError(targetUrl: string, response: Response, responseText: string): ModelRequestError {
         const normalizedResponseText: string = responseText.replace(/\s+/g, " ").trim();
-        const hint: string = this.buildRequestFailureHint(targetUrl, response.status);
+        const hint: string = this.buildRequestFailureHint(targetUrl, response.status, normalizedResponseText);
         const messageParts: string[] = [
             `模型请求失败：POST ${targetUrl}`,
             `HTTP ${response.status}`,
@@ -1041,9 +1149,12 @@ export class LocalModelClient {
         return new ModelRequestError(targetUrl, response.status, messageParts.join("。"));
     }
 
+    /**
+     * 从 Obsidian requestUrl 响应构造统一模型请求错误。
+     */
     private createRequestUrlResponseError(targetUrl: string, status: number, responseText: string): ModelRequestError {
         const normalizedResponseText: string = responseText.replace(/\s+/g, " ").trim();
-        const hint: string = this.buildRequestFailureHint(targetUrl, status);
+        const hint: string = this.buildRequestFailureHint(targetUrl, status, normalizedResponseText);
         const messageParts: string[] = [
             `模型请求失败：POST ${targetUrl}`,
             `HTTP ${status}`,
@@ -1054,6 +1165,9 @@ export class LocalModelClient {
         return new ModelRequestError(targetUrl, status, messageParts.join("。"));
     }
 
+    /**
+     * 从网络层或运行时异常构造统一模型请求错误。
+     */
     private createRequestError(targetUrl: string, error: unknown): ModelRequestError {
         const status: number | null = this.extractStatusCode(error);
         const originalMessage: string = this.getErrorMessage(error);
@@ -1068,6 +1182,9 @@ export class LocalModelClient {
         return new ModelRequestError(targetUrl, status, messageParts.join("。"));
     }
 
+    /**
+     * 根据 URL、状态码和错误文本生成用户可操作的排障提示。
+     */
     private buildRequestFailureHint(targetUrl: string, status: number | null, errorMessage = ""): string {
         if (this.isConnectionRefusedMessage(errorMessage) && this.isOllamaApiUrl(targetUrl)) {
             return "无法连接本地 Ollama 服务。请确认 Ollama 已启动，并确认本地推理服务地址只填写根地址，例如 http://127.0.0.1:11434。Windows 用户可以先打开 Ollama 应用，或在终端运行 ollama serve。";
@@ -1075,6 +1192,14 @@ export class LocalModelClient {
 
         if (status !== 404) {
             return "";
+        }
+
+        if (this.isOllamaModelNotFoundMessage(errorMessage) && this.isOllamaEmbeddingUrl(targetUrl)) {
+            return "Ollama 已启动，但找不到当前配置的 embedding 模型。请先运行 ollama list 确认模型列表；如果使用默认配置，请执行 ollama pull embeddinggemma；如果设置中填写了其他 embedding 模型，请拉取对应模型。";
+        }
+
+        if (this.isOllamaModelNotFoundMessage(errorMessage) && targetUrl.includes("/api/chat")) {
+            return "Ollama 已启动，但找不到当前配置的聊天模型。请先运行 ollama list 确认模型列表；如果使用默认配置，请执行 ollama pull gemma3:4b；如果设置中填写了其他聊天模型，请拉取对应模型。";
         }
 
         if (targetUrl.includes("/api/embed")) {
@@ -1096,14 +1221,37 @@ export class LocalModelClient {
         return "请确认对应模型服务地址和接口路径是否正确。";
     }
 
+    /**
+     * 判断 URL 是否是 Ollama API。
+     */
     private isOllamaApiUrl(targetUrl: string): boolean {
         return /\/api\/(?:chat|embed|embeddings)\b/i.test(targetUrl);
     }
 
+    /**
+     * 判断 URL 是否是 Ollama embedding API。
+     */
+    private isOllamaEmbeddingUrl(targetUrl: string): boolean {
+        return /\/api\/(?:embed|embeddings)\b/i.test(targetUrl);
+    }
+
+    /**
+     * 判断错误文本是否像连接被拒绝。
+     */
     private isConnectionRefusedMessage(message: string): boolean {
         return /ERR_CONNECTION_REFUSED|ECONNREFUSED|connection refused|failed to fetch|fetch failed/i.test(message);
     }
 
+    /**
+     * 判断错误文本是否表示 Ollama 模型不存在。
+     */
+    private isOllamaModelNotFoundMessage(message: string): boolean {
+        return /model.+not found|not found.+model|try pulling/i.test(message);
+    }
+
+    /**
+     * 判断错误是否是 404。
+     */
     private isNotFoundError(error: unknown): boolean {
         if (error instanceof ModelRequestError) {
             return error.status === 404;
@@ -1112,6 +1260,9 @@ export class LocalModelClient {
         return this.extractStatusCode(error) === 404;
     }
 
+    /**
+     * 判断 Ollama embedding 失败是否值得使用 CPU fallback 重试。
+     */
     private shouldRetryOllamaEmbeddingOnCpu(error: unknown): boolean {
         const status: number | null = this.extractStatusCode(error);
         if (status !== null && status < 500) {
@@ -1123,6 +1274,9 @@ export class LocalModelClient {
         return /cuda|gpu|ptx|llama-server|unsupported toolchain|0xc0000409|server error|status 500|http 500/i.test(message);
     }
 
+    /**
+     * 识别 AbortError，避免把用户主动取消包装为普通请求失败。
+     */
     private isAbortError(error: unknown): boolean {
         if (error instanceof DOMException) {
             return error.name === "AbortError";
@@ -1135,6 +1289,9 @@ export class LocalModelClient {
         return false;
     }
 
+    /**
+     * 从不同错误结构中提取 HTTP 状态码。
+     */
     private extractStatusCode(error: unknown): number | null {
         if (
             error
@@ -1159,6 +1316,9 @@ export class LocalModelClient {
         return Number(statusText);
     }
 
+    /**
+     * 获取错误文本。
+     */
     private getErrorMessage(error: unknown): string {
         if (error instanceof Error) {
             return error.message;

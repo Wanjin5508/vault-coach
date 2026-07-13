@@ -9,6 +9,15 @@ import type {
 } from "../types";
 import { headingPathMatches } from "./exam-utils";
 
+/**
+ * 考试范围解析模块。
+ *
+ * 负责把用户选择的目录/文件排除、规则排除和内容画像合并成最终可用于出题的 chunk 集合。
+ */
+
+/**
+ * 规则过滤后的文件分组结果。
+ */
 export interface ExamResolvedScope {
     fileOptions: ExamFileOption[];
     ruleExcludedFiles: ExamFileOption[];
@@ -16,6 +25,9 @@ export interface ExamResolvedScope {
     candidateFiles: ExamFileOption[];
 }
 
+/**
+ * 考试范围服务。
+ */
 export class ExamScopeService {
     private readonly knowledgeBase: VaultKnowledgeBase;
 
@@ -23,6 +35,9 @@ export class ExamScopeService {
         this.knowledgeBase = knowledgeBase;
     }
 
+    /**
+     * 根据用户选择拆分规则排除、手动排除和候选文件。
+     */
     resolveScope(selection: ExamScopeSelection): ExamResolvedScope {
         const fileOptions: ExamFileOption[] = this.knowledgeBase.getExamFileOptions(selection.selectedFolderPaths);
         const excludedPathSet: Set<string> = new Set(selection.excludedFilePaths);
@@ -52,6 +67,11 @@ export class ExamScopeService {
         };
     }
 
+    /**
+     * 获取最终可用于出题的 chunk。
+     *
+     * 当启用智能筛选时，partial 文件只保留画像中标记为可考试的标题路径。
+     */
     getEligibleChunks(selection: ExamScopeSelection, profiles: ExamContentProfile[], semanticFilteringEnabled: boolean): IndexedChunk[] {
         const resolvedScope: ExamResolvedScope = this.resolveScope(selection);
         const forceIncludedPathSet: Set<string> = new Set(selection.forceIncludedFilePaths);
@@ -94,6 +114,9 @@ export class ExamScopeService {
         return chunks;
     }
 
+    /**
+     * 构造 UI 展示和生成阶段复用的范围分析结果。
+     */
     buildAnalysisResult(
         selection: ExamScopeSelection,
         resolvedScope: ExamResolvedScope,
@@ -146,10 +169,16 @@ export class ExamScopeService {
         };
     }
 
+    /**
+     * 统计可出题 chunk 覆盖的文件数。
+     */
     private countEligibleFilePaths(chunks: IndexedChunk[]): number {
         return new Set(chunks.map((chunk: IndexedChunk) => chunk.filePath)).size;
     }
 
+    /**
+     * 基于文件数和 chunk 数估算题量上限。
+     */
     private estimateMaxExamQuestions(eligibleFileCount: number, eligibleChunkCount: number): number {
         if (eligibleFileCount === 0 || eligibleChunkCount === 0) {
             return 0;

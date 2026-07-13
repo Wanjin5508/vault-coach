@@ -121,16 +121,16 @@ Vault Coach 需要一个聊天模型和一个 embedding 模型。
 示例：
 
 ```bash
-ollama pull qwen2.5:7b
-ollama pull nomic-embed-text
+ollama pull gemma3:4b
+ollama pull embeddinggemma
 ```
 
 然后在设置中填写：
 
 | 用途 | 示例 |
 |------|------|
-| 本地聊天模型 | `qwen2.5:7b` |
-| 本地 embedding 模型 | `nomic-embed-text` |
+| 本地聊天模型 | `gemma3:4b` |
+| 本地 embedding 模型 | `embeddinggemma` |
 | 本地推理服务地址 | `http://127.0.0.1:11434` |
 
 你也可以使用其他 Ollama 模型。更大的模型可能回答更好，但会占用更多内存，生成速度也更慢。

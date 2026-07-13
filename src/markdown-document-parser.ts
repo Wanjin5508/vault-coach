@@ -6,6 +6,16 @@ import type {
     ParsedDocumentBlock,
 } from "./types";
 
+/**
+ * Markdown 文档解析模块。
+ *
+ * 将 Obsidian Markdown 文件按标题路径切成语义 section，并包装为统一 ParsedDocument。
+ * 后续 chunk 大小切分由 VaultKnowledgeBase 负责，本解析器只处理 Markdown 结构。
+ */
+
+/**
+ * Markdown 中一个标题路径下的正文片段。
+ */
 interface MarkdownSection {
     headingPath: string[];
     text: string;
@@ -13,6 +23,9 @@ interface MarkdownSection {
 
 export const MARKDOWN_PARSER_VERSION = "markdown-parser-v2";
 
+/**
+ * Obsidian Markdown 文件解析器。
+ */
 export class MarkdownDocumentParser implements DocumentParser {
     private readonly app: App;
 
@@ -20,10 +33,16 @@ export class MarkdownDocumentParser implements DocumentParser {
         this.app = app;
     }
 
+    /**
+     * 仅处理 `.md` 文件。
+     */
     supports(file: TFile): boolean {
         return file.extension.toLowerCase() === "md";
     }
 
+    /**
+     * 读取 Markdown 文件并转换为统一文档结构。
+     */
     async parse(file: TFile, context: DocumentParseContext): Promise<ParsedDocument> {
         context.signal?.throwIfAborted();
 
@@ -67,6 +86,11 @@ export class MarkdownDocumentParser implements DocumentParser {
         };
     }
 
+    /**
+     * 按 ATX 标题维护 headingPath，并把每段标题下的正文聚合成 section。
+     *
+     * 该方法不会解析 Markdown AST；保留轻量行扫描以减少插件启动和索引成本。
+     */
     private parseMarkdownSections(content: string): MarkdownSection[] {
         const lines: string[] = content.split(/\r?\n/);
         const sections: MarkdownSection[] = [];

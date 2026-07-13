@@ -121,16 +121,16 @@ Vault Coach needs one chat model and one embedding model.
 Example:
 
 ```bash
-ollama pull qwen2.5:7b
-ollama pull nomic-embed-text
+ollama pull gemma3:4b
+ollama pull embeddinggemma
 ```
 
 Then configure:
 
 | Purpose | Example |
 |---------|---------|
-| Local chat model | `qwen2.5:7b` |
-| Local embedding model | `nomic-embed-text` |
+| Local chat model | `gemma3:4b` |
+| Local embedding model | `embeddinggemma` |
 | Local inference service URL | `http://127.0.0.1:11434` |
 
 You can use other Ollama models. Larger models may produce better answers but require more memory and slower generation.

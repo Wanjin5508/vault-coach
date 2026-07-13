@@ -12,8 +12,18 @@ import type {
 import { clampNumber, generateParsedJsonAnswer, headingPathKey, normalizeHeadingPath, normalizeWhitespace, throwIfAborted } from "./exam-utils";
 import { ExamProfileStore } from "./exam-profile-store";
 
+/**
+ * 考试内容画像模块。
+ *
+ * 负责判断文件或章节是否适合用于考试出题，并输出 include / partial / exclude 决策。
+ * 该模块结合确定性规则、模型分类和本地缓存，降低低质量题目和无意义出题范围。
+ */
+
 export const EXAM_CONTENT_PROFILE_PROMPT_VERSION = "exam-content-profile-v1";
 
+/**
+ * 模型返回的文件级画像结构。
+ */
 interface ExamContentProfilePayload {
     decision?: unknown;
     confidence?: unknown;
@@ -24,17 +34,26 @@ interface ExamContentProfilePayload {
     estimated_question_capacity?: unknown;
 }
 
+/**
+ * 模型返回的 section 级画像结构。
+ */
 interface ExamSectionProfilePayload extends ExamContentProfilePayload {
     eligible_section_indexes?: unknown;
     excluded_section_indexes?: unknown;
 }
 
+/**
+ * 批量画像结果。
+ */
 interface ExamProfileBatchResult {
     profiles: ExamContentProfile[];
     cacheHits: number;
     cacheMisses: number;
 }
 
+/**
+ * 文件内容统计特征。
+ */
 interface ExamContentStats {
     textLength: number;
     checkboxCount: number;
@@ -43,6 +62,9 @@ interface ExamContentStats {
     paragraphCount: number;
 }
 
+/**
+ * 按标题聚合后的考试 section。
+ */
 interface ExamSectionGroup {
     index: number;
     headingPath: string[];
@@ -65,6 +87,9 @@ const VALID_REASON_CODES: Set<ExamExclusionReason> = new Set<ExamExclusionReason
     "other",
 ]);
 
+/**
+ * 考试内容画像器。
+ */
 export class ExamContentProfiler {
     private readonly knowledgeBase: VaultKnowledgeBase;
     private readonly client: LocalModelClient;
@@ -83,6 +108,11 @@ export class ExamContentProfiler {
         this.getSettings = getSettings;
     }
 
+    /**
+     * 批量生成文件画像。
+     *
+     * 优先读取缓存；缓存未命中时才读取内容并调用规则/模型分析。
+     */
     async profileFiles(
         fileOptions: ExamFileOption[],
         options: {
@@ -132,6 +162,9 @@ export class ExamContentProfiler {
         };
     }
 
+    /**
+     * 构造画像缓存键。
+     */
     private buildCacheKey(filePath: string, contentHash: string): ExamContentProfileCacheKey {
         const settings: VaultCoachSettings = this.getSettings();
         return {
@@ -143,6 +176,9 @@ export class ExamContentProfiler {
         };
     }
 
+    /**
+     * 生成单个文件画像。
+     */
     private async profileFile(fileOption: ExamFileOption, abortSignal?: AbortSignal): Promise<ExamContentProfile> {
         const chunks: IndexedChunk[] = this.knowledgeBase.getExamFileChunks(fileOption.filePath);
         const content: string = await this.knowledgeBase.readExamFileContent(fileOption.filePath) ?? "";
@@ -183,6 +219,9 @@ export class ExamContentProfiler {
         return profile;
     }
 
+    /**
+     * 使用确定性规则快速排除明显不适合出题的内容。
+     */
     private buildDeterministicProfile(filePath: string, content: string, chunks: IndexedChunk[]): ExamContentProfile | null {
         const cleanedText: string = this.cleanMarkdownText(content.length > 0 ? content : chunks.map((chunk: IndexedChunk) => chunk.text).join("\n\n"));
         if (chunks.length === 0 || cleanedText.length < 80) {
@@ -231,6 +270,9 @@ export class ExamContentProfiler {
         return null;
     }
 
+    /**
+     * 调用模型进行文件级内容分类。
+     */
     private async classifyFileWithModel(
         fileOption: ExamFileOption,
         content: string,
@@ -285,6 +327,9 @@ export class ExamContentProfiler {
         );
     }
 
+    /**
+     * 对 partial 文件继续做 section 级细化，找出真正可出题的标题路径。
+     */
     private async refinePartialProfile(
         filePath: string,
         profile: ExamContentProfile,
@@ -354,6 +399,9 @@ export class ExamContentProfiler {
         };
     }
 
+    /**
+     * 校验并归一化模型画像输出。
+     */
     private normalizeProfilePayload(
         filePath: string,
         payload: ExamContentProfilePayload,
@@ -384,6 +432,9 @@ export class ExamContentProfiler {
         };
     }
 
+    /**
+     * 归一化缓存中的画像，兼容旧版本或损坏字段。
+     */
     private normalizeCachedProfile(
         profile: ExamContentProfile,
         fallbackFilePath: string,
@@ -413,6 +464,9 @@ export class ExamContentProfiler {
         };
     }
 
+    /**
+     * 创建画像对象。
+     */
     private createProfile(
         filePath: string,
         decision: ExamContentProfile["decision"],
@@ -435,6 +489,9 @@ export class ExamContentProfiler {
         };
     }
 
+    /**
+     * 归一化排除原因，只保留枚举内的值。
+     */
     private normalizeReasonCodes(rawValue: unknown): ExamExclusionReason[] {
         if (!Array.isArray(rawValue)) {
             return [];
@@ -455,6 +512,9 @@ export class ExamContentProfiler {
         return Array.from(new Set(reasonCodes));
     }
 
+    /**
+     * 归一化并校验标题路径。
+     */
     private normalizeHeadingPaths(rawValue: unknown, knownHeadingKeys: Set<string>): string[][] {
         if (!Array.isArray(rawValue)) {
             return [];
@@ -485,6 +545,9 @@ export class ExamContentProfiler {
         });
     }
 
+    /**
+     * 将模型返回的 section index 映射回标题路径。
+     */
     private resolveSectionIndexes(rawValue: unknown, sections: ExamSectionGroup[]): string[][] {
         if (!Array.isArray(rawValue)) {
             return [];
@@ -508,6 +571,9 @@ export class ExamContentProfiler {
         return headingPaths;
     }
 
+    /**
+     * 归一化主题数组，并限制返回数量。
+     */
     private normalizeStringArray(rawValue: unknown): string[] {
         if (!Array.isArray(rawValue)) {
             return [];
@@ -521,10 +587,16 @@ export class ExamContentProfiler {
         )).slice(0, 8);
     }
 
+    /**
+     * 合并排除原因并去重。
+     */
     private mergeReasonCodes(left: ExamExclusionReason[], right: ExamExclusionReason[]): ExamExclusionReason[] {
         return Array.from(new Set([...left, ...right]));
     }
 
+    /**
+     * 从标题路径和文件名推断主题。
+     */
     private inferTopics(fileNameOrPath: string, chunks: IndexedChunk[]): string[] {
         const topics: string[] = [];
         for (const chunk of chunks) {
@@ -541,6 +613,9 @@ export class ExamContentProfiler {
         return Array.from(new Set(topics)).slice(0, 8);
     }
 
+    /**
+     * 根据 chunk 数估算可支持的题量。
+     */
     private estimateQuestionCapacity(chunkCount: number): number {
         if (chunkCount <= 0) {
             return 0;
@@ -549,6 +624,9 @@ export class ExamContentProfiler {
         return Math.max(1, Math.min(10, Math.ceil(chunkCount / 2)));
     }
 
+    /**
+     * 计算模型分类所需的文件统计特征。
+     */
     private computeContentStats(content: string, chunks: IndexedChunk[]): ExamContentStats {
         const sourceText: string = content.length > 0 ? content : chunks.map((chunk: IndexedChunk) => chunk.text).join("\n\n");
         const cleanedText: string = this.cleanMarkdownText(sourceText);
@@ -571,6 +649,9 @@ export class ExamContentProfiler {
         };
     }
 
+    /**
+     * 构造标题目录，供模型判断 section 分布。
+     */
     private buildHeadingCatalog(chunks: IndexedChunk[]): string {
         const headingPaths: string[] = this.groupChunksByHeading(chunks).map((section: ExamSectionGroup) => {
             return section.headingPath.length > 0 ? section.headingPath.join(" > ") : "（无标题）";
@@ -579,6 +660,9 @@ export class ExamContentProfiler {
         return headingPaths.length > 0 ? headingPaths.join("\n") : "（无标题）";
     }
 
+    /**
+     * 构造代表性内容样本，避免把整篇长文直接塞进 prompt。
+     */
     private buildRepresentativeContent(content: string, chunks: IndexedChunk[]): string {
         const sections: ExamSectionGroup[] = this.groupChunksByHeading(chunks);
         const samples: string[] = [];
@@ -608,6 +692,9 @@ export class ExamContentProfiler {
         return samples.join("\n\n---\n\n") || "（无代表性内容）";
     }
 
+    /**
+     * 按标题路径聚合 chunk。
+     */
     private groupChunksByHeading(chunks: IndexedChunk[]): ExamSectionGroup[] {
         const sectionsByKey: Map<string, ExamSectionGroup> = new Map<string, ExamSectionGroup>();
         for (const chunk of chunks) {
@@ -626,6 +713,9 @@ export class ExamContentProfiler {
         return Array.from(sectionsByKey.values());
     }
 
+    /**
+     * 清理 Markdown 语法，得到更适合统计质量的纯文本。
+     */
     private cleanMarkdownText(markdown: string): string {
         return markdown
             .replace(/^---[\s\S]*?---\s*/m, "")
@@ -641,11 +731,17 @@ export class ExamContentProfiler {
             .trim();
     }
 
+    /**
+     * 提取 frontmatter，用作内容判断的辅助样本。
+     */
     private extractFrontmatter(content: string): string {
         const match: RegExpExecArray | null = /^---\s*([\s\S]*?)\s*---/.exec(content);
         return match?.[1]?.trim() ?? "";
     }
 
+    /**
+     * 文件级画像 JSON schema 文本。
+     */
     private buildProfileSchema(): string {
         return [
             "{",
@@ -660,6 +756,9 @@ export class ExamContentProfiler {
         ].join("\n");
     }
 
+    /**
+     * section 级画像 JSON schema 文本。
+     */
     private buildSectionProfileSchema(): string {
         return [
             "{",
@@ -676,6 +775,9 @@ export class ExamContentProfiler {
         ].join("\n");
     }
 
+    /**
+     * 获取当前聊天模型名称，用于缓存隔离。
+     */
     private getActiveChatModel(settings: VaultCoachSettings): string {
         return settings.modelProvider === "openai-compatible"
             ? settings.cloudChatModel.trim()

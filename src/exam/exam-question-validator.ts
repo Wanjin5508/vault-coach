@@ -9,12 +9,28 @@ import {
     throwIfAborted,
 } from "./exam-utils";
 
+/**
+ * 考试题目校验模块。
+ *
+ * 当前使用确定性规则检查模型题目是否可用，包括来源合法性、100 分制评分标准、
+ * 内部标记泄漏、答案泄露和重复题目等。
+ */
+
+/**
+ * 题目候选及其校验结果。
+ */
 export interface ExamCandidateValidation {
     candidate: GeneratedExamQuestionCandidate;
     review: ExamQuestionReview;
 }
 
+/**
+ * 考试题目校验器。
+ */
 export class ExamQuestionValidator {
+    /**
+     * 批量校验题目候选。
+     */
     async validateCandidates(
         candidates: GeneratedExamQuestionCandidate[],
         chunksById: Map<string, IndexedChunk>,
@@ -31,6 +47,9 @@ export class ExamQuestionValidator {
         return deterministicResults;
     }
 
+    /**
+     * 归一化题目候选，清理内部标签并补齐评分标准口径。
+     */
     normalizeCandidate(candidate: GeneratedExamQuestionCandidate): GeneratedExamQuestionCandidate {
         return {
             ...candidate,
@@ -42,6 +61,9 @@ export class ExamQuestionValidator {
         };
     }
 
+    /**
+     * 创建题目去重指纹。
+     */
     createQuestionFingerprint(question: unknown): string {
         return normalizeWhitespace(question)
             .toLowerCase()
@@ -49,6 +71,9 @@ export class ExamQuestionValidator {
             .slice(0, 100);
     }
 
+    /**
+     * 使用确定性规则校验单个题目候选。
+     */
     private validateCandidateDeterministically(
         rawCandidate: GeneratedExamQuestionCandidate,
         chunksById: Map<string, IndexedChunk>,
@@ -109,10 +134,16 @@ export class ExamQuestionValidator {
         };
     }
 
+    /**
+     * 检查题目内容是否泄露了 prompt 内部标记。
+     */
     private containsInternalTrace(value: unknown): boolean {
         return /EXCERPT_ID|SOURCE_PATH|SOURCE_CHUNK_IDS?|BLUEPRINT_ITEM|HEADING:|\bE\d+\b/i.test(normalizeWhitespace(value));
     }
 
+    /**
+     * 检查题干是否直接包含参考答案的长片段。
+     */
     private questionLeaksReferenceAnswer(question: unknown, referenceAnswer: unknown): boolean {
         const normalizedQuestion: string = normalizeWhitespace(question).toLowerCase().replace(/\s+/g, "");
         const answerParts: string[] = normalizeWhitespace(referenceAnswer)
@@ -123,6 +154,9 @@ export class ExamQuestionValidator {
         return answerParts.some((part: string) => normalizedQuestion.includes(part.toLowerCase().replace(/\s+/g, "").slice(0, 40)));
     }
 
+    /**
+     * 将评分标准统一为 100 分制。
+     */
     private normalizeRubricText(value: unknown): string {
         const cleanedValue: string = normalizeWhitespace(value)
             .replace(/满分\s*\d+\s*分/g, "满分 100 分")
@@ -141,6 +175,9 @@ export class ExamQuestionValidator {
         return `本题按 100 分制评分；${cleanedValue}`;
     }
 
+    /**
+     * 根据校验失败原因生成修复建议。
+     */
     private buildRepairInstruction(failureCodes: string[]): string {
         if (failureCodes.includes("invalid-source-chunk")) {
             return "必须只使用蓝图指定的真实 source_chunk_ids 生成题目。";
@@ -161,10 +198,16 @@ export class ExamQuestionValidator {
         return "请基于相同来源重新生成更清晰、可回答且有学习价值的问题。";
     }
 
+    /**
+     * 获取候选题目 ID。
+     */
     private getCandidateQuestionId(candidate: GeneratedExamQuestionCandidate): string {
         return candidate.id?.trim() || candidate.blueprintItemId;
     }
 
+    /**
+     * 将 unknown 数组归一化为去重后的字符串数组。
+     */
     private normalizeStringArray(value: unknown): string[] {
         if (!Array.isArray(value)) {
             return [];

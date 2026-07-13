@@ -25,7 +25,7 @@ const DOCUMENT_CHUNKER_VERSION = "document-chunker-v2";
 const DOCUMENT_PARSER_LAYER_VERSION = "document-parser-v2";
 
 /**
- * VaultKnowledgeBase 负责第一阶段与第二阶段共享的“知识库底座”：
+ * VaultKnowledgeBase 负责插件共享的知识库底座：
  * 1. 扫描 vault / 指定目录中的已启用知识文件
  * 2. 通过文档解析器把不同载体转换为统一 block
  * 3. 建立倒排索引用于关键词检索
@@ -37,7 +37,8 @@ const DOCUMENT_PARSER_LAYER_VERSION = "document-parser-v2";
  */
 export class VaultKnowledgeBase {
     private readonly app: App;
-    private readonly getSettings: () => VaultCoachSettings;  // ? 这什么类型？
+    // 使用函数注入设置读取器，确保每次索引或检索都能拿到最新设置。
+    private readonly getSettings: () => VaultCoachSettings;
     private readonly parserRegistry: DocumentParserRegistry;
 
     /**
@@ -98,25 +99,34 @@ export class VaultKnowledgeBase {
     getStats(): KnowledgeBaseStats {
         return { 
             ...this.stats 
-        }; // ? 什么用法？
+        };
     }
 
     /**
      * 获取全部 chunk。
-     * 第二阶段建立 embedding 时会用到这个方法。
+     * 向量索引、考试模式和快照持久化都会通过这个方法读取当前文本索引。
      */
     getAllChunks(): IndexedChunk[] {
         return [...this.chunks];
     }
 
+    /**
+     * 获取考试文件的内容哈希，用于画像缓存键。
+     */
     getExamFileContentHash(filePath: string): string | null {
         return this.fileHashes.get(normalizePath(filePath)) ?? null;
     }
 
+    /**
+     * 获取某个考试文件对应的 chunk。
+     */
     getExamFileChunks(filePath: string): IndexedChunk[] {
         return this.getChunksForFilePath(normalizePath(filePath));
     }
 
+    /**
+     * 按 chunkId 批量读取 chunk。
+     */
     getExamChunksByIds(chunkIds: string[]): IndexedChunk[] {
         const chunks: IndexedChunk[] = [];
         for (const chunkId of chunkIds) {
@@ -128,6 +138,11 @@ export class VaultKnowledgeBase {
         return chunks;
     }
 
+    /**
+     * 读取考试文件原文。
+     *
+     * Markdown 文件返回原始内容；非 Markdown 文档返回已解析 chunk 的拼接文本。
+     */
     async readExamFileContent(filePath: string): Promise<string | null> {
         const abstractFile = this.app.vault.getAbstractFileByPath(normalizePath(filePath));
         if (!(abstractFile instanceof TFile)) {
@@ -142,6 +157,9 @@ export class VaultKnowledgeBase {
         return this.app.vault.cachedRead(abstractFile);
     }
 
+    /**
+     * 构造考试模式可选择的目录范围。
+     */
     getExamFolderScopeOptions(): ExamScopeOption[] {
         const folderStats: Map<string, { filePaths: Set<string>; chunkCount: number }> = new Map();
 
@@ -169,11 +187,17 @@ export class VaultKnowledgeBase {
             }));
     }
 
+    /**
+     * 根据目录范围构造考试文件选项。
+     */
     getExamFileOptions(folderPaths: string[]): ExamFileOption[] {
         const filePaths: string[] = this.resolveExamFilePathsForFolders(folderPaths);
         return filePaths.map((filePath: string) => this.buildExamFileOption(filePath));
     }
 
+    /**
+     * 计算考试范围快照，供 UI 估算题量和展示筛选结果。
+     */
     getExamScopeSnapshot(selection: ExamScopeSelection): ExamScopeSnapshot {
         const fileOptions: ExamFileOption[] = this.getExamFileOptions(selection.selectedFolderPaths);
         const excludedPathSet: Set<string> = new Set(selection.excludedFilePaths.map((filePath: string) => normalizePath(filePath)));
@@ -195,6 +219,9 @@ export class VaultKnowledgeBase {
         };
     }
 
+    /**
+     * 根据考试范围选择返回可用于出题的 chunk。
+     */
     getChunksForExamScope(selectionOrFolderPaths: ExamScopeSelection | string[]): IndexedChunk[] {
         const selection: ExamScopeSelection = Array.isArray(selectionOrFolderPaths)
             ? {
@@ -214,6 +241,9 @@ export class VaultKnowledgeBase {
         return this.chunks.filter((chunk: IndexedChunk) => allowedFilePaths.has(chunk.filePath));
     }
 
+    /**
+     * 获取文件级索引记录，用于持久化快照。
+     */
     getFileRecords(): KnowledgeBaseFileRecord[] {
         return Array.from(this.fileRecords.values()).map((record: KnowledgeBaseFileRecord) => ({
             ...record,
@@ -221,10 +251,16 @@ export class VaultKnowledgeBase {
         }));
     }
 
+    /**
+     * 清空索引数据。
+     */
     clearIndexData(): void {
         this.clearIndex();
     }
 
+    /**
+     * 生成影响文本索引有效性的设置签名。
+     */
     getSettingsSignature(): string {
         const settings: VaultCoachSettings = this.getSettings();
         return JSON.stringify({
@@ -272,11 +308,6 @@ export class VaultKnowledgeBase {
     /**
      * 重建整个知识库索引。
      *
-     * 注意：这里采用“全量重建”而不是“增量更新”，原因是：
-     * 1. 第一阶段先追求结构清晰，便于学习和调试
-     * 2. vault 规模通常可控，先用全量方案足够稳定
-     * 3. 后续如果需要性能优化，再把它升级为增量索引即可
-     *  * 注意：
      * - 这里只负责扫描、切块和倒排索引；
      * - 向量索引由上层额外建立，因为向量索引依赖外部 embedding 模型。
      */
@@ -285,7 +316,11 @@ export class VaultKnowledgeBase {
         return result.stats;
     }
 
-    // 新增：全量重建时返回详细变更结果，供向量层同步。
+    /**
+     * 全量重建并返回详细变更结果。
+     *
+     * changedChunks 供向量层批量重建 embedding，affectedFiles 供 UI 和日志解释本次操作范围。
+     */
     async rebuildIndexDetailed(signal?: AbortSignal): Promise<KnowledgeBaseSyncResult> {
         signal?.throwIfAborted();
         this.clearIndex();
@@ -319,7 +354,11 @@ export class VaultKnowledgeBase {
         };
     }
 
-    // 新增：只同步发生改动的知识库文件。
+    /**
+     * 增量同步发生变化的知识文件。
+     *
+     * 删除或移出范围的文件会返回 removedChunkIds；内容变化的文件会重新解析并返回 changedChunks。
+     */
     async syncChangedFiles(filePaths: string[], signal?: AbortSignal): Promise<KnowledgeBaseSyncResult> {
         signal?.throwIfAborted();
         const dedupedPaths: string[] = Array.from(
@@ -393,11 +432,11 @@ export class VaultKnowledgeBase {
     /**
      * 对外提供的关键词检索接口。
      *
-     * 这里不是简单的 “includes 判断”，而是做了一个适合第一阶段使用的轻量级打分：
+     * 这里不是简单的 includes 判断，而是做轻量级打分：
      *   - token 命中次数（tf）
      *   - token 逆文档频率（idf）
-     * * - 完整短语命中加分
-     * * - 标题命中加分
+     *   - 完整短语命中加分
+     *   - 标题命中加分
      */
     searchKeyword(query: string, limit: number): KeywordSearchHit[] {
         const trimmedQuery: string = query.trim();
@@ -410,7 +449,7 @@ export class VaultKnowledgeBase {
             return [];
         }
 
-        const scoreMap: Map<string, number> = new Map<string, number>();  // ? 初始值是什么？
+        const scoreMap: Map<string, number> = new Map<string, number>();
         const matchedTokenMap: Map<string, Set<string>> = new Map<string, Set<string>>();
 
         // 第一轮，通过倒排索引累计 token 分数, TF-IDF = TF * IDF
@@ -475,6 +514,9 @@ export class VaultKnowledgeBase {
 
     }
 
+    /**
+     * 根据考试目录选择解析出实际文件路径。
+     */
     private resolveExamFilePathsForFolders(folderPaths: string[]): string[] {
         const normalizedFolderPaths: string[] = folderPaths
             .map((folderPath: string) => this.normalizeFolderPath(folderPath))
@@ -495,6 +537,9 @@ export class VaultKnowledgeBase {
             .sort((leftPath: string, rightPath: string) => leftPath.localeCompare(rightPath));
     }
 
+    /**
+     * 构造考试文件选项，并附带永久排除原因。
+     */
     private buildExamFileOption(filePath: string): ExamFileOption {
         const normalizedPath: string = normalizePath(filePath);
         const permanentExcludeReason: string | null = this.getPermanentExamExcludeReason(normalizedPath);
@@ -514,6 +559,9 @@ export class VaultKnowledgeBase {
         };
     }
 
+    /**
+     * 判断文件是否应永久排除在考试模式之外。
+     */
     private getPermanentExamExcludeReason(filePath: string): string | null {
         if (this.isVaultCoachHiddenPath(filePath)) {
             return "VaultCoach hidden directory";
@@ -556,6 +604,9 @@ export class VaultKnowledgeBase {
         return null;
     }
 
+    /**
+     * 根据用户配置的考试排除规则寻找命中的模式。
+     */
     private findMatchingExamExcludeRule(filePath: string): string | null {
         const normalizedPath: string = normalizePath(filePath);
         const patterns: string[] = this.getSettings().examExcludePathPatterns
@@ -573,6 +624,9 @@ export class VaultKnowledgeBase {
         return null;
     }
 
+    /**
+     * 判断文件路径是否匹配简单 glob 规则。
+     */
     private matchesExamExcludePattern(filePath: string, pattern: string): boolean {
         if (pattern.length === 0) {
             return false;
@@ -592,6 +646,9 @@ export class VaultKnowledgeBase {
         return new RegExp(`^${escapedPattern}$`).test(filePath);
     }
 
+    /**
+     * 使用确定性规则识别低质量考试内容。
+     */
     private detectLowQualityExamContentReason(rawText: string, cleanedText: string): string | null {
         const contentLines: string[] = cleanedText
             .split(/\r?\n/g)
@@ -640,6 +697,9 @@ export class VaultKnowledgeBase {
         return null;
     }
 
+    /**
+     * 清理 Markdown 标记，得到适合考试质量判断的正文文本。
+     */
     private cleanExamMarkdownText(markdown: string): string {
         return markdown
             .replace(/^---[\s\S]*?---\s*/m, "")
@@ -655,6 +715,9 @@ export class VaultKnowledgeBase {
             .trim();
     }
 
+    /**
+     * 按文件路径读取 chunk。
+     */
     private getChunksForFilePath(filePath: string): IndexedChunk[] {
         const chunkIds: string[] = this.fileChunkIds.get(filePath) ?? [];
         return chunkIds
@@ -662,10 +725,16 @@ export class VaultKnowledgeBase {
             .filter((chunk: IndexedChunk | undefined): chunk is IndexedChunk => chunk !== undefined);
     }
 
+    /**
+     * 获取某个文件对应的 chunk 数量。
+     */
     private getChunkCountForFilePath(filePath: string): number {
         return this.fileChunkIds.get(filePath)?.length ?? 0;
     }
 
+    /**
+     * 判断文件是否位于指定文件夹内。
+     */
     private isFileInFolder(filePath: string, folderPath: string): boolean {
         const normalizedFolderPath: string = this.normalizeFolderPath(folderPath);
         if (normalizedFolderPath.length === 0) {
@@ -675,6 +744,9 @@ export class VaultKnowledgeBase {
         return filePath.startsWith(`${normalizedFolderPath}/`);
     }
 
+    /**
+     * 根据有效文件数和 chunk 数估算可出题数量上限。
+     */
     private estimateMaxExamQuestions(eligibleFileCount: number, eligibleChunkCount: number): number {
         if (eligibleFileCount === 0 || eligibleChunkCount === 0) {
             return 0;
@@ -686,8 +758,7 @@ export class VaultKnowledgeBase {
     }
 
     /**
-     * 清空现有索引数据
-     * 
+     * 清空现有索引数据。
      */
     private clearIndex(): void {
         this.chunks = [];
@@ -705,6 +776,9 @@ export class VaultKnowledgeBase {
 
     }
 
+    /**
+     * 更新索引统计信息。
+     */
     private updateStats(fileCount: number): void {
         this.rebuildChunkArray();
         this.stats = {
@@ -715,6 +789,9 @@ export class VaultKnowledgeBase {
         };
     }
 
+    /**
+     * 从索引中移除指定文件及其所有 chunk。
+     */
     private removeFileFromIndex(filePath: string): string[] {
         const chunkIds: string[] = this.fileChunkIds.get(filePath) ?? [];
         for (const chunkId of chunkIds) {
@@ -746,6 +823,9 @@ export class VaultKnowledgeBase {
         return chunkIds;
     }
 
+    /**
+     * 从 chunkMap 重建有序 chunk 数组。
+     */
     private rebuildChunkArray(): void {
         this.chunks = Array.from(this.chunkMap.values()).sort((left: IndexedChunk, right: IndexedChunk) => {
             const fileOrder: number = left.filePath.localeCompare(right.filePath);
@@ -780,6 +860,9 @@ export class VaultKnowledgeBase {
             .sort((left: TFile, right: TFile) => left.path.localeCompare(right.path));
     }
 
+    /**
+     * 获取文件所属的所有父级目录路径。
+     */
     private getParentFolderPaths(filePath: string): string[] {
         const normalizedPath: string = normalizePath(filePath);
         const pathParts: string[] = normalizedPath.split("/");
@@ -796,6 +879,9 @@ export class VaultKnowledgeBase {
         return folderPaths;
     }
 
+    /**
+     * 使用匹配的解析器读取文件并转换为 chunk。
+     */
     private async parseFileToChunks(file: TFile, signal?: AbortSignal): Promise<IndexedChunk[]> {
         signal?.throwIfAborted();
         const parser: DocumentParser | null = this.parserRegistry.resolve(file);
@@ -827,6 +913,11 @@ export class VaultKnowledgeBase {
         return fileChunks;
     }
 
+    /**
+     * 将统一 ParsedDocument 切分为 IndexedChunk。
+     *
+     * 该方法按标题路径和 locator 兼容性聚合 block，再按 chunkSize/chunkOverlap 做文本切分。
+     */
     private chunkParsedDocument(parsedDocument: ParsedDocument): IndexedChunk[] {
         const chunks: IndexedChunk[] = [];
         const settings: VaultCoachSettings = this.getSettings();
@@ -940,6 +1031,11 @@ export class VaultKnowledgeBase {
         }
     }
 
+    /**
+     * 合并一组 block 的来源定位。
+     *
+     * PDF block 会合并为页码范围；Markdown/Zotero 直接保留首个定位。
+     */
     private mergeLocators(blocks: ParsedDocumentBlock[]): DocumentLocator {
         const firstLocator: DocumentLocator | undefined = blocks[0]?.locator;
         if (!firstLocator) {
@@ -972,6 +1068,9 @@ export class VaultKnowledgeBase {
         };
     }
 
+    /**
+     * 构造 locator 对应的可检索文本。
+     */
     private buildLocatorSearchText(locator: DocumentLocator): string {
         if (locator.type === "pdf") {
             const pageEnd: number = locator.pageEnd ?? locator.pageStart;
@@ -987,6 +1086,9 @@ export class VaultKnowledgeBase {
         return locator.citationKey ?? locator.itemKey;
     }
 
+    /**
+     * 计算一组 block 的平均提取质量。
+     */
     private averageExtractionQuality(blocks: ParsedDocumentBlock[]): number | undefined {
         const values: number[] = blocks
             .map((block: ParsedDocumentBlock) => block.extractionQuality)
@@ -999,12 +1101,18 @@ export class VaultKnowledgeBase {
         return values.reduce((sum: number, value: number) => sum + value, 0) / values.length;
     }
 
+    /**
+     * 判断两个 block 是否位于同一标题路径。
+     */
     private haveCompatibleHeadingPath(left: ParsedDocumentBlock | undefined, right: ParsedDocumentBlock): boolean {
         const leftHeadingPath: string[] = left?.headingPath ?? [];
         const rightHeadingPath: string[] = right.headingPath ?? [];
         return leftHeadingPath.join("\u0000") === rightHeadingPath.join("\u0000");
     }
 
+    /**
+     * 判断一组 block 的 locator 是否可合并到同一个 chunk。
+     */
     private canMergeLocatorRange(blocks: ParsedDocumentBlock[]): boolean {
         const firstLocator: DocumentLocator | undefined = blocks[0]?.locator;
         if (!firstLocator || firstLocator.type !== "pdf") {
@@ -1025,6 +1133,9 @@ export class VaultKnowledgeBase {
         return pageEnd - pageStart <= 1;
     }
 
+    /**
+     * 归一化旧快照中的 chunk，补齐新版本需要的字段。
+     */
     private normalizePersistedChunk(chunk: IndexedChunk): IndexedChunk {
         const documentType = chunk.documentType ?? "markdown";
         const documentId: string = chunk.documentId ?? createDocumentId(documentType, chunk.filePath);
@@ -1045,6 +1156,9 @@ export class VaultKnowledgeBase {
         };
     }
 
+    /**
+     * 读取文件内容哈希。
+     */
     private async readFileContentHash(file: TFile): Promise<string> {
         if (this.isPdfPath(file.path)) {
             return hashArrayBuffer(await this.app.vault.readBinary(file));
@@ -1238,30 +1352,48 @@ export class VaultKnowledgeBase {
             : "目录：未指定";
     }
 
+    /**
+     * 判断路径是否为 Markdown 文件。
+     */
     private isMarkdownPath(path: string): boolean {
         return path.toLowerCase().endsWith(".md");
     }
 
+    /**
+     * 判断路径是否为 PDF 文件。
+     */
     private isPdfPath(path: string): boolean {
         return path.toLowerCase().endsWith(".pdf");
     }
 
+    /**
+     * 判断路径是否属于当前设置启用的知识文件类型。
+     */
     private isSupportedKnowledgePath(path: string): boolean {
         const settings: VaultCoachSettings = this.getSettings();
         return (settings.enableMarkdownIndexing && this.isMarkdownPath(path))
             || (settings.enablePdfIndexing && this.isPdfPath(path));
     }
 
+    /**
+     * 判断文件是否能被当前解析器链处理。
+     */
     private isSupportedKnowledgeFile(file: TFile): boolean {
         return this.isSupportedKnowledgePath(file.path) && this.parserRegistry.resolve(file) !== null;
     }
 
+    /**
+     * 判断路径是否位于 VaultCoach 隐藏目录中。
+     */
     private isVaultCoachHiddenPath(path: string): boolean {
         const normalizedPath: string = normalizePath(path);
         return normalizedPath === VAULT_COACH_HIDDEN_DIR_PATH
             || normalizedPath.startsWith(`${VAULT_COACH_HIDDEN_DIR_PATH}/`);
     }
 
+    /**
+     * 识别 AbortError，避免把用户主动取消记录为失败。
+     */
     private isAbortError(error: unknown): boolean {
         if (error instanceof DOMException) {
             return error.name === "AbortError";

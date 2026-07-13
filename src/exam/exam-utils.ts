@@ -1,6 +1,16 @@
 import { LocalModelClient } from "../model-client";
 import type { LocalChatMessage } from "../types";
 
+/**
+ * 考试模式通用工具模块。
+ *
+ * 这里放置跨考试子模块复用的小函数，包括取消检查、模型 JSON 修复、
+ * 标题路径规范化和内部提示词标记清理。
+ */
+
+/**
+ * 如果调用方已经取消考试生成，立即抛出 AbortError。
+ */
 export function throwIfAborted(abortSignal?: AbortSignal): void {
     if (!abortSignal?.aborted) {
         return;
@@ -9,6 +19,9 @@ export function throwIfAborted(abortSignal?: AbortSignal): void {
     throw new DOMException("VaultCoach exam generation was cancelled.", "AbortError");
 }
 
+/**
+ * 将 unknown 值安全转换为指定范围内的数字。
+ */
 export function clampNumber(value: unknown, min: number, max: number): number {
     const numericValue: number = typeof value === "number"
         ? value
@@ -21,6 +34,9 @@ export function clampNumber(value: unknown, min: number, max: number): number {
     return Math.max(min, Math.min(max, numericValue));
 }
 
+/**
+ * 将常见原始值归一化为单行文本。
+ */
 export function normalizeWhitespace(value: unknown): string {
     if (typeof value === "string") {
         return value.replace(/\s+/g, " ").trim();
@@ -33,6 +49,9 @@ export function normalizeWhitespace(value: unknown): string {
     return "";
 }
 
+/**
+ * 将模型返回的标题路径归一化为字符串数组。
+ */
 export function normalizeHeadingPath(value: unknown): string[] {
     if (!Array.isArray(value)) {
         return [];
@@ -44,10 +63,16 @@ export function normalizeHeadingPath(value: unknown): string[] {
         .filter((part: string) => part.length > 0);
 }
 
+/**
+ * 生成标题路径比较用 key。
+ */
 export function headingPathKey(headingPath: string[]): string {
     return headingPath.map((part: string) => normalizeWhitespace(part).toLowerCase()).join("\u0000");
 }
 
+/**
+ * 判断候选标题路径是否匹配目标标题路径。
+ */
 export function headingPathMatches(candidate: string[], target: string[]): boolean {
     if (target.length === 0) {
         return candidate.length === 0;
@@ -66,6 +91,9 @@ export function headingPathMatches(candidate: string[], target: string[]): boole
     return true;
 }
 
+/**
+ * 清理模型可能泄露到题目、答案或评分标准中的内部上下文标记。
+ */
 export function stripInternalExamLabels(value: unknown): string {
     return normalizeWhitespace(value)
         .replace(/^(?:请)?(?:根据|基于|结合|参考)(?:上述|给定|以上|以下|下列|提供的)?(?:上下文|材料|片段|内容|文本)(?:中(?:的)?(?:内容|信息|描述|说明)?)?\s*[，,。.:：；;]?\s*/gi, "")
@@ -82,6 +110,11 @@ export function stripInternalExamLabels(value: unknown): string {
         .trim();
 }
 
+/**
+ * 尽量从模型输出中解析 JSON 对象。
+ *
+ * 兼容被 Markdown 代码块包裹或前后带解释文本的模型输出。
+ */
 export function parseJsonObject(rawText: string): unknown {
     const trimmedText: string = rawText.trim()
         .replace(/^```(?:json)?\s*/i, "")
@@ -101,6 +134,9 @@ export function parseJsonObject(rawText: string): unknown {
     }
 }
 
+/**
+ * 调用模型生成 JSON，并在第一次解析失败时让模型按 schema 修复。
+ */
 export async function generateParsedJsonAnswer<T>(
     client: LocalModelClient,
     messages: LocalChatMessage[],

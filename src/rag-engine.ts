@@ -34,6 +34,17 @@ import type {
     VaultCoachSettings,
 } from "./types";
 
+/**
+ * RAG 引擎模块。
+ *
+ * 负责把用户问题转成完整回答链路：query rewrite、候选召回、混合融合、
+ * rerank、prompt 构造、模型生成、来源构造和兜底回答。
+ * 它不直接管理 Obsidian 视图或磁盘状态，这些由主插件入口负责。
+ */
+
+/**
+ * 生成回答前准备好的上下文。
+ */
 interface PreparedAnswer {
     promptMessages: LocalChatMessage[];
     sources: AnswerSource[];
@@ -44,6 +55,9 @@ interface PreparedAnswer {
     noCandidates: boolean;
 }
 
+/**
+ * 旧版考试生成链路的题目 JSON 结构。
+ */
 interface GeneratedExamQuestionPayload {
     id?: string;
     question?: string;
@@ -52,11 +66,17 @@ interface GeneratedExamQuestionPayload {
     source_paths?: string[];
 }
 
+/**
+ * 旧版考试生成链路的试卷 JSON 结构。
+ */
 interface GeneratedExamPayload {
     title?: string;
     questions?: GeneratedExamQuestionPayload[];
 }
 
+/**
+ * 旧版考试评分链路的单题 JSON 结构。
+ */
 interface ExamEvaluationItemPayload {
     id?: string;
     question_id?: string;
@@ -66,6 +86,9 @@ interface ExamEvaluationItemPayload {
     improvement?: string;
 }
 
+/**
+ * 旧版考试评分链路的整卷 JSON 结构。
+ */
 interface ExamEvaluationPayload {
     score?: number;
     max_score?: number;
@@ -73,6 +96,9 @@ interface ExamEvaluationPayload {
     items?: ExamEvaluationItemPayload[];
 }
 
+/**
+ * 高级 RAG 引擎。
+ */
 export class AdvancedRagEngine {
     private readonly knowledgeBase: VaultKnowledgeBase;
     private readonly vectorStore: VectorStore;
@@ -101,19 +127,30 @@ export class AdvancedRagEngine {
         this.client = new LocalModelClient(getSettings, getCloudApiKey);
     }
 
+    /**
+     * 获取当前向量索引统计。
+     */
     getVectorIndexStats(): VectorIndexStats {
         return { ...this.vectorStats };
     }
 
+    /**
+     * 消费 Ollama embedding CPU fallback 标记。
+     */
     consumeOllamaEmbeddingCpuFallbackUsed(): boolean {
         return this.client.consumeOllamaEmbeddingCpuFallbackUsed();
     }
 
-    // 新增：从磁盘恢复向量索引状态。
+    /**
+     * 从磁盘快照恢复向量索引状态。
+     */
     hydrateVectorStats(vectorStats: VectorIndexStats): void {
         this.vectorStats = { ...vectorStats };
     }
 
+    /**
+     * 从 VectorStore 重新读取向量索引统计。
+     */
     async refreshVectorStatsFromStore(): Promise<VectorIndexStats> {
         const stats: VectorStoreStats = await this.vectorStore.getStats();
         this.vectorStats = {
@@ -125,6 +162,9 @@ export class AdvancedRagEngine {
         return this.getVectorIndexStats();
     }
 
+    /**
+     * 全量重建向量索引。
+     */
     async rebuildVectorIndex(signal?: AbortSignal): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
         signal?.throwIfAborted();
@@ -153,7 +193,11 @@ export class AdvancedRagEngine {
         return this.getVectorIndexStats();
     }
 
-    // 新增：增量同步时只为发生变化的 chunk 重算 embedding。
+    /**
+     * 增量同步向量索引。
+     *
+     * 删除已移除 chunk 的向量，只为 changedChunks 重新生成 embedding。
+     */
     async syncVectorIndex(syncResult: KnowledgeBaseSyncResult, signal?: AbortSignal): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
         signal?.throwIfAborted();
@@ -185,12 +229,18 @@ export class AdvancedRagEngine {
         return this.getVectorIndexStats();
     }
 
+    /**
+     * 根据设置读取当前 embedding 模型名。
+     */
     private getActiveEmbeddingModel(settings: VaultCoachSettings): string {
         return settings.embeddingProvider === "openai-compatible"
             ? settings.cloudEmbeddingModel.trim()
             : settings.embeddingModel.trim();
     }
 
+    /**
+     * 非流式回答入口。
+     */
     async answerQuestion(
         userText: string,
         messages: ChatMessage[],
@@ -247,7 +297,11 @@ export class AdvancedRagEngine {
         }
     }
 
-    // 新增：最终回答使用流式输出，完成后仍返回完整 AssistantAnswer。
+    /**
+     * 流式回答入口。
+     *
+     * UI 可通过 handlers 接收 token，同时方法结束时仍返回完整 AssistantAnswer 供持久化。
+     */
     async streamAnswerQuestion(
         userText: string,
         messages: ChatMessage[],
@@ -332,6 +386,9 @@ export class AdvancedRagEngine {
         }
     }
 
+    /**
+     * 识别 AbortError，避免取消操作进入普通失败 fallback。
+     */
     private isAbortError(error: unknown): boolean {
         if (error instanceof DOMException) {
             return error.name === "AbortError";
@@ -344,7 +401,11 @@ export class AdvancedRagEngine {
         return false;
     }
 
-    // 新增：对外暴露长期记忆抽取入口，由主插件负责持久化与去重。
+    /**
+     * 对外暴露长期记忆抽取入口。
+     *
+     * 主插件负责持久化与去重，本方法只负责调用模型提取候选记忆。
+     */
     async extractMemoryStatements(
         userText: string,
         assistantText: string,
@@ -357,6 +418,11 @@ export class AdvancedRagEngine {
         );
     }
 
+    /**
+     * 旧版考试会话生成入口。
+     *
+     * 当前主考试链路已拆分到 ExamEngine；保留该方法用于兼容现有调用和评分链路。
+     */
     async generateExamSession(
         scopeLabel: string,
         selection: ExamScopeSelection,
@@ -461,6 +527,9 @@ export class AdvancedRagEngine {
         };
     }
 
+    /**
+     * 对用户提交的考试答案进行模型评分。
+     */
     async evaluateExamSession(session: ExamSession, userAnswers: string[]): Promise<ExamEvaluation> {
         const answerBlocks: string[] = session.questions.map((question: ExamQuestion, index: number) => {
             const userAnswer: string = userAnswers[index]?.trim() ?? "";
@@ -527,6 +596,9 @@ export class AdvancedRagEngine {
         return this.normalizeExamEvaluation(payload, session.questions);
     }
 
+    /**
+     * 调用模型生成 JSON，并在解析失败时请求模型修复。
+     */
     private async generateParsedJsonAnswer<T>(
         messages: LocalChatMessage[],
         temperature: number,
@@ -578,6 +650,9 @@ export class AdvancedRagEngine {
         }
     }
 
+    /**
+     * 考试生成 JSON schema 文本。
+     */
     private buildGeneratedExamJsonSchemaDescription(): string {
         return [
             "{",
@@ -595,6 +670,9 @@ export class AdvancedRagEngine {
         ].join("\n");
     }
 
+    /**
+     * 考试评分 JSON schema 文本。
+     */
     private buildExamEvaluationJsonSchemaDescription(): string {
         return [
             "{",
@@ -614,6 +692,9 @@ export class AdvancedRagEngine {
         ].join("\n");
     }
 
+    /**
+     * 截断待修复的模型输出，避免 JSON 修复 prompt 过长。
+     */
     private truncateModelOutputForRepair(rawText: string): string {
         const maxCharacters = 16000;
         if (rawText.length <= maxCharacters) {
@@ -623,6 +704,9 @@ export class AdvancedRagEngine {
         return `${rawText.slice(0, maxCharacters)}\n...`;
     }
 
+    /**
+     * 构建旧版考试蓝图。
+     */
     private buildExamBlueprint(scopeLabel: string, contextChunks: IndexedChunk[], requestedQuestionCount: number): ExamBlueprint {
         const plannedQuestionCount: number = Math.min(requestedQuestionCount, contextChunks.length);
         const questionTypes: ExamBlueprintItem["questionType"][] = [
@@ -664,6 +748,9 @@ export class AdvancedRagEngine {
         };
     }
 
+    /**
+     * 将蓝图格式化为模型可读文本。
+     */
     private buildExamBlueprintBlock(blueprint: ExamBlueprint): string {
         return blueprint.items.map((item: ExamBlueprintItem, index: number) => {
             return [
@@ -678,6 +765,9 @@ export class AdvancedRagEngine {
         }).join("\n\n");
     }
 
+    /**
+     * 选择考试上下文 chunk，并尽量覆盖多个文件。
+     */
     private selectExamContextChunks(chunks: IndexedChunk[], maxChunks: number, maxCharacters: number): IndexedChunk[] {
         const chunksByFilePath: Map<string, IndexedChunk[]> = new Map<string, IndexedChunk[]>();
         for (const chunk of chunks) {
@@ -717,6 +807,9 @@ export class AdvancedRagEngine {
         return this.limitChunksByCharacters(selectedChunks, maxCharacters);
     }
 
+    /**
+     * 按字符预算限制 chunk 数量。
+     */
     private limitChunksByCharacters(chunks: IndexedChunk[], maxCharacters: number): IndexedChunk[] {
         const selectedChunks: IndexedChunk[] = [];
         let usedCharacters = 0;
@@ -734,6 +827,9 @@ export class AdvancedRagEngine {
         return selectedChunks;
     }
 
+    /**
+     * 构造考试生成 prompt 中的上下文块。
+     */
     private buildExamContextBlock(chunks: IndexedChunk[]): string {
         return chunks.map((chunk: IndexedChunk, index: number) => {
             const headingLabel: string = chunk.headingPath.length > 0
@@ -750,6 +846,9 @@ export class AdvancedRagEngine {
         }).join("\n\n");
     }
 
+    /**
+     * 规范化模型生成的考试题。
+     */
     private normalizeGeneratedExamQuestions(
         payloadQuestions: GeneratedExamQuestionPayload[],
         questionCount: number,
@@ -813,6 +912,9 @@ export class AdvancedRagEngine {
         return questions;
     }
 
+    /**
+     * 生成题目去重指纹。
+     */
     private normalizeExamQuestionFingerprint(question: string): string {
         return question
             .toLowerCase()
@@ -820,6 +922,9 @@ export class AdvancedRagEngine {
             .slice(0, 80);
     }
 
+    /**
+     * 清理考试题目中的内部上下文标签。
+     */
     private stripInternalContextLabels(value: string): string {
         return value
             .replace(/上下文\s*\d+/gi, "")
@@ -833,6 +938,9 @@ export class AdvancedRagEngine {
             .trim();
     }
 
+    /**
+     * 将评分标准统一为 100 分制。
+     */
     private normalizeRubricText(value: string): string {
         const cleanedValue: string = value
             .replace(/满分\s*\d+\s*分/g, "满分 100 分")
@@ -847,6 +955,9 @@ export class AdvancedRagEngine {
         return `本题按 100 分制评分；${cleanedValue}`;
     }
 
+    /**
+     * 规范化模型评分结果。
+     */
     private normalizeExamEvaluation(payload: ExamEvaluationPayload, questions: ExamQuestion[]): ExamEvaluation {
         const itemPayloads: ExamEvaluationItemPayload[] = Array.isArray(payload.items) ? payload.items : [];
         const items: ExamEvaluationItem[] = questions.map((question: ExamQuestion, index: number) => {
@@ -877,6 +988,9 @@ export class AdvancedRagEngine {
         };
     }
 
+    /**
+     * 从模型文本中解析 JSON 对象。
+     */
     private parseJsonObject(rawText: string): unknown {
         const trimmedText: string = rawText.trim()
             .replace(/^```(?:json)?\s*/i, "")
@@ -896,11 +1010,17 @@ export class AdvancedRagEngine {
         }
     }
 
+    /**
+     * 规范化题目 ID。
+     */
     private normalizeQuestionId(value: string | undefined, fallback: string): string {
         const normalizedValue: string = this.normalizeText(value, fallback).toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
         return normalizedValue.length > 0 ? normalizedValue : fallback;
     }
 
+    /**
+     * 规范化模型返回文本。
+     */
     private normalizeText(value: string | undefined, fallback: string): string {
         if (typeof value !== "string") {
             return fallback;
@@ -910,6 +1030,9 @@ export class AdvancedRagEngine {
         return trimmedValue.length > 0 ? trimmedValue : fallback;
     }
 
+    /**
+     * 将分数裁剪到指定范围。
+     */
     private clampScore(value: number, min: number, max: number): number {
         if (!Number.isFinite(value)) {
             return min;
@@ -918,10 +1041,16 @@ export class AdvancedRagEngine {
         return Math.max(min, Math.min(max, Math.round(value)));
     }
 
+    /**
+     * 生成稳定的考试 ID。
+     */
     private createExamId(timestamp: number): string {
         return `exam_${new Date(timestamp).toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
     }
 
+    /**
+     * 准备回答所需的检索结果、来源和模型消息。
+     */
     private async prepareAnswer(
         userText: string,
         messages: ChatMessage[],
@@ -975,6 +1104,9 @@ export class AdvancedRagEngine {
         };
     }
 
+    /**
+     * 根据运行时模式和向量索引状态决定实际检索模式。
+     */
     private resolveEffectiveRetrievalMode(): RetrievalMode {
         const runtimeMode: RetrievalMode = this.getRuntimeRetrievalMode();
         const settings: VaultCoachSettings = this.getSettings();
@@ -990,6 +1122,9 @@ export class AdvancedRagEngine {
         return runtimeMode;
     }
 
+    /**
+     * 按检索模式召回候选 chunk。
+     */
     private async retrieveCandidates(query: string, mode: RetrievalMode): Promise<RetrievalCandidate[]> {
         if (mode === "keyword") {
             return this.buildCandidatesFromKeywordHits(
@@ -1019,6 +1154,9 @@ export class AdvancedRagEngine {
         return this.mergeHybrid(keywordHits, vectorHits, this.getSettings().hybridSearchTopK);
     }
 
+    /**
+     * 执行向量召回。
+     */
     private async searchVector(query: string): Promise<VectorSearchHit[]> {
         const queryEmbeddings: number[][] = await this.client.embedTexts([query]);
         const queryEmbedding: number[] | undefined = queryEmbeddings[0];
@@ -1051,6 +1189,9 @@ export class AdvancedRagEngine {
             .filter((hit: VectorSearchHit | null): hit is VectorSearchHit => hit !== null);
     }
 
+    /**
+     * 将关键词命中转换为统一候选结构。
+     */
     private buildCandidatesFromKeywordHits(hits: KeywordSearchHit[]): RetrievalCandidate[] {
         return hits.map((hit: KeywordSearchHit) => ({
             chunk: hit.chunk,
@@ -1061,6 +1202,9 @@ export class AdvancedRagEngine {
         }));
     }
 
+    /**
+     * 将向量命中转换为统一候选结构。
+     */
     private buildCandidatesFromVectorHits(hits: VectorSearchHit[]): RetrievalCandidate[] {
         return hits.map((hit: VectorSearchHit) => ({
             chunk: hit.chunk,
@@ -1071,6 +1215,9 @@ export class AdvancedRagEngine {
         }));
     }
 
+    /**
+     * 使用 RRF 融合关键词和向量召回结果。
+     */
     private mergeHybrid(
         keywordHits: KeywordSearchHit[],
         vectorHits: VectorSearchHit[],
@@ -1138,6 +1285,9 @@ export class AdvancedRagEngine {
         return mergedCandidates.slice(0, limit);
     }
 
+    /**
+     * 对召回候选进行重排。
+     */
     private async rerankCandidates(query: string, candidates: RetrievalCandidate[]): Promise<RerankedCandidate[]> {
         const settings: VaultCoachSettings = this.getSettings();
         const limitedCandidates: RetrievalCandidate[] = candidates.slice(0, settings.rerankTopK);
@@ -1162,6 +1312,9 @@ export class AdvancedRagEngine {
         return this.heuristicRerank(query, limitedCandidates);
     }
 
+    /**
+     * 调用独立 rerank 服务进行重排。
+     */
     private async remoteRerank(query: string, candidates: RetrievalCandidate[]): Promise<RerankedCandidate[]> {
         const documents: string[] = candidates.map((candidate: RetrievalCandidate) => this.buildRerankDocument(candidate.chunk));
         const results: RerankResultItem[] = await this.client.rerankDocuments(query, documents);
@@ -1191,6 +1344,9 @@ export class AdvancedRagEngine {
         return reranked;
     }
 
+    /**
+     * 本地启发式 rerank fallback。
+     */
     private heuristicRerank(query: string, candidates: RetrievalCandidate[]): RerankedCandidate[] {
         const normalizedQuery: string = this.normalizeForPhraseMatch(query);
         const queryTokens: string[] = Array.from(new Set(this.tokenize(query)));
@@ -1238,6 +1394,9 @@ export class AdvancedRagEngine {
         return reranked;
     }
 
+    /**
+     * 构造最终回答使用的聊天消息。
+     */
     private buildAnswerMessages(
         userText: string,
         rewriteResult: QueryRewriteResult,
@@ -1264,6 +1423,9 @@ export class AdvancedRagEngine {
         ];
     }
 
+    /**
+     * 构造回答系统提示词。
+     */
     private buildAnswerSystemPrompt(answerLanguage: QuestionLanguage): string {
         if (answerLanguage === "en") {
             return [
@@ -1294,6 +1456,9 @@ export class AdvancedRagEngine {
         ].join("\n");
     }
 
+    /**
+     * 构造回答用户提示词。
+     */
     private buildAnswerUserPrompt(
         userText: string,
         rewriteResult: QueryRewriteResult,
@@ -1342,6 +1507,9 @@ export class AdvancedRagEngine {
         ].join("\n");
     }
 
+    /**
+     * 构造注入 prompt 的检索上下文块。
+     */
     private buildContextBlock(contextCandidates: RerankedCandidate[], answerLanguage: QuestionLanguage): string {
         const blocks: string[] = [];
 
@@ -1384,6 +1552,9 @@ export class AdvancedRagEngine {
         return blocks.join("\n\n");
     }
 
+    /**
+     * 根据重排结果生成回答下方展示的来源列表。
+     */
     private buildAnswerSources(candidates: RerankedCandidate[], answerLanguage: QuestionLanguage): AnswerSource[] {
         const uniqueSources: AnswerSource[] = [];
         const seenKeys: Set<string> = new Set<string>();
@@ -1410,6 +1581,9 @@ export class AdvancedRagEngine {
         return uniqueSources;
     }
 
+    /**
+     * 在生成模型不可用或无候选时构造可读的检索摘要。
+     */
     private buildFallbackMarkdownAnswer(
         userText: string,
         rewriteResult: QueryRewriteResult,
@@ -1502,6 +1676,9 @@ export class AdvancedRagEngine {
         return lines.join("\n");
     }
 
+    /**
+     * 将 chunk 转换为用户可点击的来源结构。
+     */
     private convertChunkToSource(chunk: IndexedChunk, answerLanguage: QuestionLanguage): AnswerSource {
         if (chunk.locator.type === "pdf") {
             const pageEnd: number = chunk.locator.pageEnd ?? chunk.locator.pageStart;
@@ -1530,6 +1707,9 @@ export class AdvancedRagEngine {
         };
     }
 
+    /**
+     * 格式化 PDF 来源页码。
+     */
     private formatPdfSourcePageLabel(pageStart: number, pageEnd: number, answerLanguage: QuestionLanguage): string {
         if (answerLanguage === "en") {
             return pageEnd === pageStart
@@ -1542,6 +1722,9 @@ export class AdvancedRagEngine {
             : `第 ${pageStart}-${pageEnd} 页`;
     }
 
+    /**
+     * 格式化 prompt 中展示的来源定位。
+     */
     private formatLocatorLabel(chunk: IndexedChunk, answerLanguage: QuestionLanguage): string {
         if (chunk.locator.type === "pdf") {
             const pageEnd: number = chunk.locator.pageEnd ?? chunk.locator.pageStart;
@@ -1559,6 +1742,9 @@ export class AdvancedRagEngine {
         return chunk.primaryHeading ?? (answerLanguage === "en" ? "(No heading)" : "（无标题）");
     }
 
+    /**
+     * 构造 rerank 服务使用的文档文本。
+     */
     private buildRerankDocument(chunk: IndexedChunk): string {
         return [
             `文件：${chunk.filePath}`,
@@ -1568,6 +1754,9 @@ export class AdvancedRagEngine {
         ].join("\n");
     }
 
+    /**
+     * 构造最近对话上下文。
+     */
     private buildConversationContext(messages: ChatMessage[]): string {
         const recentMessages: ChatMessage[] = messages.slice(-6);
         const lines: string[] = [];
@@ -1580,6 +1769,9 @@ export class AdvancedRagEngine {
         return lines.join("\n");
     }
 
+    /**
+     * 构造用户可读摘录。
+     */
     private createExcerpt(text: string, maxLength: number): string {
         const normalizedText: string = text.replace(/\s+/g, " ").trim();
         if (normalizedText.length <= maxLength) {
@@ -1589,6 +1781,9 @@ export class AdvancedRagEngine {
         return `${normalizedText.slice(0, maxLength)}…`;
     }
 
+    /**
+     * 轻量 tokenizer，支持中英文混合检索。
+     */
     private tokenize(text: string): string[] {
         const normalizedText: string = text.toLowerCase();
         const tokens: string[] = [];
@@ -1618,10 +1813,16 @@ export class AdvancedRagEngine {
         return tokens;
     }
 
+    /**
+     * 用于短语匹配的文本归一化。
+     */
     private normalizeForPhraseMatch(text: string): string {
         return text.toLowerCase().replace(/\s+/g, " ").trim();
     }
 
+    /**
+     * 分批为 chunk 生成 embedding 记录。
+     */
     private async buildChunkEmbeddings(chunks: IndexedChunk[], signal?: AbortSignal): Promise<VectorRecord[]> {
         const batchSize = 16;
         const items: VectorRecord[] = [];

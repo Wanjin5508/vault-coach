@@ -8,6 +8,16 @@ import type {
 } from "../types";
 import { generateParsedJsonAnswer, normalizeWhitespace } from "./exam-utils";
 
+/**
+ * 考试蓝图规划模块。
+ *
+ * 蓝图是题目生成前的结构化计划，用于控制题目数量、覆盖主题、题型、难度和来源 chunk。
+ * 模型规划失败时会回退到确定性蓝图，避免考试模式完全不可用。
+ */
+
+/**
+ * 模型返回的蓝图根结构。
+ */
 interface ExamBlueprintPayload {
     title?: unknown;
     requested_question_count?: unknown;
@@ -15,6 +25,9 @@ interface ExamBlueprintPayload {
     items?: unknown;
 }
 
+/**
+ * 模型返回的单个蓝图项。
+ */
 interface ExamBlueprintItemPayload {
     id?: unknown;
     topic?: unknown;
@@ -38,6 +51,9 @@ const DIFFICULTIES: ExamBlueprintItem["difficulty"][] = [
     "advanced",
 ];
 
+/**
+ * 考试蓝图服务。
+ */
 export class ExamBlueprintService {
     private readonly client: LocalModelClient;
 
@@ -45,6 +61,11 @@ export class ExamBlueprintService {
         this.client = client;
     }
 
+    /**
+     * 构建考试蓝图。
+     *
+     * 优先让模型根据内容画像和 chunk 清单规划覆盖范围；解析或校验失败时回退到确定性选择。
+     */
     async buildBlueprint(
         scopeLabel: string,
         chunks: IndexedChunk[],
@@ -89,6 +110,9 @@ export class ExamBlueprintService {
         return this.buildDeterministicBlueprint(scopeLabel, chunks, requestedQuestionCount, plannedQuestionCount);
     }
 
+    /**
+     * 调用模型生成蓝图 JSON。
+     */
     private async generateBlueprintWithModel(
         scopeLabel: string,
         chunks: IndexedChunk[],
@@ -142,6 +166,9 @@ export class ExamBlueprintService {
         );
     }
 
+    /**
+     * 校验并规范化模型返回的蓝图。
+     */
     private normalizeBlueprintPayload(
         payload: ExamBlueprintPayload,
         scopeLabel: string,
@@ -217,6 +244,9 @@ export class ExamBlueprintService {
         };
     }
 
+    /**
+     * 从模型输出中提取合法且未使用过的 source_chunk_ids。
+     */
     private normalizeSourceChunkIds(
         rawValue: unknown,
         chunkById: Map<string, IndexedChunk>,
@@ -243,6 +273,11 @@ export class ExamBlueprintService {
         return Array.from(new Set(chunkIds)).slice(0, 3);
     }
 
+    /**
+     * 构建确定性蓝图。
+     *
+     * 按文件轮询选择 chunk，尽量让题目覆盖多个文件和主题。
+     */
     private buildDeterministicBlueprint(
         scopeLabel: string,
         chunks: IndexedChunk[],
@@ -270,6 +305,9 @@ export class ExamBlueprintService {
         };
     }
 
+    /**
+     * 选择用于规划的代表性 chunk。
+     */
     private selectPlanningChunks(chunks: IndexedChunk[], maxChunks: number, maxCharacters: number): IndexedChunk[] {
         const chunksByFilePath: Map<string, IndexedChunk[]> = new Map<string, IndexedChunk[]>();
         for (const chunk of chunks) {
@@ -316,6 +354,9 @@ export class ExamBlueprintService {
         return selectedChunks;
     }
 
+    /**
+     * 根据可用 chunk 和文件数估算最多可生成多少题。
+     */
     private estimateContentCapacity(chunks: IndexedChunk[]): number {
         if (chunks.length === 0) {
             return 0;
@@ -325,6 +366,9 @@ export class ExamBlueprintService {
         return Math.min(10, Math.max(1, Math.ceil(chunks.length / 2)), Math.max(1, fileCount * 3));
     }
 
+    /**
+     * 构造模型可读的内容画像摘要。
+     */
     private buildProfileSummary(profiles: ExamContentProfile[]): string {
         const includedProfiles: ExamContentProfile[] = profiles.filter((profile: ExamContentProfile) => profile.decision !== "exclude");
         if (includedProfiles.length === 0) {
@@ -341,6 +385,9 @@ export class ExamBlueprintService {
         }).join("\n\n");
     }
 
+    /**
+     * 构造模型可读的 chunk 清单。
+     */
     private buildChunkInventory(chunks: IndexedChunk[]): string {
         return chunks.map((chunk: IndexedChunk, index: number) => {
             return [
@@ -354,6 +401,9 @@ export class ExamBlueprintService {
         }).join("\n\n");
     }
 
+    /**
+     * 生成蓝图 JSON schema 文本。
+     */
     private buildBlueprintSchema(): string {
         return [
             "{",
@@ -374,17 +424,26 @@ export class ExamBlueprintService {
         ].join("\n");
     }
 
+    /**
+     * 规范化蓝图项 ID。
+     */
     private normalizeBlueprintItemId(value: unknown, fallbackIndex: number): string {
         const normalizedValue: string = normalizeWhitespace(value ?? "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
         return normalizedValue.length > 0 ? normalizedValue : `bp${fallbackIndex}`;
     }
 
+    /**
+     * 规范化题型，非法值按位置轮换兜底。
+     */
     private normalizeQuestionType(value: unknown, index: number): ExamBlueprintItem["questionType"] {
         return QUESTION_TYPES.includes(value as ExamBlueprintItem["questionType"])
             ? value as ExamBlueprintItem["questionType"]
             : QUESTION_TYPES[index % QUESTION_TYPES.length] ?? "explanation";
     }
 
+    /**
+     * 规范化难度，非法值按题目顺序分布到基础/中级/高级。
+     */
     private normalizeDifficulty(value: unknown, index: number, total: number): ExamBlueprintItem["difficulty"] {
         if (DIFFICULTIES.includes(value as ExamBlueprintItem["difficulty"])) {
             return value as ExamBlueprintItem["difficulty"];
@@ -393,6 +452,9 @@ export class ExamBlueprintService {
         return DIFFICULTIES[Math.min(DIFFICULTIES.length - 1, Math.floor(index / Math.max(1, Math.ceil(total / DIFFICULTIES.length))))] ?? "basic";
     }
 
+    /**
+     * 判断错误是否来自取消操作。
+     */
     private isAbortError(error: unknown): boolean {
         if (error instanceof DOMException) {
             return error.name === "AbortError";

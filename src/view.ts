@@ -1,4 +1,10 @@
-// 最关键的文件，用于将插件做成右侧的边栏视图
+/**
+ * 右侧边栏视图模块。
+ *
+ * 负责 VaultCoach 的全部用户界面渲染与交互事件绑定，包括问答模式、考试模式、
+ * 流式回答、来源展示、考试历史和索引状态工具栏。业务逻辑通过 VaultCoach 主类调用，
+ * 本文件不直接访问模型或知识库内部实现。
+ */
 
 import { ItemView, WorkspaceLeaf, Notice, MarkdownRenderer } from "obsidian";
 import type VaultCoach  from "./main";
@@ -31,17 +37,11 @@ type ExamViewPhase = "setup" | "generating" | "taking" | "evaluating" | "review"
 
 /**
  * VaultCoachView 是一个自定义 ItemView。它不会像 Modal 那样弹窗，而是被放进 Obsidian 右侧边栏中。
- *
- * 第二阶段的界面重点：
- * - 支持切换 keyword / vector / hybrid
- * - 展示文本索引与向量索引状态
- * - assistant 回答按 Markdown 渲染
- * - 继续支持来源折叠与点击跳转
  */
 export class VaultCoachView extends ItemView {
     plugin: VaultCoach;
 
-    // 消息列表容器， 后面渲染消息时会往这个元素里塞内容
+    // 消息列表容器，后续消息渲染会写入该元素。
     private messageListEl!: HTMLDivElement;
 
     // 输入框元素
@@ -57,7 +57,7 @@ export class VaultCoachView extends ItemView {
     // 当前是否正等待插件完成检索回复
     private isBusy = false;
 
-    // 仅用于前端展示的模式切换；后台考试逻辑后续再接入。
+    // 当前交互模式：普通问答或考试。
     private activeInteractionMode: InteractionMode = "qa";
 
     private examPhase: ExamViewPhase = "setup";
@@ -82,7 +82,7 @@ export class VaultCoachView extends ItemView {
     // 中文/日文等输入法正在组词时，Enter 应交给输入法确认候选词，而不是发送消息。
     private isComposingInput = false;
 
-    // 新增：回答流式输出期间使用的临时助手气泡。
+    // 回答流式输出期间使用的临时助手气泡。
     private streamingWrapperEl: HTMLDivElement | null = null;
     private streamingBubbleEl: HTMLDivElement | null = null;
     private streamingText = "";
@@ -94,35 +94,46 @@ export class VaultCoachView extends ItemView {
         this.plugin = plugin;
     }
 
+    /**
+     * 获取本地化文案。
+     */
     private t(key: TranslationKey, replacements?: Record<string, string | number>): string {
         return translate(key, replacements);
     }
 
-    // 返回当前视图的唯一类型 ID，Obsidian 通过它识别这是哪个视图
+    /**
+     * 返回当前视图的唯一类型 ID，Obsidian 通过它识别视图类型。
+     */
     getViewType(): string {
         return VIEW_TYPE_VAULT_COACH;
     }
 
-    // 返回显示给用户看的标题，通常显示在标签页标题、悬浮窗标题和视图标题
+    /**
+     * 返回显示给用户看的视图标题。
+     */
     getDisplayText(): string {
         return VIEW_NAME_VAULT_COACH;
     }
 
-    // 返回视图图标名称，图标会显示在右侧上方标签区域
-    // TODO 后续可以改成其他图标名称
+    /**
+     * 返回 Obsidian 视图标签上的图标名称。
+     */
     getIcon(): string {
         return "message-square";
     }
 
-    // 当视图被打开时调用
+    /**
+     * 视图打开时渲染 UI，并处理首次样式加载延迟。
+     */
     async onOpen(): Promise<void> {
-        // 满足了"async 函数必须有 await 表达式"的 lint 规则，同时对实际行为没有任何影响
         await Promise.resolve();
         this.render();
         this.schedulePostOpenStyleRefresh();
     }
 
-    // 当视图被关闭时调用
+    /**
+     * 视图关闭时清理内容和延迟刷新计时器。
+     */
     async onClose(): Promise<void> {
         await Promise.resolve();
         this.clearPostOpenStyleRefreshTimers();
@@ -132,11 +143,16 @@ export class VaultCoachView extends ItemView {
         this.contentEl.removeClass("vault-coach-view");
     }
 
-    // 对外暴露的刷新方法，当 settings 变化、会话重置后，可以重新渲染界面
+    /**
+     * 对外暴露的刷新方法，设置变化或会话重置后由主插件调用。
+     */
     public refresh(): void {
         this.render();
     }
 
+    /**
+     * 安排几次延迟刷新，解决 Obsidian 首次注入 styles.css 较晚的问题。
+     */
     private schedulePostOpenStyleRefresh(): void {
         this.clearPostOpenStyleRefreshTimers();
 
@@ -149,6 +165,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 清理首次打开样式刷新计时器。
+     */
     private clearPostOpenStyleRefreshTimers(): void {
         for (const timerId of this.postOpenStyleRefreshTimers) {
             window.clearTimeout(timerId);
@@ -156,6 +175,9 @@ export class VaultCoachView extends ItemView {
         this.postOpenStyleRefreshTimers = [];
     }
 
+    /**
+     * 如果样式已经加载且用户尚未输入，则补一次完整渲染。
+     */
     private refreshInitialLayoutIfStylesReady(): void {
         if (!this.isVaultCoachStylesheetActive()) {
             return;
@@ -172,6 +194,9 @@ export class VaultCoachView extends ItemView {
         this.render();
     }
 
+    /**
+     * 通过 sentinel CSS 变量判断插件样式是否已加载。
+     */
     private isVaultCoachStylesheetActive(): boolean {
         const sentinelEl: HTMLDivElement = this.contentEl.createDiv({ cls: "vault-coach-style-sentinel" });
         const loadedValue: string = getComputedStyle(sentinelEl)
@@ -182,8 +207,9 @@ export class VaultCoachView extends ItemView {
         return loadedValue === "1";
     }
 
-    // render 方法，负责完整渲染界面
-    // 当前写法是初学者友好的，逻辑清晰，好调试
+    /**
+     * 完整渲染当前视图。
+     */
     private render(): void {
         const { contentEl } = this;
         contentEl.empty();
@@ -205,12 +231,18 @@ export class VaultCoachView extends ItemView {
         this.renderInputArea(rootEl);
     }
 
+    /**
+     * 在重新渲染考试区域前记录滚动位置。
+     */
     private renderPreservingExamScroll(): void {
         const examAreaEl: HTMLDivElement | null = this.contentEl.querySelector(".vault-coach-exam-area");
         this.pendingExamAreaScrollTop = examAreaEl?.scrollTop ?? null;
         this.render();
     }
 
+    /**
+     * 恢复考试区域滚动位置。
+     */
     private restorePendingExamAreaScroll(): void {
         if (this.pendingExamAreaScrollTop === null) {
             return;
@@ -299,6 +331,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染索引构建中的状态条。
+     */
     private renderIndexBusyState(containerEl: HTMLDivElement, state: KnowledgeIndexBusyState): void {
         const busyEl: HTMLDivElement = containerEl.createDiv({
             cls: "vault-coach-index-busy",
@@ -325,6 +360,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 获取索引构建阶段对应的展示文案。
+     */
     private getIndexBusyText(state: KnowledgeIndexBusyState): string {
         if (state.phase === "rebuilding") {
             return this.t("view.indexBusy.rebuilding");
@@ -341,6 +379,9 @@ export class VaultCoachView extends ItemView {
         return this.t("view.indexBusy.generic");
     }
 
+    /**
+     * 渲染问答模式工具栏。
+     */
     private renderQaToolbar(toolbarEl: HTMLDivElement, indexBusy: boolean): void {
         const retrievalGroupEl: HTMLDivElement = toolbarEl.createDiv({ cls: "vault-coach-retrieval-group"});
         retrievalGroupEl.createSpan({text: `${this.t("view.retrievalModeLabel")} `});
@@ -368,6 +409,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染问答/考试模式切换。
+     */
     private renderModeSwitch(headerTopEl: HTMLDivElement): void {
         const modeSwitchEl: HTMLDivElement = headerTopEl.createDiv({
             cls: "vault-coach-mode-switch",
@@ -381,6 +425,9 @@ export class VaultCoachView extends ItemView {
         this.renderModeOption(modeSwitchEl, "exam", this.t("view.mode.exam"));
     }
 
+    /**
+     * 渲染单个模式选项。
+     */
     private renderModeOption(containerEl: HTMLDivElement, mode: InteractionMode, label: string): void {
         const buttonEl: HTMLButtonElement = containerEl.createEl("button", {
             text: label,
@@ -406,6 +453,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染头部统计项。
+     */
     private renderHeaderStat(containerEl: HTMLDivElement, label: string, value: string): void {
         const itemEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-header-stat" });
         itemEl.createDiv({
@@ -418,12 +468,18 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 向检索模式选择器添加选项。
+     */
     private addRetrievalOption(value: RetrievalMode, label: string): void {
         const optionEl: HTMLOptionElement = this.retrievalModeSelectEl.createEl("option");
         optionEl.value = value;
         optionEl.text = label;
     }
 
+    /**
+     * 渲染考试模式主体区域。
+     */
     private renderExamArea(rootEl: HTMLDivElement): void {
         const examAreaEl: HTMLDivElement = rootEl.createDiv({ cls: "vault-coach-exam-area" });
 
@@ -455,6 +511,9 @@ export class VaultCoachView extends ItemView {
         this.renderExamReview(examAreaEl, this.examSession);
     }
 
+    /**
+     * 渲染考试创建设置页。
+     */
     private renderExamSetup(containerEl: HTMLDivElement): void {
         const panelEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-panel" });
         panelEl.createEl("h4", { text: this.t("exam.setup.title") });
@@ -565,6 +624,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染单个考试范围选项。
+     */
     private renderExamScopeOption(containerEl: HTMLDivElement, option: ExamScopeOption, isAllOption: boolean): void {
         const optionEl: HTMLLabelElement = containerEl.createEl("label", {
             cls: "vault-coach-exam-scope-option",
@@ -616,6 +678,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染考试文件范围管理区域。
+     */
     private renderExamFileScopeSection(
         containerEl: HTMLDivElement,
         fileOptions: ExamFileOption[],
@@ -665,6 +730,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 渲染智能筛选开关。
+     */
     private renderExamSmartFilteringToggle(containerEl: HTMLDivElement): void {
         const toggleLabelEl: HTMLLabelElement = containerEl.createEl("label", {
             cls: "vault-coach-exam-toggle",
@@ -692,6 +760,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染考试文件管理器。
+     */
     private renderExamFileManager(containerEl: HTMLDivElement, fileOptions: ExamFileOption[]): void {
         const managerEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-file-manager" });
         const toolbarEl: HTMLDivElement = managerEl.createDiv({ cls: "vault-coach-exam-file-toolbar" });
@@ -774,6 +845,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 渲染单个考试文件选项。
+     */
     private renderExamFileOption(containerEl: HTMLElement, option: ExamFileOption): void {
         const optionEl: HTMLLabelElement = containerEl.createEl("label", {
             cls: `vault-coach-exam-file-option ${option.permanentlyExcluded ? "is-permanently-excluded" : ""}`,
@@ -819,6 +893,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 渲染智能筛选失败后的操作区。
+     */
     private renderExamSmartFilteringFailure(containerEl: HTMLDivElement): void {
         const warningEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-analysis-warning" });
         warningEl.createDiv({
@@ -847,6 +924,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染考试范围分析预览。
+     */
     private renderExamAnalysisPreview(
         containerEl: HTMLDivElement,
         fileOptions: ExamFileOption[],
@@ -934,12 +1014,18 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 渲染考试范围分析统计项。
+     */
     private renderExamAnalysisStat(containerEl: HTMLDivElement, label: string, value: string | number): void {
         const itemEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-analysis-stat" });
         itemEl.createDiv({ cls: "vault-coach-exam-analysis-stat-value", text: String(value) });
         itemEl.createDiv({ cls: "vault-coach-exam-analysis-stat-label", text: label });
     }
 
+    /**
+     * 获取智能筛选决策展示标签。
+     */
     private getExamAnalysisDecisionLabel(option: ExamFileOption, profile: ExamContentProfile | undefined): string {
         if (option.permanentlyExcluded) {
             return this.t("exam.analysis.ruleExcluded");
@@ -968,6 +1054,9 @@ export class VaultCoachView extends ItemView {
         return this.t("exam.analysis.included");
     }
 
+    /**
+     * 获取智能筛选决策对应的 CSS class。
+     */
     private getExamAnalysisDecisionClass(option: ExamFileOption, profile: ExamContentProfile | undefined): string {
         if (option.permanentlyExcluded || this.excludedExamFilePaths.has(option.filePath) || profile?.decision === "exclude") {
             return "is-muted";
@@ -980,6 +1069,9 @@ export class VaultCoachView extends ItemView {
         return "is-positive";
     }
 
+    /**
+     * 获取智能筛选原因展示文本。
+     */
     private getExamAnalysisReasonText(option: ExamFileOption, profile: ExamContentProfile | undefined): string {
         if (option.permanentExcludeReason) {
             return option.permanentExcludeReason;
@@ -992,6 +1084,9 @@ export class VaultCoachView extends ItemView {
         return profile.reasonCodes.join(", ");
     }
 
+    /**
+     * 渲染考试相关异步操作的忙碌态。
+     */
     private renderExamBusyState(containerEl: HTMLDivElement, label: string, canCancel = false): void {
         const panelEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-panel vault-coach-exam-busy" });
         const thinkingEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-thinking-indicator" });
@@ -1023,6 +1118,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 获取向量索引状态文案。
+     */
     private getVectorIndexStatusText(vectorStats: VectorIndexStats): string {
         if (!this.plugin.settings.enableVectorRetrieval) {
             return this.t("view.indexStatus.vectorDisabled");
@@ -1037,6 +1135,9 @@ export class VaultCoachView extends ItemView {
             : this.t("view.indexStatus.vectorFallback");
     }
 
+    /**
+     * 渲染考试作答页。
+     */
     private renderExamTaking(containerEl: HTMLDivElement, session: ExamSession): void {
         this.examAnswerEls = [];
 
@@ -1098,6 +1199,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染考试结果页。
+     */
     private renderExamReview(containerEl: HTMLDivElement, session: ExamSession): void {
         const evaluation = session.evaluation;
         if (!evaluation) {
@@ -1225,6 +1329,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染考试历史页。
+     */
     private renderExamHistory(containerEl: HTMLDivElement): void {
         const panelEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-panel" });
         const titleRowEl: HTMLDivElement = panelEl.createDiv({ cls: "vault-coach-exam-title-row" });
@@ -1287,6 +1394,9 @@ export class VaultCoachView extends ItemView {
         void this.renderExamHistoryMarkdown(detailEl, this.selectedExamHistoryContent);
     }
 
+    /**
+     * 将考试历史 Markdown 渲染到容器中。
+     */
     private async renderExamHistoryMarkdown(containerEl: HTMLElement, markdown: string): Promise<void> {
         containerEl.empty();
         try {
@@ -1298,6 +1408,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 绑定考试历史内部链接点击事件。
+     */
     private bindExamHistoryInternalLinks(containerEl: HTMLElement): void {
         containerEl.addEventListener("click", (event: MouseEvent) => {
             const targetEl: Element | null = this.getEventTargetElement(event.target);
@@ -1321,6 +1434,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 将事件目标归一化为 Element。
+     */
     private getEventTargetElement(target: EventTarget | null): Element | null {
         if (!target) {
             return null;
@@ -1329,6 +1445,9 @@ export class VaultCoachView extends ItemView {
         return target instanceof Element ? target : null;
     }
 
+    /**
+     * 渲染考试结果中的文本块。
+     */
     private renderExamReviewBlock(containerEl: HTMLElement, label: string, text: string): void {
         const blockEl: HTMLDivElement = containerEl.createDiv({ cls: "vault-coach-exam-review-block" });
         blockEl.createEl("strong", { cls: "vault-coach-exam-review-label", text: label });
@@ -1344,8 +1463,7 @@ export class VaultCoachView extends ItemView {
     }
 
     /**
-     * 渲染输入区域
-     * 
+     * 渲染问答输入区域。
      */
     private renderInputArea(rootEl: HTMLDivElement): void {
         const indexBusy: boolean = this.plugin.getKnowledgeIndexBusyState().busy;
@@ -1413,6 +1531,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 渲染当前模型状态。
+     */
     private renderModelStatus(buttonRowEl: HTMLDivElement): void {
         const modelStatusEl: HTMLDivElement = buttonRowEl.createDiv({ cls: "vault-coach-model-status" });
         const chatModelName: string = this.plugin.getActiveChatModelName() || this.t("view.modelUnset");
@@ -1428,10 +1549,16 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 判断键盘事件是否应交给输入法处理。
+     */
     private shouldLetInputMethodHandleKey(event: KeyboardEvent): boolean {
         return this.isComposingInput || event.isComposing || this.getLegacyKeyCode(event) === 229;
     }
 
+    /**
+     * 获取旧式 keyCode，用于兼容部分输入法事件。
+     */
     private getLegacyKeyCode(event: KeyboardEvent): number | null {
         const eventRecord: Record<string, unknown> = event as unknown as Record<string, unknown>;
         const keyCode: unknown = eventRecord["keyCode"];
@@ -1441,9 +1568,7 @@ export class VaultCoachView extends ItemView {
     /**
      * 重新渲染消息列表。
      *
-     * * 这里改成 async 的原因是：
-     * * - MarkdownRenderer.renderMarkdown() 是异步的；
-     *   - 这样可以在渲染结束后再统一滚动到底部。
+     * MarkdownRenderer 是异步的，因此这里等待每条消息渲染完成后再统一滚动到底部。
      */
     private async renderMessages(): Promise<void> {
         this.messageListEl.empty();
@@ -1453,7 +1578,7 @@ export class VaultCoachView extends ItemView {
 
         const messages: ChatMessage[] = this.plugin.getMessages();
 
-        // 如果没消息，则显示空状态提示
+        // 如果没有消息，则显示空状态提示。
         if (messages.length === 0) {
             const emptyStateEl: HTMLDivElement = this.messageListEl.createDiv({
                 cls: "vault-coach-empty-state",
@@ -1462,14 +1587,12 @@ export class VaultCoachView extends ItemView {
             return;
         }
 
-        // 逐条渲染消息
+        // 逐条渲染消息。
         for (const message of messages) {
             await this.createMessageBubble(message);
         }
 
-        // 滚动到最底部，方便看到最新消息
-        // this.messageListEl.scrollTop = this.messageListEl.scrollHeight; 
-        //* Height 是整个滚动容器的总高度， Top 是滚动条顶部距离容器顶部的距离
+        // 滚动到底部，方便用户看到最新消息。
         this.scrollMessagesToBottom();
 
     }
@@ -1477,9 +1600,7 @@ export class VaultCoachView extends ItemView {
     /**
      * 创建单条消息气泡。
      *
-     * 第二阶段的关键改动：
-     * - 不再使用 setText 直接显示 assistant 内容；
-     * - 统一交给 MarkdownRenderer 渲染。
+     * 助手消息统一交给 MarkdownRenderer 渲染，用户消息保持纯文本展示。
      */
     private async createMessageBubble(message: ChatMessage): Promise<void> {
         const wrapperEl: HTMLDivElement = this.messageListEl.createDiv({
@@ -1560,6 +1681,12 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 在来源区域渲染 Markdown 摘录。
+     *
+     * 来源内容可能包含 Mermaid 等不适合直接嵌入的语法，因此先做安全归一化；
+     * 渲染失败时回退为纯文本，避免整条回答展示中断。
+     */
     private async renderSourceMarkdown(markdown: string, containerEl: HTMLElement, sourcePath: string): Promise<void> {
         const safeMarkdown: string = this.sanitizeSourceMarkdown(normalizeObsidianMarkdown(markdown));
 
@@ -1572,6 +1699,11 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 格式化来源按钮展示文本。
+     *
+     * PDF 来源使用 `#page=` 跳转锚点，Markdown 来源沿用检索层生成的 Obsidian 链接。
+     */
     private formatSourceDisplayLink(source: AnswerSource): string {
         if (source.locator?.type !== "pdf" || source.pageStart === undefined) {
             return source.displayLink;
@@ -1587,13 +1719,20 @@ export class VaultCoachView extends ItemView {
         return `[[${source.filePath}#page=${pageStart}|${fileName} · ${pageLabel}]]`;
     }
 
+    /**
+     * 清理来源摘录中不适合在折叠区直接渲染的 Markdown 块。
+     */
     private sanitizeSourceMarkdown(markdown: string): string {
         return markdown
             .replace(/```[ \t]*mermaid\b/gi, "```text")
             .replace(/~~~[ \t]*mermaid\b/gi, "~~~text");
     }
 
-    // 新增：创建一个临时助手气泡；真正 token 到达前显示“思考中”动画。
+    /**
+     * 创建临时助手气泡。
+     *
+     * 在首个 token 到达前显示思考状态，降低模型响应等待期间的空白感。
+     */
     private beginStreamingAssistantBubble(): void {
         const wrapperEl: HTMLDivElement = this.messageListEl.createDiv({
             cls: "vault-coach-message-wrapper assistant",
@@ -1605,7 +1744,7 @@ export class VaultCoachView extends ItemView {
         metaEl.setText(`${this.plugin.settings.assistantName} · ${this.formatTime(Date.now())}`);
 
         const bubbleEl: HTMLDivElement = wrapperEl.createDiv({
-            cls: "vault-coach-message-bubble assistant vault-coach-streaming-bubble", // 三个类，类似 html 的写法
+            cls: "vault-coach-message-bubble assistant vault-coach-streaming-bubble",
         });
 
         this.renderThinkingIndicator(bubbleEl);
@@ -1616,6 +1755,9 @@ export class VaultCoachView extends ItemView {
         this.scrollMessagesToBottom();
     }
 
+    /**
+     * 渲染助手生成中的视觉状态。
+     */
     private renderThinkingIndicator(bubbleEl: HTMLDivElement): void {
         bubbleEl.empty();
         bubbleEl.addClass("vault-coach-thinking-bubble");
@@ -1651,7 +1793,11 @@ export class VaultCoachView extends ItemView {
         }
     }
 
-    // 新增：将新 token 追加到临时气泡中，降低 UI 感知延迟。
+    /**
+     * 将流式 token 追加到临时气泡。
+     *
+     * 这里先以纯文本展示增量内容，最终完成后再统一转换为 Markdown 渲染结果。
+     */
     private appendStreamingToken(token: string): void {
         if (!this.streamingBubbleEl) {
             this.beginStreamingAssistantBubble();
@@ -1671,6 +1817,9 @@ export class VaultCoachView extends ItemView {
         this.scrollMessagesToBottom();
     }
 
+    /**
+     * 清理当前未完成的流式助手气泡。
+     */
     private clearStreamingAssistantBubble(): void {
         this.streamingWrapperEl?.remove();
         this.streamingWrapperEl = null;
@@ -1678,6 +1827,11 @@ export class VaultCoachView extends ItemView {
         this.streamingText = "";
     }
 
+    /**
+     * 将流式气泡升级为最终助手消息。
+     *
+     * 最终态会重新走 MarkdownRenderer，并补充来源折叠区，确保展示效果与历史消息一致。
+     */
     private async finalizeStreamingAssistantBubble(answer: AssistantAnswer): Promise<void> {
         const wrapperEl: HTMLDivElement | null = this.streamingWrapperEl;
         const bubbleEl: HTMLDivElement | null = this.streamingBubbleEl;
@@ -1704,6 +1858,9 @@ export class VaultCoachView extends ItemView {
         this.scrollMessagesToBottom();
     }
 
+    /**
+     * 中止当前问答生成请求。
+     */
     private abortActiveAssistantTurn(): void {
         if (!this.activeAbortController || this.activeAbortController.signal.aborted) {
             return;
@@ -1713,6 +1870,9 @@ export class VaultCoachView extends ItemView {
         this.stopButtonEl.disabled = true;
     }
 
+    /**
+     * 中止当前考试分析或生成请求。
+     */
     private cancelActiveExamGeneration(): void {
         if (!this.activeExamAbortController || this.activeExamAbortController.signal.aborted) {
             return;
@@ -1723,6 +1883,11 @@ export class VaultCoachView extends ItemView {
         this.renderPreservingExamScroll();
     }
 
+    /**
+     * 执行考试范围智能分析。
+     *
+     * 分析结果会驱动文件筛选预览，不直接创建考试。
+     */
     private async handleAnalyzeExamScope(forceRefresh: boolean): Promise<void> {
         if (this.isBusy) {
             return;
@@ -1765,6 +1930,11 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 基于当前范围创建考试会话。
+     *
+     * 当用户选择跳过语义筛选时，直接使用手动选择的范围生成题目。
+     */
     private async handleCreateExam(skipSemanticFiltering: boolean): Promise<void> {
         if (this.isBusy) {
             return;
@@ -1819,6 +1989,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 提交当前考试答案并请求评分。
+     */
     private async handleSubmitExam(): Promise<void> {
         if (this.isBusy || !this.examSession) {
             return;
@@ -1853,6 +2026,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 将考试结果导出为 Vault 内的 Markdown 文件。
+     */
     private async handleExportExam(): Promise<void> {
         if (this.isBusy || !this.examSession) {
             return;
@@ -1871,6 +2047,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 打开考试历史列表，并刷新历史文件摘要。
+     */
     private async handleShowExamHistory(): Promise<void> {
         if (this.isBusy) {
             return;
@@ -1893,6 +2072,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 读取并展示指定考试历史文件。
+     */
     private async handleLoadExamHistoryContent(path: string): Promise<void> {
         if (this.isBusy) {
             return;
@@ -1914,6 +2096,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 删除指定考试历史文件，并同步刷新历史列表。
+     */
     private async handleDeleteExamHistory(path: string): Promise<void> {
         if (this.isBusy) {
             return;
@@ -1937,6 +2122,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 删除当前考试会话已保存的结果文件。
+     */
     private async handleDeleteExam(): Promise<void> {
         if (this.isBusy || !this.examSession) {
             return;
@@ -1956,6 +2144,11 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 将界面上的范围选择转换为文件夹路径列表。
+     *
+     * 选择“全部知识库”时返回空数组，由下游服务解释为不限制文件夹。
+     */
     private getSelectedExamFolderPaths(scopeOptions?: ExamScopeOption[]): string[] {
         if (this.selectedExamScopeIds.has("__all__")) {
             return [];
@@ -1971,6 +2164,9 @@ export class VaultCoachView extends ItemView {
         return selectedFolderPaths;
     }
 
+    /**
+     * 汇总当前考试范围选择。
+     */
     private getCurrentExamScopeSelection(scopeOptions?: ExamScopeOption[]): ExamScopeSelection {
         return {
             selectedFolderPaths: this.getSelectedExamFolderPaths(scopeOptions),
@@ -1979,6 +2175,9 @@ export class VaultCoachView extends ItemView {
         };
     }
 
+    /**
+     * 判断当前界面是否已经选中有效考试范围。
+     */
     private hasExamScopeSelection(scopeOptions: ExamScopeOption[]): boolean {
         if (this.selectedExamScopeIds.has("__all__")) {
             return true;
@@ -1989,6 +2188,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 规范化题目数量，防止非法输入或超过当前范围可承载的题量。
+     */
     private normalizeQuestionCount(value: string, maxQuestionCount = 10): number {
         const parsedValue: number = Number.parseInt(value, 10);
         if (!Number.isFinite(parsedValue)) {
@@ -1999,11 +2201,19 @@ export class VaultCoachView extends ItemView {
         return Math.max(1, Math.min(normalizedMaxQuestionCount, parsedValue));
     }
 
+    /**
+     * 使当前智能分析结果失效。
+     *
+     * 文件范围、强制包含或排除发生变化后，都需要重新分析。
+     */
     private invalidateExamAnalysis(): void {
         this.examAnalysisResult = null;
         this.examSmartFilteringFailed = false;
     }
 
+    /**
+     * 更新考试分析/生成进度提示。
+     */
     private updateExamProgress(progress: ExamGenerationProgress): void {
         this.examProgressLabel = this.formatExamProgressLabel(progress);
         if (this.examPhase === "generating") {
@@ -2011,6 +2221,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 将内部进度阶段转换为本地化文案。
+     */
     private formatExamProgressLabel(progress: ExamGenerationProgress): string {
         switch (progress.phase) {
             case "resolving-scope":
@@ -2038,6 +2251,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 重置考试状态并回到设置页。
+     */
     private resetExamSession(): void {
         this.examSession = null;
         this.examPhase = "setup";
@@ -2045,6 +2261,9 @@ export class VaultCoachView extends ItemView {
         this.invalidateExamAnalysis();
     }
 
+    /**
+     * 从历史记录视图返回到合适的考试阶段。
+     */
     private returnFromExamHistory(): void {
         if (!this.examSession) {
             this.examPhase = "setup";
@@ -2057,6 +2276,9 @@ export class VaultCoachView extends ItemView {
         this.render();
     }
 
+    /**
+     * 打开考试题目或历史记录中引用的来源文件。
+     */
     private async openExamSourcePath(sourcePath: string): Promise<void> {
         const normalizedSourcePath: string = this.normalizeExamSourcePath(sourcePath);
         if (normalizedSourcePath.length === 0) {
@@ -2072,6 +2294,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 兼容不同格式的来源路径，提取 Obsidian 可打开的相对路径。
+     */
     private normalizeExamSourcePath(sourcePath: string): string {
         return sourcePath
             .trim()
@@ -2082,6 +2307,9 @@ export class VaultCoachView extends ItemView {
             .trim();
     }
 
+    /**
+     * 根据得分返回用于样式分层的 CSS 类。
+     */
     private getExamScoreClass(score: number): string {
         if (score >= 85) {
             return "is-good";
@@ -2094,6 +2322,9 @@ export class VaultCoachView extends ItemView {
         return "is-low";
     }
 
+    /**
+     * 格式化考试历史列表中的日期与得分摘要。
+     */
     private formatExamHistoryMeta(item: ExamHistoryItem): string {
         const dateText: string = item.createdAt
             ? this.formatDateTime(item.createdAt)
@@ -2105,12 +2336,14 @@ export class VaultCoachView extends ItemView {
         return `${dateText} · ${scoreText}`;
     }
 
-
-    // 处理发送逻辑
+    /**
+     * 处理问答发送流程。
+     *
+     * 用户消息先入库并刷新界面，助手回答随后以流式气泡展示，完成后落为正式消息。
+     */
     private async handleSend(): Promise<void> {
         const userText: string = this.inputEl.value.trim();
 
-        // 用户什么都没输入，就不发送
         if (!userText || this.isBusy || this.plugin.getKnowledgeIndexBusyState().busy) {
             return;
         }
@@ -2123,24 +2356,13 @@ export class VaultCoachView extends ItemView {
         this.retrievalModeSelectEl.disabled = true;
 
         try {
-            // 1. 将用户消息加入对话
-            // this.plugin.addUserMessage(userText);
-
-            // 2.  清空输入框
             this.inputEl.value = "";
             await this.plugin.appendUserMessage(userText);
 
-            // 3. 立刻刷新消息区域，让用户先看到自己的消息
+            // 先刷新用户消息，再启动助手流式气泡，避免输入后界面无反馈。
             await this.renderMessages();
 
             this.beginStreamingAssistantBubble();
-
-            // 4. 生成助手回复 
-            // TODO 目前还只是展示逻辑，后续再接入本地 LLM
-            // const answer = await this.plugin.answerQuestion(userText);
-
-            // 5. 把助手回复加入对话
-            // this.plugin.addAssistantMessage(answer.text, answer.sources);
 
             const answer: AssistantAnswer = await this.plugin.streamAssistantTurn(userText, {
                 onToken: (token: string) => {
@@ -2153,7 +2375,7 @@ export class VaultCoachView extends ItemView {
                 new Notice(this.t("view.generationStopped"));
             }
 
-            // 6. 直接把当前流式气泡升级为最终 Markdown 气泡，避免整区重绘造成视觉闪回。
+            // 直接升级当前气泡，避免整区重绘造成视觉闪回。
             await this.finalizeStreamingAssistantBubble(answer);
 
         } catch (error: unknown) {
@@ -2173,11 +2395,13 @@ export class VaultCoachView extends ItemView {
             this.stopButtonEl.disabled = true;
             this.inputEl.disabled = false;
             this.retrievalModeSelectEl.disabled = false;
-            // 7. 把焦点重新放回输入框
             this.focusInput();
         }
     }
 
+    /**
+     * 判断异常是否来自主动中止。
+     */
     private isAbortError(error: unknown): boolean {
         if (error instanceof DOMException) {
             return error.name === "AbortError";
@@ -2191,7 +2415,7 @@ export class VaultCoachView extends ItemView {
     }
 
     /**
-     * 手动重建索引
+     * 手动重建知识库索引。
      */
     private async handleRebuildIndex(): Promise<void> {
         if (this.isBusy || this.plugin.getKnowledgeIndexBusyState().busy) {
@@ -2213,6 +2437,9 @@ export class VaultCoachView extends ItemView {
         }
     }
 
+    /**
+     * 清空已构建的知识库索引。
+     */
     private async handleClearIndex(): Promise<void> {
         if (this.isBusy || this.plugin.getKnowledgeIndexBusyState().busy) {
             return;
@@ -2222,18 +2449,21 @@ export class VaultCoachView extends ItemView {
     }
 
     /**
-     * 聚焦输入框
-     *  */ 
+     * 聚焦问答输入框。
+     */
     private focusInput(): void {
         this.inputEl?.focus();
     }
 
+    /**
+     * 将消息列表滚动到底部。
+     */
     private scrollMessagesToBottom(): void {
         this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
     }
 
     /**
-     * 格式化时间
+     * 格式化聊天消息时间。
      */
     private formatTime(timestamp: number): string {
         return new Date(timestamp).toLocaleTimeString([], {
@@ -2242,6 +2472,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 格式化考试历史时间。
+     */
     private formatDateTime(timestamp: number): string {
         return new Date(timestamp).toLocaleString([], {
             year: "numeric",
@@ -2252,6 +2485,9 @@ export class VaultCoachView extends ItemView {
         });
     }
 
+    /**
+     * 生成适合 Notice 展示的短错误信息。
+     */
     private createShortErrorMessage(error: unknown): string {
         const message: string = error instanceof Error ? error.message : String(error);
         const normalizedMessage: string = message.replace(/\s+/g, " ").trim();
