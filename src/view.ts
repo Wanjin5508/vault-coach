@@ -86,6 +86,10 @@ export class VaultCoachView extends ItemView {
     private streamingWrapperEl: HTMLDivElement | null = null;
     private streamingBubbleEl: HTMLDivElement | null = null;
     private streamingContentEl: HTMLDivElement | null = null;
+    private streamingDurationEl: HTMLSpanElement | null = null;
+    private streamingStartedAt: number | null = null;
+    private streamingFirstChunkDurationMs: number | null = null;
+    private streamingTimerId: number | null = null;
     private streamingText = "";
     private activeAbortController: AbortController | null = null;
     private postOpenStyleRefreshTimers: number[] = [];
@@ -138,6 +142,7 @@ export class VaultCoachView extends ItemView {
     async onClose(): Promise<void> {
         await Promise.resolve();
         this.clearPostOpenStyleRefreshTimers();
+        this.clearStreamingTimer();
         // 只清理插件自己的内容区。清空 containerEl 会移除 Obsidian 的视图外壳，
         // 在某些冷启动/首次打开路径下会导致后续渲染缺少正常的样式和布局上下文。
         this.contentEl.empty();
@@ -1576,6 +1581,10 @@ export class VaultCoachView extends ItemView {
         this.streamingWrapperEl = null;
         this.streamingBubbleEl = null;
         this.streamingContentEl = null;
+        this.streamingDurationEl = null;
+        this.streamingStartedAt = null;
+        this.streamingFirstChunkDurationMs = null;
+        this.clearStreamingTimer();
         this.streamingText = "";
 
         const messages: ChatMessage[] = this.plugin.getMessages();
@@ -1620,7 +1629,7 @@ export class VaultCoachView extends ItemView {
         const sourcePath: string = this.app.workspace.getActiveFile()?.path ?? "";
         await MarkdownRenderer.render(this.app, normalizeObsidianMarkdown(message.text), contentEl, sourcePath, this);
 
-        this.createMessageFooter(bubbleEl, message.role, message.createdAt, () => message.text);
+        this.createMessageFooter(bubbleEl, message.role, message.createdAt, () => message.text, message.generationDurationMs);
 
         // 如果是助手消息，并且携带来源，则在下方渲染折叠来源区域
         if (message.role == "assistant" && message.sources && message.sources.length > 0) {
@@ -1638,6 +1647,7 @@ export class VaultCoachView extends ItemView {
         role: ChatMessage["role"],
         createdAt: number,
         getText: () => string,
+        generationDurationMs?: number,
     ): HTMLDivElement {
         const metaEl: HTMLDivElement = bubbleEl.createDiv({
             cls: "vault-coach-message-meta",
@@ -1647,9 +1657,22 @@ export class VaultCoachView extends ItemView {
             text: `${role === "user" ? this.t("view.you") : this.plugin.settings.assistantName}` +
                 ` · ${this.formatTime(createdAt)}`,
         });
+        if (role === "assistant" && generationDurationMs !== undefined) {
+            this.createMessageDurationEl(metaEl, generationDurationMs);
+        }
         this.createMessageCopyButton(metaEl, getText);
 
         return metaEl;
+    }
+
+    /**
+     * 在消息底部栏创建生成耗时文本。
+     */
+    private createMessageDurationEl(metaEl: HTMLDivElement, generationDurationMs: number): HTMLSpanElement {
+        return metaEl.createSpan({
+            cls: "vault-coach-message-duration",
+            text: this.formatGenerationDuration(generationDurationMs),
+        });
     }
 
     /**
@@ -1807,6 +1830,7 @@ export class VaultCoachView extends ItemView {
      * 在首个 token 到达前显示思考状态，降低模型响应等待期间的空白感。
      */
     private beginStreamingAssistantBubble(): void {
+        const generationStartedAt: number = Date.now();
         const wrapperEl: HTMLDivElement = this.messageListEl.createDiv({
             cls: "vault-coach-message-wrapper assistant",
         });
@@ -1819,12 +1843,22 @@ export class VaultCoachView extends ItemView {
         });
 
         this.renderThinkingIndicator(contentEl);
-        this.createMessageFooter(bubbleEl, "assistant", Date.now(), () => this.streamingText);
+        const footerEl: HTMLDivElement = this.createMessageFooter(
+            bubbleEl,
+            "assistant",
+            generationStartedAt,
+            () => this.streamingText,
+            0,
+        );
 
         this.streamingWrapperEl = wrapperEl;
         this.streamingBubbleEl = bubbleEl;
         this.streamingContentEl = contentEl;
+        this.streamingDurationEl = footerEl.querySelector<HTMLSpanElement>(".vault-coach-message-duration");
+        this.streamingStartedAt = generationStartedAt;
+        this.streamingFirstChunkDurationMs = null;
         this.streamingText = "";
+        this.startStreamingTimer(generationStartedAt);
         this.scrollMessagesToBottom();
     }
 
@@ -1877,6 +1911,7 @@ export class VaultCoachView extends ItemView {
         }
 
         if (this.streamingText.length === 0 && token.length > 0) {
+            this.freezeStreamingTimerAtFirstChunk();
             this.streamingContentEl?.removeClass("vault-coach-thinking-bubble");
             this.streamingContentEl?.empty();
         }
@@ -1891,6 +1926,56 @@ export class VaultCoachView extends ItemView {
     }
 
     /**
+     * 启动回答生成计时器。
+     */
+    private startStreamingTimer(generationStartedAt: number): void {
+        this.clearStreamingTimer();
+        this.streamingStartedAt = generationStartedAt;
+        this.updateStreamingTimer();
+        this.streamingTimerId = window.setInterval(() => {
+            this.updateStreamingTimer();
+        }, 1000);
+    }
+
+    /**
+     * 刷新当前流式回答的生成耗时。
+     */
+    private updateStreamingTimer(): void {
+        if (!this.streamingDurationEl || this.streamingStartedAt === null) {
+            return;
+        }
+
+        this.streamingDurationEl.setText(this.formatGenerationDuration(Date.now() - this.streamingStartedAt));
+    }
+
+    /**
+     * 清理回答生成计时器。
+     */
+    private clearStreamingTimer(): void {
+        if (this.streamingTimerId === null) {
+            return;
+        }
+
+        window.clearInterval(this.streamingTimerId);
+        this.streamingTimerId = null;
+    }
+
+    /**
+     * 首个流式 chunk 到达后冻结耗时。
+     */
+    private freezeStreamingTimerAtFirstChunk(): void {
+        if (this.streamingStartedAt === null || this.streamingFirstChunkDurationMs !== null) {
+            return;
+        }
+
+        this.streamingFirstChunkDurationMs = Math.max(0, Date.now() - this.streamingStartedAt);
+        this.clearStreamingTimer();
+        if (this.streamingDurationEl) {
+            this.streamingDurationEl.setText(this.formatGenerationDuration(this.streamingFirstChunkDurationMs));
+        }
+    }
+
+    /**
      * 清理当前未完成的流式助手气泡。
      */
     private clearStreamingAssistantBubble(): void {
@@ -1898,6 +1983,10 @@ export class VaultCoachView extends ItemView {
         this.streamingWrapperEl = null;
         this.streamingBubbleEl = null;
         this.streamingContentEl = null;
+        this.streamingDurationEl = null;
+        this.streamingStartedAt = null;
+        this.streamingFirstChunkDurationMs = null;
+        this.clearStreamingTimer();
         this.streamingText = "";
     }
 
@@ -1914,6 +2003,14 @@ export class VaultCoachView extends ItemView {
             return;
         }
 
+        const fallbackDurationMs: number | undefined = this.streamingStartedAt === null
+            ? undefined
+            : Math.max(0, Date.now() - this.streamingStartedAt);
+        const generationDurationMs: number | undefined = this.streamingFirstChunkDurationMs
+            ?? answer.generationDurationMs
+            ?? fallbackDurationMs;
+        this.clearStreamingTimer();
+
         bubbleEl.removeClass("vault-coach-streaming-bubble");
         bubbleEl.removeClass("vault-coach-thinking-bubble");
         bubbleEl.empty();
@@ -1923,7 +2020,7 @@ export class VaultCoachView extends ItemView {
         });
         const sourcePath: string = this.app.workspace.getActiveFile()?.path ?? "";
         await MarkdownRenderer.render(this.app, normalizeObsidianMarkdown(answer.text), contentEl, sourcePath, this);
-        this.createMessageFooter(bubbleEl, "assistant", Date.now(), () => answer.text);
+        this.createMessageFooter(bubbleEl, "assistant", Date.now(), () => answer.text, generationDurationMs);
 
         if (answer.sources.length > 0) {
             await this.renderSources(wrapperEl, answer.sources);
@@ -1932,6 +2029,9 @@ export class VaultCoachView extends ItemView {
         this.streamingWrapperEl = null;
         this.streamingBubbleEl = null;
         this.streamingContentEl = null;
+        this.streamingDurationEl = null;
+        this.streamingStartedAt = null;
+        this.streamingFirstChunkDurationMs = null;
         this.streamingText = "";
         this.scrollMessagesToBottom();
     }
@@ -2548,6 +2648,14 @@ export class VaultCoachView extends ItemView {
             hour: '2-digit',
             minute: '2-digit'
         });
+    }
+
+    /**
+     * 格式化回答生成耗时。
+     */
+    private formatGenerationDuration(durationMs: number): string {
+        const seconds: number = Math.max(0, Math.floor(durationMs / 1000));
+        return this.t("view.generationDuration", { seconds });
     }
 
     /**
