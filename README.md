@@ -52,7 +52,7 @@ What works today:
 - Page-aware source links, such as `paper.pdf · page 3`
 - PDF chunks in keyword, vector, hybrid, rerank, Q&A, and Exam mode
 - Basic cleanup for repeated headers, footers, page numbers, and reading order
-- Obsidian/KaTeX-compatible math block normalization for model answers when formulas are produced from PDF content
+- Obsidian/KaTeX-compatible inline and block math normalization for model answers when formulas are produced from PDF content
 
 Current limits:
 

@@ -52,7 +52,7 @@ Vault Coach 可以索引 vault 中带原生文本层的 PDF。插件会提取 PD
 - 展示页码级来源，例如 `paper.pdf · 第 3 页`
 - PDF 片段参与关键词检索、向量检索、混合检索、rerank、问答和考试模式
 - 基础清理页眉、页脚、页码和部分阅读顺序问题
-- 当模型从 PDF 内容生成公式时，对回答中的块级公式做 Obsidian/KaTeX 兼容的 Markdown 规范化
+- 当模型从 PDF 内容生成公式时，对回答中的行内公式和块级公式做 Obsidian/KaTeX 兼容的 Markdown 规范化
 
 当前限制：
 

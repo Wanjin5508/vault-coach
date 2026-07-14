@@ -2,14 +2,14 @@
  * Markdown 输出归一化模块。
  *
  * 负责把模型返回的 Markdown 调整为 Obsidian/MarkdownRenderer 更容易正确渲染的格式。
- * 当前重点处理模型常见的 LaTeX display math 包裹方式。
+ * 当前重点处理模型常见的 LaTeX display/inline math 包裹方式。
  */
 
 /**
  * 对即将展示到 Obsidian 的 Markdown 做兼容性归一化。
  */
 export function normalizeObsidianMarkdown(markdown: string): string {
-    return normalizeDisplayMathBlocks(markdown);
+    return normalizeInlineMath(normalizeDisplayMathBlocks(markdown));
 }
 
 /**
@@ -75,6 +75,118 @@ function normalizeDisplayMathBlocks(markdown: string): string {
     }
 
     return normalizedLines.join("\n");
+}
+
+/**
+ * 将模型常见的 `\(...\)` 行内公式转换为 Obsidian 支持的 `$...$`。
+ *
+ * 函数会跳过代码围栏和行内代码，避免修改代码示例中的转义括号。
+ */
+function normalizeInlineMath(markdown: string): string {
+    const lines: string[] = markdown.split("\n");
+    const normalizedLines: string[] = [];
+    let inFence = false;
+    let fenceMarker: string | null = null;
+
+    for (const line of lines) {
+        const fenceMatch: RegExpMatchArray | null = line.match(/^\s*(```+|~~~+)/);
+        if (fenceMatch) {
+            const marker: string = fenceMatch[1] ?? "";
+            if (!inFence) {
+                inFence = true;
+                fenceMarker = marker.startsWith("`") ? "`" : "~";
+            } else if (fenceMarker && marker.startsWith(fenceMarker)) {
+                inFence = false;
+                fenceMarker = null;
+            }
+            normalizedLines.push(line);
+            continue;
+        }
+
+        normalizedLines.push(inFence ? line : normalizeInlineMathInLine(line));
+    }
+
+    return normalizedLines.join("\n");
+}
+
+/**
+ * 处理单行中的行内公式，同时保留行内代码原样。
+ */
+function normalizeInlineMathInLine(line: string): string {
+    let output = "";
+    let index = 0;
+
+    while (index < line.length) {
+        if (line[index] === "`") {
+            const backtickCount: number = countBackticks(line, index);
+            const codeSpanEnd: number = findClosingBackticks(line, index + backtickCount, backtickCount);
+            if (codeSpanEnd === -1) {
+                output += line.slice(index);
+                break;
+            }
+
+            output += line.slice(index, codeSpanEnd + backtickCount);
+            index = codeSpanEnd + backtickCount;
+            continue;
+        }
+
+        if (line[index] === "\\" && line[index + 1] === "(") {
+            const closeIndex: number = findInlineMathClose(line, index + 2);
+            if (closeIndex !== -1) {
+                const content: string = line.slice(index + 2, closeIndex);
+                if (shouldNormalizeInlineMathContent(content)) {
+                    output += `$${content.trim()}$`;
+                    index = closeIndex + 2;
+                    continue;
+                }
+            }
+        }
+
+        output += line[index] ?? "";
+        index += 1;
+    }
+
+    return output;
+}
+
+/**
+ * 统计当前位置连续反引号数量，用于匹配 Markdown 行内代码边界。
+ */
+function countBackticks(line: string, startIndex: number): number {
+    let count = 0;
+    while (line[startIndex + count] === "`") {
+        count += 1;
+    }
+
+    return count;
+}
+
+/**
+ * 查找与当前行内代码起始边界长度一致的结束边界。
+ */
+function findClosingBackticks(line: string, startIndex: number, backtickCount: number): number {
+    return line.indexOf("`".repeat(backtickCount), startIndex);
+}
+
+/**
+ * 查找 `\(...\)` 的结束边界。
+ */
+function findInlineMathClose(line: string, startIndex: number): number {
+    for (let index = startIndex; index < line.length - 1; index += 1) {
+        if (line[index] === "\\" && line[index + 1] === ")") {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * 判断行内公式内容是否适合转换为 `$...$`。
+ */
+function shouldNormalizeInlineMathContent(content: string): boolean {
+    const trimmedContent: string = content.trim();
+    return trimmedContent.length > 0 && !trimmedContent.includes("$");
 }
 
 /**
