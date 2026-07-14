@@ -219,6 +219,10 @@
     overflow-wrap: anywhere;
 }
 
+.vault-coach-message-duration {
+    white-space: nowrap;
+}
+
 .vault-coach-message-copy-button {
     display: inline-flex;
     align-items: center;

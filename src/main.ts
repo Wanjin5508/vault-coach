@@ -649,11 +649,12 @@ export default class VaultCoach extends Plugin {
     /**
      * 追加助手消息。
      */
-    addAssistantMessage(text: string, sources: AnswerSource[]): void {
+    addAssistantMessage(text: string, sources: AnswerSource[], generationDurationMs?: number): void {
         this.messages.push({
             role: "assistant",
             text: normalizeObsidianMarkdown(text),
             createdAt: Date.now(),
+            generationDurationMs,
             sources,
         });
         this.trimMessages();
@@ -871,6 +872,17 @@ export default class VaultCoach extends Plugin {
      * 视图发送消息时调用，内部负责流式生成、记忆更新与持久化。
      */
     async streamAssistantTurn(userText: string, handlers?: StreamHandlers): Promise<AssistantAnswer> {
+        const generationStartedAt: number = Date.now();
+        let firstChunkDurationMs: number | null = null;
+        const effectiveHandlers: StreamHandlers = {
+            ...handlers,
+            onToken: (token: string) => {
+                if (firstChunkDurationMs === null && token.length > 0) {
+                    firstChunkDurationMs = Math.max(0, Date.now() - generationStartedAt);
+                }
+                handlers?.onToken?.(token);
+            },
+        };
         await this.ensureKnowledgeBaseReady();
 
         const memoryContext: string = this.buildMemoryContext(userText);
@@ -880,16 +892,21 @@ export default class VaultCoach extends Plugin {
                 this.messages,
                 this.getKnowledgeScopeDescription(),
                 memoryContext,
-                handlers,
+                effectiveHandlers,
             );
 
-            this.addAssistantMessage(answer.text, answer.sources);
-            if (!handlers?.abortSignal?.aborted) {
-                await this.updateLongTermMemory(userText, answer.text);
+            const generationDurationMs: number = firstChunkDurationMs ?? Math.max(0, Date.now() - generationStartedAt);
+            const answerWithDuration: AssistantAnswer = {
+                ...answer,
+                generationDurationMs,
+            };
+            this.addAssistantMessage(answerWithDuration.text, answerWithDuration.sources, generationDurationMs);
+            if (!effectiveHandlers.abortSignal?.aborted) {
+                await this.updateLongTermMemory(userText, answerWithDuration.text);
             }
             await this.persistRuntimeState();
 
-            return answer;
+            return answerWithDuration;
         } finally {
             this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
         }

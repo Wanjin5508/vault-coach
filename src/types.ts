@@ -228,6 +228,9 @@ export interface ChatMessage {
     // 消息创建时间戳 ms
     createdAt: number;
 
+    // 可选：助手首个流式输出 chunk 到达耗时 ms
+    generationDurationMs?: number;
+
     // 可选：该回复对应的来源列表
     sources?: AnswerSource[];
 }
@@ -563,6 +566,7 @@ export interface KnowledgeIndexBusyState {
 export interface AssistantAnswer {
     text: string;
     sources: AnswerSource[];
+    generationDurationMs?: number;
     retrievalModeUsed:RetrievalMode;
     queryRewrite: QueryRewriteResult;
 }
