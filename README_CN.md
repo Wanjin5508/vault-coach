@@ -7,7 +7,7 @@ Vault Coach 可以把你的 Obsidian vault 变成本地优先的学习和研究�
 插件默认使用本地 [Ollama](https://ollama.com)，不会默认把笔记发送到远程服务。只有当你显式配置 OpenAI-compatible 的云端或自托管模型服务时，插件才会调用对应远程接口。
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.3.3-1E90FF)
+![Version](https://img.shields.io/badge/version-1.3.4-1E90FF)
 ![Local RAG](https://img.shields.io/badge/Local--first-RAG-10b981)
 ![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
