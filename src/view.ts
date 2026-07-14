@@ -6,7 +6,7 @@
  * 本文件不直接访问模型或知识库内部实现。
  */
 
-import { ItemView, WorkspaceLeaf, Notice, MarkdownRenderer } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, MarkdownRenderer, setIcon } from "obsidian";
 import type VaultCoach  from "./main";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import type {
@@ -85,6 +85,7 @@ export class VaultCoachView extends ItemView {
     // 回答流式输出期间使用的临时助手气泡。
     private streamingWrapperEl: HTMLDivElement | null = null;
     private streamingBubbleEl: HTMLDivElement | null = null;
+    private streamingContentEl: HTMLDivElement | null = null;
     private streamingText = "";
     private activeAbortController: AbortController | null = null;
     private postOpenStyleRefreshTimers: number[] = [];
@@ -1574,6 +1575,7 @@ export class VaultCoachView extends ItemView {
         this.messageListEl.empty();
         this.streamingWrapperEl = null;
         this.streamingBubbleEl = null;
+        this.streamingContentEl = null;
         this.streamingText = "";
 
         const messages: ChatMessage[] = this.plugin.getMessages();
@@ -1600,36 +1602,25 @@ export class VaultCoachView extends ItemView {
     /**
      * 创建单条消息气泡。
      *
-     * 助手消息统一交给 MarkdownRenderer 渲染，用户消息保持纯文本展示。
+     * 消息正文统一交给 MarkdownRenderer 渲染，底部栏独立承载元信息和操作按钮。
      */
     private async createMessageBubble(message: ChatMessage): Promise<void> {
         const wrapperEl: HTMLDivElement = this.messageListEl.createDiv({
             cls: `vault-coach-message-wrapper ${message.role}`,
         });
 
-        // 消息头部：显示角色和时间
-        const metaEl: HTMLDivElement = wrapperEl.createDiv({
-            cls: "vault-coach-message-meta",
-        });
-        metaEl.setText(
-            `${message.role === "user" ? this.t("view.you") : this.plugin.settings.assistantName}` +
-            ` · ${this.formatTime(message.createdAt)}`
-        );
-
-        // 消息气泡
         const bubbleEl: HTMLDivElement = wrapperEl.createDiv({
             cls: `vault-coach-message-bubble ${message.role}`,
         });
 
-        // 追加 Obsidian 常用的 markdown 渲染类名
-        // 这样列表、标题、代码块等元素会更接近原生预览样式
-        bubbleEl.addClass("markdown-rendered");
+        const contentEl: HTMLDivElement = bubbleEl.createDiv({
+            cls: "vault-coach-message-content markdown-rendered",
+        });
 
-        // setText 不会保留换行显示，因此这里通过 whiteSpace = pre-wrap 让多行文本能够正确展示。
-        // bubbleEl.style.whiteSpace = "pre-wrap";
-        // bubbleEl.setText(message.text);
         const sourcePath: string = this.app.workspace.getActiveFile()?.path ?? "";
-        await MarkdownRenderer.render(this.app, normalizeObsidianMarkdown(message.text), bubbleEl, sourcePath, this)
+        await MarkdownRenderer.render(this.app, normalizeObsidianMarkdown(message.text), contentEl, sourcePath, this);
+
+        this.createMessageFooter(bubbleEl, message.role, message.createdAt, () => message.text);
 
         // 如果是助手消息，并且携带来源，则在下方渲染折叠来源区域
         if (message.role == "assistant" && message.sources && message.sources.length > 0) {
@@ -1637,6 +1628,116 @@ export class VaultCoachView extends ItemView {
         }
 
 
+    }
+
+    /**
+     * 在气泡底部创建发送者、时间和复制按钮。
+     */
+    private createMessageFooter(
+        bubbleEl: HTMLDivElement,
+        role: ChatMessage["role"],
+        createdAt: number,
+        getText: () => string,
+    ): HTMLDivElement {
+        const metaEl: HTMLDivElement = bubbleEl.createDiv({
+            cls: "vault-coach-message-meta",
+        });
+        metaEl.createSpan({
+            cls: "vault-coach-message-meta-label",
+            text: `${role === "user" ? this.t("view.you") : this.plugin.settings.assistantName}` +
+                ` · ${this.formatTime(createdAt)}`,
+        });
+        this.createMessageCopyButton(metaEl, getText);
+
+        return metaEl;
+    }
+
+    /**
+     * 在气泡底部栏创建复制按钮。
+     *
+     * getText 使用函数而不是固定字符串，便于流式消息在最终完成时绑定最终回答内容。
+     */
+    private createMessageCopyButton(metaEl: HTMLDivElement, getText: () => string): HTMLButtonElement {
+        const copyButtonEl: HTMLButtonElement = metaEl.createEl("button", {
+            cls: "vault-coach-message-copy-button",
+            attr: {
+                "aria-label": this.t("view.copyMessage"),
+                title: this.t("view.copyMessage"),
+                type: "button",
+            },
+        });
+        setIcon(copyButtonEl, "copy");
+
+        copyButtonEl.addEventListener("click", (event: MouseEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void this.handleCopyMessage(getText(), copyButtonEl);
+        });
+
+        return copyButtonEl;
+    }
+
+    /**
+     * 复制消息原始 Markdown/纯文本内容。
+     */
+    private async handleCopyMessage(text: string, copyButtonEl: HTMLButtonElement): Promise<void> {
+        try {
+            await this.writeTextToClipboard(text);
+            new Notice(this.t("view.copyMessageSuccess"));
+            setIcon(copyButtonEl, "check");
+            window.setTimeout(() => {
+                if (copyButtonEl.isConnected) {
+                    setIcon(copyButtonEl, "copy");
+                }
+            }, 1200);
+        } catch (error: unknown) {
+            console.error("[VaultCoachView] 复制消息失败", error);
+            new Notice(this.t("view.copyMessageFailed", { message: this.createShortErrorMessage(error) }));
+        }
+    }
+
+    /**
+     * 写入系统剪贴板。
+     *
+     * 优先使用 Clipboard API；在受限环境中回退到临时 textarea + execCommand。
+     */
+    private async writeTextToClipboard(text: string): Promise<void> {
+        const activeWindow: Window | null = this.contentEl.ownerDocument.defaultView;
+        const clipboard: Clipboard | undefined = activeWindow?.navigator.clipboard;
+
+        if (clipboard?.writeText) {
+            try {
+                await clipboard.writeText(text);
+                return;
+            } catch (error: unknown) {
+                console.warn("[VaultCoachView] Clipboard API 复制失败，将尝试回退方案。", error);
+            }
+        }
+
+        this.writeTextToClipboardWithTextarea(text);
+    }
+
+    /**
+     * 使用临时 textarea 执行复制，兼容 Clipboard API 不可用的环境。
+     */
+    private writeTextToClipboardWithTextarea(text: string): void {
+        const ownerDocument: Document = this.contentEl.ownerDocument;
+        const textareaEl: HTMLTextAreaElement = ownerDocument.createElement("textarea");
+        textareaEl.value = text;
+        textareaEl.setAttribute("readonly", "true");
+        textareaEl.style.position = "fixed";
+        textareaEl.style.left = "-9999px";
+        textareaEl.style.top = "0";
+        ownerDocument.body.appendChild(textareaEl);
+
+        textareaEl.select();
+        textareaEl.setSelectionRange(0, textareaEl.value.length);
+        const succeeded: boolean = ownerDocument.execCommand("copy");
+        textareaEl.remove();
+
+        if (!succeeded) {
+            throw new Error("Clipboard copy command failed.");
+        }
     }
 
     /**
@@ -1738,19 +1839,19 @@ export class VaultCoachView extends ItemView {
             cls: "vault-coach-message-wrapper assistant",
         });
 
-        const metaEl: HTMLDivElement = wrapperEl.createDiv({
-            cls: "vault-coach-message-meta",
-        });
-        metaEl.setText(`${this.plugin.settings.assistantName} · ${this.formatTime(Date.now())}`);
-
         const bubbleEl: HTMLDivElement = wrapperEl.createDiv({
             cls: "vault-coach-message-bubble assistant vault-coach-streaming-bubble",
         });
+        const contentEl: HTMLDivElement = bubbleEl.createDiv({
+            cls: "vault-coach-message-content vault-coach-streaming-content",
+        });
 
-        this.renderThinkingIndicator(bubbleEl);
+        this.renderThinkingIndicator(contentEl);
+        this.createMessageFooter(bubbleEl, "assistant", Date.now(), () => this.streamingText);
 
         this.streamingWrapperEl = wrapperEl;
         this.streamingBubbleEl = bubbleEl;
+        this.streamingContentEl = contentEl;
         this.streamingText = "";
         this.scrollMessagesToBottom();
     }
@@ -1799,19 +1900,19 @@ export class VaultCoachView extends ItemView {
      * 这里先以纯文本展示增量内容，最终完成后再统一转换为 Markdown 渲染结果。
      */
     private appendStreamingToken(token: string): void {
-        if (!this.streamingBubbleEl) {
+        if (!this.streamingBubbleEl || !this.streamingContentEl) {
             this.beginStreamingAssistantBubble();
         }
 
         if (this.streamingText.length === 0 && token.length > 0) {
-            this.streamingBubbleEl?.removeClass("vault-coach-thinking-bubble");
-            this.streamingBubbleEl?.empty();
+            this.streamingContentEl?.removeClass("vault-coach-thinking-bubble");
+            this.streamingContentEl?.empty();
         }
 
         this.streamingText += token;
 
-        if (this.streamingBubbleEl) {
-            this.streamingBubbleEl.setText(this.streamingText);
+        if (this.streamingContentEl) {
+            this.streamingContentEl.setText(this.streamingText);
         }
 
         this.scrollMessagesToBottom();
@@ -1824,6 +1925,7 @@ export class VaultCoachView extends ItemView {
         this.streamingWrapperEl?.remove();
         this.streamingWrapperEl = null;
         this.streamingBubbleEl = null;
+        this.streamingContentEl = null;
         this.streamingText = "";
     }
 
@@ -1842,11 +1944,14 @@ export class VaultCoachView extends ItemView {
 
         bubbleEl.removeClass("vault-coach-streaming-bubble");
         bubbleEl.removeClass("vault-coach-thinking-bubble");
-        bubbleEl.addClass("markdown-rendered");
         bubbleEl.empty();
 
+        const contentEl: HTMLDivElement = bubbleEl.createDiv({
+            cls: "vault-coach-message-content markdown-rendered",
+        });
         const sourcePath: string = this.app.workspace.getActiveFile()?.path ?? "";
-        await MarkdownRenderer.render(this.app, normalizeObsidianMarkdown(answer.text), bubbleEl, sourcePath, this);
+        await MarkdownRenderer.render(this.app, normalizeObsidianMarkdown(answer.text), contentEl, sourcePath, this);
+        this.createMessageFooter(bubbleEl, "assistant", Date.now(), () => answer.text);
 
         if (answer.sources.length > 0) {
             await this.renderSources(wrapperEl, answer.sources);
@@ -1854,6 +1959,7 @@ export class VaultCoachView extends ItemView {
 
         this.streamingWrapperEl = null;
         this.streamingBubbleEl = null;
+        this.streamingContentEl = null;
         this.streamingText = "";
         this.scrollMessagesToBottom();
     }
