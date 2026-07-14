@@ -86,6 +86,9 @@ const ZH_TRANSLATIONS = {
     "view.source.pdfPage": "第 {{page}} 页",
     "view.source.pdfPages": "第 {{start}}-{{end}} 页",
     "view.thinking": "思考中",
+    "view.copyMessage": "复制消息",
+    "view.copyMessageSuccess": "已复制消息内容。",
+    "view.copyMessageFailed": "复制失败：{{message}}",
     "view.sendFailed": "发送失败：{{message}}",
     "view.sourceMarkdownFallback": "[VaultCoachView] 来源 Markdown 渲染失败，已回退到纯文本。",
 
@@ -406,6 +409,9 @@ const EN_TRANSLATIONS: Record<TranslationKey, string> = {
     "view.source.pdfPage": "page {{page}}",
     "view.source.pdfPages": "pages {{start}}-{{end}}",
     "view.thinking": "Thinking",
+    "view.copyMessage": "Copy message",
+    "view.copyMessageSuccess": "Message copied.",
+    "view.copyMessageFailed": "Copy failed: {{message}}",
     "view.sendFailed": "Send failed: {{message}}",
     "view.sourceMarkdownFallback": "[VaultCoachView] Source Markdown render failed. Falling back to plain text.",
 
