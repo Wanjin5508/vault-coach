@@ -1699,45 +1699,17 @@ export class VaultCoachView extends ItemView {
     /**
      * 写入系统剪贴板。
      *
-     * 优先使用 Clipboard API；在受限环境中回退到临时 textarea + execCommand。
+     * 仅使用现代 Clipboard API，避免依赖已废弃的 execCommand 路径。
      */
     private async writeTextToClipboard(text: string): Promise<void> {
         const activeWindow: Window | null = this.contentEl.ownerDocument.defaultView;
         const clipboard: Clipboard | undefined = activeWindow?.navigator.clipboard;
 
-        if (clipboard?.writeText) {
-            try {
-                await clipboard.writeText(text);
-                return;
-            } catch (error: unknown) {
-                console.warn("[VaultCoachView] Clipboard API 复制失败，将尝试回退方案。", error);
-            }
+        if (!clipboard?.writeText) {
+            throw new Error("Clipboard API is unavailable in the current environment.");
         }
 
-        this.writeTextToClipboardWithTextarea(text);
-    }
-
-    /**
-     * 使用临时 textarea 执行复制，兼容 Clipboard API 不可用的环境。
-     */
-    private writeTextToClipboardWithTextarea(text: string): void {
-        const ownerDocument: Document = this.contentEl.ownerDocument;
-        const textareaEl: HTMLTextAreaElement = ownerDocument.createElement("textarea");
-        textareaEl.value = text;
-        textareaEl.setAttribute("readonly", "true");
-        textareaEl.style.position = "fixed";
-        textareaEl.style.left = "-9999px";
-        textareaEl.style.top = "0";
-        ownerDocument.body.appendChild(textareaEl);
-
-        textareaEl.select();
-        textareaEl.setSelectionRange(0, textareaEl.value.length);
-        const succeeded: boolean = ownerDocument.execCommand("copy");
-        textareaEl.remove();
-
-        if (!succeeded) {
-            throw new Error("Clipboard copy command failed.");
-        }
+        await clipboard.writeText(text);
     }
 
     /**
