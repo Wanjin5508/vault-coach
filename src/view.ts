@@ -7,8 +7,10 @@
  */
 
 import { ItemView, WorkspaceLeaf, Notice, MarkdownRenderer, setIcon } from "obsidian";
-import type VaultCoach  from "./main";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
+import type { VaultCoachPluginApi } from "./plugin-api";
+import { createShortErrorMessage, formatDateTime, formatGenerationDuration, formatTime } from "./ui/view-formatters";
+import { isAbortError } from "./utils/errors";
 import type {
     AnswerSource,
     AssistantAnswer,
@@ -39,7 +41,7 @@ type ExamViewPhase = "setup" | "generating" | "taking" | "evaluating" | "review"
  * VaultCoachView 是一个自定义 ItemView。它不会像 Modal 那样弹窗，而是被放进 Obsidian 右侧边栏中。
  */
 export class VaultCoachView extends ItemView {
-    plugin: VaultCoach;
+    plugin: VaultCoachPluginApi;
 
     // 消息列表容器，后续消息渲染会写入该元素。
     private messageListEl!: HTMLDivElement;
@@ -94,7 +96,7 @@ export class VaultCoachView extends ItemView {
     private activeAbortController: AbortController | null = null;
     private postOpenStyleRefreshTimers: number[] = [];
 
-    constructor(leaf: WorkspaceLeaf, plugin: VaultCoach) {
+    constructor(leaf: WorkspaceLeaf, plugin: VaultCoachPluginApi) {
         super(leaf);
         this.plugin = plugin;
     }
@@ -1655,7 +1657,7 @@ export class VaultCoachView extends ItemView {
         metaEl.createSpan({
             cls: "vault-coach-message-meta-label",
             text: `${role === "user" ? this.t("view.you") : this.plugin.settings.assistantName}` +
-                ` · ${this.formatTime(createdAt)}`,
+                ` · ${formatTime(createdAt)}`,
         });
         if (role === "assistant" && generationDurationMs !== undefined) {
             this.createMessageDurationEl(metaEl, generationDurationMs);
@@ -1671,7 +1673,7 @@ export class VaultCoachView extends ItemView {
     private createMessageDurationEl(metaEl: HTMLDivElement, generationDurationMs: number): HTMLSpanElement {
         return metaEl.createSpan({
             cls: "vault-coach-message-duration",
-            text: this.formatGenerationDuration(generationDurationMs),
+            text: formatGenerationDuration(generationDurationMs, (key, replacements) => this.t(key, replacements)),
         });
     }
 
@@ -1715,7 +1717,7 @@ export class VaultCoachView extends ItemView {
             }, 1200);
         } catch (error: unknown) {
             console.error("[VaultCoachView] 复制消息失败", error);
-            new Notice(this.t("view.copyMessageFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("view.copyMessageFailed", { message: createShortErrorMessage(error) }));
         }
     }
 
@@ -1945,7 +1947,10 @@ export class VaultCoachView extends ItemView {
             return;
         }
 
-        this.streamingDurationEl.setText(this.formatGenerationDuration(Date.now() - this.streamingStartedAt));
+        this.streamingDurationEl.setText(formatGenerationDuration(
+            Date.now() - this.streamingStartedAt,
+            (key, replacements) => this.t(key, replacements),
+        ));
     }
 
     /**
@@ -1971,7 +1976,10 @@ export class VaultCoachView extends ItemView {
         this.streamingFirstChunkDurationMs = Math.max(0, Date.now() - this.streamingStartedAt);
         this.clearStreamingTimer();
         if (this.streamingDurationEl) {
-            this.streamingDurationEl.setText(this.formatGenerationDuration(this.streamingFirstChunkDurationMs));
+            this.streamingDurationEl.setText(formatGenerationDuration(
+                this.streamingFirstChunkDurationMs,
+                (key, replacements) => this.t(key, replacements),
+            ));
         }
     }
 
@@ -2090,7 +2098,7 @@ export class VaultCoachView extends ItemView {
             });
             this.examPhase = "setup";
         } catch (error: unknown) {
-            if (this.isAbortError(error)) {
+            if (isAbortError(error)) {
                 this.examPhase = "setup";
                 new Notice(this.t("exam.notice.cancelled"));
                 return;
@@ -2099,7 +2107,7 @@ export class VaultCoachView extends ItemView {
             console.error("[VaultCoachView] 智能筛选失败", error);
             this.examSmartFilteringFailed = true;
             this.examPhase = "setup";
-            new Notice(this.t("exam.notice.analysisFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("exam.notice.analysisFailed", { message: createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.activeExamAbortController = null;
@@ -2150,7 +2158,7 @@ export class VaultCoachView extends ItemView {
             }
             this.examPhase = "taking";
         } catch (error: unknown) {
-            if (this.isAbortError(error)) {
+            if (isAbortError(error)) {
                 this.examPhase = "setup";
                 new Notice(this.t("exam.notice.cancelled"));
                 return;
@@ -2158,7 +2166,7 @@ export class VaultCoachView extends ItemView {
 
             console.error("[VaultCoachView] 创建考试失败", error);
             this.examPhase = "setup";
-            new Notice(this.t("exam.notice.createFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("exam.notice.createFailed", { message: createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.activeExamAbortController = null;
@@ -2191,13 +2199,13 @@ export class VaultCoachView extends ItemView {
                 this.examSession = await this.plugin.saveExamSession(evaluatedSession);
             } catch (saveError: unknown) {
                 console.error("[VaultCoachView] 自动保存考试结果失败", saveError);
-                new Notice(this.t("exam.notice.saveFailed", { message: this.createShortErrorMessage(saveError) }));
+                new Notice(this.t("exam.notice.saveFailed", { message: createShortErrorMessage(saveError) }));
             }
             this.examPhase = "review";
         } catch (error: unknown) {
             console.error("[VaultCoachView] 考试评分失败", error);
             this.examPhase = "taking";
-            new Notice(this.t("exam.notice.evaluateFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("exam.notice.evaluateFailed", { message: createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.render();
@@ -2218,7 +2226,7 @@ export class VaultCoachView extends ItemView {
             new Notice(this.t("exam.notice.exported", { path: exportPath }));
         } catch (error: unknown) {
             console.error("[VaultCoachView] 导出考试结果失败", error);
-            new Notice(this.t("exam.notice.exportFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("exam.notice.exportFailed", { message: createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.render();
@@ -2243,7 +2251,7 @@ export class VaultCoachView extends ItemView {
             this.examHistoryItems = await this.plugin.listExamHistory();
         } catch (error: unknown) {
             console.error("[VaultCoachView] 读取考试历史失败", error);
-            new Notice(this.t("exam.notice.historyFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("exam.notice.historyFailed", { message: createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.render();
@@ -2267,7 +2275,7 @@ export class VaultCoachView extends ItemView {
             this.selectedExamHistoryContent = await this.plugin.readExamHistoryContent(path);
         } catch (error: unknown) {
             console.error("[VaultCoachView] 读取考试历史内容失败", error);
-            new Notice(this.t("exam.notice.historyFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("exam.notice.historyFailed", { message: createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.render();
@@ -2293,7 +2301,7 @@ export class VaultCoachView extends ItemView {
             new Notice(this.t("exam.notice.deleted"));
         } catch (error: unknown) {
             console.error("[VaultCoachView] 删除考试历史失败", error);
-            new Notice(this.t("exam.notice.deleteFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("exam.notice.deleteFailed", { message: createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.render();
@@ -2315,7 +2323,7 @@ export class VaultCoachView extends ItemView {
             new Notice(this.t("exam.notice.deleted"));
         } catch (error: unknown) {
             console.error("[VaultCoachView] 删除考试失败", error);
-            new Notice(this.t("exam.notice.deleteFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("exam.notice.deleteFailed", { message: createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.render();
@@ -2468,7 +2476,7 @@ export class VaultCoachView extends ItemView {
             await this.app.workspace.openLinkText(normalizedSourcePath, activeFilePath, false);
         } catch (error: unknown) {
             console.error("[VaultCoachView] 打开考试来源失败", error);
-            new Notice(this.t("exam.notice.openSourceFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("exam.notice.openSourceFailed", { message: createShortErrorMessage(error) }));
         }
     }
 
@@ -2505,7 +2513,7 @@ export class VaultCoachView extends ItemView {
      */
     private formatExamHistoryMeta(item: ExamHistoryItem): string {
         const dateText: string = item.createdAt
-            ? this.formatDateTime(item.createdAt)
+            ? formatDateTime(item.createdAt)
             : this.t("exam.history.unknownDate");
         const scoreText: string = item.score !== null && item.maxScore !== null
             ? `${item.score} / ${item.maxScore}`
@@ -2557,7 +2565,7 @@ export class VaultCoachView extends ItemView {
             await this.finalizeStreamingAssistantBubble(answer);
 
         } catch (error: unknown) {
-            if (this.isAbortError(error)) {
+            if (isAbortError(error)) {
                 this.clearStreamingAssistantBubble();
                 new Notice(this.t("view.generationStopped"));
                 return;
@@ -2565,7 +2573,7 @@ export class VaultCoachView extends ItemView {
 
             console.error("[VaultCoachView] 发送消息失败", error);
             this.clearStreamingAssistantBubble();
-            new Notice(this.t("view.sendFailed", { message: this.createShortErrorMessage(error) }));
+            new Notice(this.t("view.sendFailed", { message: createShortErrorMessage(error) }));
         } finally {
             this.isBusy = false;
             this.activeAbortController = null;
@@ -2575,21 +2583,6 @@ export class VaultCoachView extends ItemView {
             this.retrievalModeSelectEl.disabled = false;
             this.focusInput();
         }
-    }
-
-    /**
-     * 判断异常是否来自主动中止。
-     */
-    private isAbortError(error: unknown): boolean {
-        if (error instanceof DOMException) {
-            return error.name === "AbortError";
-        }
-
-        if (error instanceof Error) {
-            return error.name === "AbortError" || /aborted|aborterror/i.test(error.message);
-        }
-
-        return false;
     }
 
     /**
@@ -2638,51 +2631,6 @@ export class VaultCoachView extends ItemView {
      */
     private scrollMessagesToBottom(): void {
         this.messageListEl.scrollTop = this.messageListEl.scrollHeight;
-    }
-
-    /**
-     * 格式化聊天消息时间。
-     */
-    private formatTime(timestamp: number): string {
-        return new Date(timestamp).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    }
-
-    /**
-     * 格式化回答生成耗时。
-     */
-    private formatGenerationDuration(durationMs: number): string {
-        const seconds: number = Math.max(0, Math.floor(durationMs / 1000));
-        return this.t("view.generationDuration", { seconds });
-    }
-
-    /**
-     * 格式化考试历史时间。
-     */
-    private formatDateTime(timestamp: number): string {
-        return new Date(timestamp).toLocaleString([], {
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-        });
-    }
-
-    /**
-     * 生成适合 Notice 展示的短错误信息。
-     */
-    private createShortErrorMessage(error: unknown): string {
-        const message: string = error instanceof Error ? error.message : String(error);
-        const normalizedMessage: string = message.replace(/\s+/g, " ").trim();
-
-        if (normalizedMessage.length <= 180) {
-            return normalizedMessage;
-        }
-
-        return `${normalizedMessage.slice(0, 177)}...`;
     }
 
 }

@@ -5,7 +5,7 @@
  * 不直接执行检索、模型调用或考试生成逻辑。
  */
 
-import { App, DropdownComponent, PluginSettingTab, SecretComponent, Setting, normalizePath } from "obsidian";
+import { App, DropdownComponent, PluginSettingTab, SecretComponent, Setting, normalizePath, type Plugin } from "obsidian";
 import {
     DEFAULT_AUTO_INDEX_DEBOUNCE_MS,
     DEFAULT_AUTO_INDEX_FILE_THRESHOLD,
@@ -39,7 +39,7 @@ import {
     DEFAULT_VECTOR_TOP_K,
 } from "./constants"
 import { getDefaultGreeting, translate, type TranslationKey } from "./i18n";
-import type VaultCoach from "./main";
+import type { VaultCoachPluginApi } from "./plugin-api";
 import type { VaultCoachSettings } from "./types";
 
 /**
@@ -105,9 +105,9 @@ export const DEFAULT_SETTINGS: VaultCoachSettings = createDefaultSettings();
  * Obsidian 设置页：Settings -> Community plugins -> VaultCoach。
  */
 export class VaultCoachSettingTab extends PluginSettingTab {
-    plugin: VaultCoach;
+    plugin: Plugin & VaultCoachPluginApi;
 
-    constructor(app: App, plugin: VaultCoach) {
+    constructor(app: App, plugin: Plugin & VaultCoachPluginApi) {
         super(app, plugin);
         this.plugin = plugin;
     }
