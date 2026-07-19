@@ -3,7 +3,8 @@ import { VAULT_COACH_HIDDEN_DIR_PATH, VIEW_TYPE_VAULT_COACH } from "./constants"
 import { createApplicationContainer, type ApplicationContainer } from "./app/application-container";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { registerVaultCoachCommands, registerVaultCoachRibbon } from "./plugin/command-registry";
-import type { VaultCoachPluginApi } from "./plugin-api";
+import { LegacyPluginApiAdapter } from "./presentation/legacy-plugin-api-adapter";
+import type { VaultCoachPluginApi } from "./presentation/plugin-api";
 import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
 import { getErrorMessage, isAbortError } from "./utils/errors";
 import type { ExamEngine } from "./exam/exam-engine";
@@ -62,6 +63,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
     private persistentStore!: VaultCoachPersistentStore;
     private indexCoordinator!: KnowledgeIndexCoordinator;
     private applicationContainer!: ApplicationContainer;
+    private legacyApi!: LegacyPluginApiAdapter;
     private unsubscribeApplicationEvents: (() => void) | null = null;
 
 
@@ -158,6 +160,10 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
             persistentStore: this.persistentStore,
             indexCoordinator: this.indexCoordinator,
         } = this.applicationContainer.services);
+        this.legacyApi = new LegacyPluginApiAdapter(
+            this.applicationContainer.application,
+            this,
+        );
         this.unsubscribeApplicationEvents = this.applicationContainer.application.subscribe(() => this.refreshAllViews());
 
         await this.restorePersistentState();
@@ -169,13 +175,13 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
 
         this.registerView(
             VIEW_TYPE_VAULT_COACH,
-            (leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this),
+            (leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this.legacyApi),
         );
 
-        registerVaultCoachCommands(this, (key, replacements) => this.t(key, replacements));
-        registerVaultCoachRibbon(this, (key, replacements) => this.t(key, replacements));
+        registerVaultCoachCommands(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
+        registerVaultCoachRibbon(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
 
-        this.addSettingTab(new VaultCoachSettingTab(this.app, this));
+        this.addSettingTab(new VaultCoachSettingTab(this.app, this, this.legacyApi));
         this.registerVaultEvents();
 
         this.app.workspace.onLayoutReady(() => {

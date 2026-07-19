@@ -39,7 +39,7 @@ import {
     DEFAULT_VECTOR_TOP_K,
 } from "./constants"
 import { getDefaultGreeting, translate, type TranslationKey } from "./i18n";
-import type { VaultCoachPluginApi } from "./plugin-api";
+import type { VaultCoachPluginApi } from "./presentation/plugin-api";
 import type { VaultCoachSettings } from "./app/config/settings-types";
 
 /**
@@ -105,10 +105,10 @@ export const DEFAULT_SETTINGS: VaultCoachSettings = createDefaultSettings();
  * Obsidian 设置页：Settings -> Community plugins -> VaultCoach。
  */
 export class VaultCoachSettingTab extends PluginSettingTab {
-    plugin: Plugin & VaultCoachPluginApi;
+    plugin: VaultCoachPluginApi;
 
-    constructor(app: App, plugin: Plugin & VaultCoachPluginApi) {
-        super(app, plugin);
+    constructor(app: App, hostPlugin: Plugin, plugin: VaultCoachPluginApi) {
+        super(app, hostPlugin);
         this.plugin = plugin;
     }
 

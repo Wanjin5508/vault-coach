@@ -8,7 +8,7 @@
 
 import { ItemView, WorkspaceLeaf, Notice, MarkdownRenderer, setIcon } from "obsidian";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
-import type { VaultCoachPluginApi } from "./plugin-api";
+import type { VaultCoachPluginApi } from "./presentation/plugin-api";
 import { createShortErrorMessage, formatDateTime, formatGenerationDuration, formatTime } from "./ui/view-formatters";
 import { isAbortError } from "./utils/errors";
 import type {
