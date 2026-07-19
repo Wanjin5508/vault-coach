@@ -7,7 +7,7 @@ import {
     formatExamSessionMarkdown,
     parseExamHistoryItem,
 } from "../src/exam/exam-session-markdown";
-import type { ExamEvaluation, ExamSession } from "../src/types";
+import type { ExamEvaluation, ExamSession } from "../src/domain/exam/exam-types";
 
 const labels: Record<string, string> = {
     "exam.markdown.id": "ID",

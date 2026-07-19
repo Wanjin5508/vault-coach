@@ -5,10 +5,10 @@ import type {
     ExamContentProfileCacheKey,
     ExamExclusionReason,
     ExamFileOption,
-    IndexedChunk,
-    LocalChatMessage,
-    VaultCoachSettings,
-} from "../types";
+} from "../domain/exam/exam-types";
+import type { IndexedChunk } from "../domain/documents/document-types";
+import type { LocalChatMessage } from "../domain/model/model-types";
+import type { VaultCoachSettings } from "../app/config/settings-types";
 import { clampNumber, generateParsedJsonAnswer, headingPathKey, normalizeHeadingPath, normalizeWhitespace, throwIfAborted } from "./exam-utils";
 import { ExamProfileStore } from "./exam-profile-store";
 

@@ -5,8 +5,8 @@ import type {
     ParsedDocument,
     ParsedDocumentBlock,
     PdfExtractionReport,
-    VaultCoachSettings,
-} from "./types";
+} from "./domain/documents/document-types";
+import type { VaultCoachSettings } from "./app/config/settings-types";
 
 /**
  * PDF 文档解析模块。

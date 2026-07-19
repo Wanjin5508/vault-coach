@@ -1,6 +1,6 @@
 import {App, normalizePath} from "obsidian";
 import { INDEX_SNAPSHOT_FILE_NAME, RUNTIME_STATE_FILE_NAME } from "./constants";
-import type { KnowledgeBaseSnapshot, PersistedPluginState } from "./types";
+import type { KnowledgeBaseSnapshot, PersistedPluginState } from "./infrastructure/storage/storage-types";
 
 const KNOWLEDGE_INDEX_DIR_NAME = "knowledge-index";
 

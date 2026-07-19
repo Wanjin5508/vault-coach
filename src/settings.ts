@@ -40,7 +40,7 @@ import {
 } from "./constants"
 import { getDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import type { VaultCoachPluginApi } from "./plugin-api";
-import type { VaultCoachSettings } from "./types";
+import type { VaultCoachSettings } from "./app/config/settings-types";
 
 /**
  * 插件默认设置

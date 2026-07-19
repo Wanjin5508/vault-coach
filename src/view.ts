@@ -14,7 +14,9 @@ import { isAbortError } from "./utils/errors";
 import type {
     AnswerSource,
     AssistantAnswer,
-    ChatMessage,
+} from "./domain/retrieval/retrieval-types";
+import type { ChatMessage } from "./app/chat/chat-types";
+import type {
     ExamContentProfile,
     ExamEvaluationItem,
     ExamFileOption,
@@ -26,11 +28,10 @@ import type {
     ExamScopeSnapshot,
     ExamScopeOption,
     ExamSession,
-    KnowledgeIndexBusyState,
-    KnowledgeBaseStats,
-    RetrievalMode,
-    VectorIndexStats,
-} from "./types";
+} from "./domain/exam/exam-types";
+import type { KnowledgeIndexBusyState } from "./app/index/index-types";
+import type { KnowledgeBaseStats } from "./domain/documents/document-types";
+import type { RetrievalMode, VectorIndexStats } from "./domain/retrieval/retrieval-types";
 import { VIEW_NAME_VAULT_COACH, VIEW_TYPE_VAULT_COACH } from "./constants";
 import { translate, type TranslationKey } from "./i18n";
 

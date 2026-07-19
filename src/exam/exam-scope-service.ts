@@ -5,8 +5,8 @@ import type {
     ExamScopeAnalysisResult,
     ExamScopeAnalysisSummary,
     ExamScopeSelection,
-    IndexedChunk,
-} from "../types";
+} from "../domain/exam/exam-types";
+import type { IndexedChunk } from "../domain/documents/document-types";
 import { headingPathMatches } from "./exam-utils";
 
 /**

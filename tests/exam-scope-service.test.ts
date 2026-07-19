@@ -6,8 +6,8 @@ import type {
     ExamContentProfile,
     ExamFileOption,
     ExamScopeSelection,
-    IndexedChunk,
-} from "../src/types";
+} from "../src/domain/exam/exam-types";
+import type { IndexedChunk } from "../src/domain/documents/document-types";
 
 interface ExamScopeFixture {
     selection: ExamScopeSelection;

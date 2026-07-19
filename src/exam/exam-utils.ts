@@ -1,5 +1,5 @@
 import { LocalModelClient } from "../model-client";
-import type { LocalChatMessage } from "../types";
+import type { LocalChatMessage } from "../domain/model/model-types";
 
 /**
  * 考试模式通用工具模块。

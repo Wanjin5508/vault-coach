@@ -1,7 +1,7 @@
 import { App, normalizePath, type ListedFiles, type Stat } from "obsidian";
 import { EXAM_RESULTS_DIR_PATH, VAULT_COACH_HIDDEN_DIR_PATH } from "../constants";
 import type { TranslationKey } from "../i18n";
-import type { ExamHistoryItem, ExamSession } from "../types";
+import type { ExamHistoryItem, ExamSession } from "../domain/exam/exam-types";
 import { formatExamSessionMarkdown, parseExamHistoryItem } from "./exam-session-markdown";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;

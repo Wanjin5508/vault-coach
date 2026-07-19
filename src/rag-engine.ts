@@ -6,33 +6,24 @@ import { detectQuestionLanguage, type QuestionLanguage } from "./question-langua
 import type {
     AnswerSource,
     AssistantAnswer,
-    ChatMessage,
-    ExamBlueprint,
-    ExamBlueprintItem,
-    ExamEvaluation,
-    ExamEvaluationItem,
-    ExamQuestion,
-    ExamScopeSelection,
-    ExamScopeSnapshot,
-    ExamSession,
-    IndexedChunk,
-    KnowledgeBaseSyncResult,
     KeywordSearchHit,
-    LocalChatMessage,
     QueryRewriteResult,
     RerankedCandidate,
     RetrievalCandidate,
     RetrievalMode,
     RerankResultItem,
-    StreamHandlers,
     VectorIndexStats,
     VectorRecord,
     VectorSearchHit,
     VectorStore,
     VectorStoreHit,
     VectorStoreStats,
-    VaultCoachSettings,
-} from "./types";
+} from "./domain/retrieval/retrieval-types";
+import type { ChatMessage, StreamHandlers } from "./app/chat/chat-types";
+import type { ExamBlueprint, ExamBlueprintItem, ExamEvaluation, ExamEvaluationItem, ExamQuestion, ExamScopeSelection, ExamScopeSnapshot, ExamSession } from "./domain/exam/exam-types";
+import type { IndexedChunk, KnowledgeBaseSyncResult } from "./domain/documents/document-types";
+import type { LocalChatMessage } from "./domain/model/model-types";
+import type { VaultCoachSettings } from "./app/config/settings-types";
 
 /**
  * RAG 引擎模块。

@@ -10,9 +10,9 @@ import type {
     ExamScopeSnapshot,
     ExamScopeSelection,
     ExamSession,
-    IndexedChunk,
-    VaultCoachSettings,
-} from "../types";
+} from "../domain/exam/exam-types";
+import type { IndexedChunk } from "../domain/documents/document-types";
+import type { VaultCoachSettings } from "../app/config/settings-types";
 import { ExamBlueprintService } from "./exam-blueprint-service";
 import { ExamContentProfiler, EXAM_CONTENT_PROFILE_PROMPT_VERSION } from "./exam-content-profiler";
 import { ExamQuestionGenerator, ExamQuestionGenerationResult } from "./exam-question-generator";

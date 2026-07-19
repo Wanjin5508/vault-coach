@@ -5,7 +5,7 @@ import type {
     ExamContentProfileCache,
     ExamContentProfileCacheKey,
     ExamContentProfileCacheRecord,
-} from "../types";
+} from "../domain/exam/exam-types";
 
 const EXAM_PROFILE_CACHE_VERSION = 1;
 

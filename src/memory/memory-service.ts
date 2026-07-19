@@ -1,5 +1,7 @@
 import type { AdvancedRagEngine } from "../rag-engine";
-import type { ChatMessage, MemoryItem, MemorySearchHit, VaultCoachSettings } from "../types";
+import type { ChatMessage } from "../app/chat/chat-types";
+import type { MemoryItem, MemorySearchHit } from "../domain/memory/memory-types";
+import type { VaultCoachSettings } from "../app/config/settings-types";
 
 /**
  * 管理长期记忆的本地状态、检索、抽取、去重和裁剪。

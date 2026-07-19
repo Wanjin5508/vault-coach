@@ -16,7 +16,9 @@ import { EmbeddedExactVectorStore } from "./vector-store";
 import type {
     AnswerSource,
     AssistantAnswer,
-    ChatMessage,
+} from "./domain/retrieval/retrieval-types";
+import type { ChatMessage, StreamHandlers } from "./app/chat/chat-types";
+import type {
     ExamFileOption,
     ExamGenerationOptions,
     ExamHistoryItem,
@@ -26,19 +28,12 @@ import type {
     ExamScopeSnapshot,
     ExamScopeOption,
     ExamSession,
-    IndexedChunk,
-    KnowledgeBaseSnapshot,
-    KnowledgeBaseStats,
-    KnowledgeBaseSyncResult,
-    KnowledgeIndexBusyPhase,
-    KnowledgeIndexBusyState,
-    PersistedPluginState,
-    RetrievalMode,
-    StreamHandlers,
-    VectorIndexStats,
-    VectorStore,
-    VaultCoachSettings,
-} from "./types";
+} from "./domain/exam/exam-types";
+import type { IndexedChunk, KnowledgeBaseStats, KnowledgeBaseSyncResult } from "./domain/documents/document-types";
+import type { KnowledgeBaseSnapshot, PersistedPluginState } from "./infrastructure/storage/storage-types";
+import type { KnowledgeIndexBusyPhase, KnowledgeIndexBusyState } from "./app/index/index-types";
+import type { RetrievalMode, VectorIndexStats, VectorStore } from "./domain/retrieval/retrieval-types";
+import type { VaultCoachSettings } from "./app/config/settings-types";
 import { VaultCoachView } from "./view";
 
 /**

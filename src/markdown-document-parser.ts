@@ -4,7 +4,7 @@ import type {
     DocumentParseContext,
     ParsedDocument,
     ParsedDocumentBlock,
-} from "./types";
+} from "./domain/documents/document-types";
 
 /**
  * Markdown 文档解析模块。

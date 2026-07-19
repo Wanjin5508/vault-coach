@@ -6,20 +6,22 @@ import { PdfDocumentParser } from "./pdf-document-parser";
 import type {
     ChunkContentKind,
     DocumentLocator,
-    ExamFileOption,
-    ExamScopeSelection,
-    ExamScopeSnapshot,
-    ExamScopeOption,
     IndexedChunk,
     KnowledgeBaseFileRecord,
-    KnowledgeBaseSnapshot,
     KnowledgeBaseStats,
     KnowledgeBaseSyncResult,
-    KeywordSearchHit,
     ParsedDocument,
     ParsedDocumentBlock,
-    VaultCoachSettings,
-} from "./types";
+} from "./domain/documents/document-types";
+import type {
+    ExamFileOption,
+    ExamScopeOption,
+    ExamScopeSelection,
+    ExamScopeSnapshot,
+} from "./domain/exam/exam-types";
+import type { KeywordSearchHit } from "./domain/retrieval/retrieval-types";
+import type { KnowledgeBaseSnapshot } from "./infrastructure/storage/storage-types";
+import type { VaultCoachSettings } from "./app/config/settings-types";
 
 const DOCUMENT_CHUNKER_VERSION = "document-chunker-v2";
 const DOCUMENT_PARSER_LAYER_VERSION = "document-parser-v2";

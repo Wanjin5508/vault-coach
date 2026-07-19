@@ -1,6 +1,6 @@
 import type { Stat } from "obsidian";
 import type { TranslationKey } from "../i18n";
-import type { ExamEvaluationItem, ExamHistoryItem, ExamQuestion, ExamSession } from "../types";
+import type { ExamEvaluationItem, ExamHistoryItem, ExamQuestion, ExamSession } from "../domain/exam/exam-types";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 

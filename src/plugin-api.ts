@@ -2,7 +2,9 @@ import type { Plugin } from "obsidian";
 import type {
     AnswerSource,
     AssistantAnswer,
-    ChatMessage,
+} from "./domain/retrieval/retrieval-types";
+import type { ChatMessage, StreamHandlers } from "./app/chat/chat-types";
+import type {
     ExamFileOption,
     ExamGenerationOptions,
     ExamHistoryItem,
@@ -11,13 +13,11 @@ import type {
     ExamScopeSelection,
     ExamScopeSnapshot,
     ExamSession,
-    KnowledgeBaseStats,
-    KnowledgeIndexBusyState,
-    RetrievalMode,
-    StreamHandlers,
-    VaultCoachSettings,
-    VectorIndexStats,
-} from "./types";
+} from "./domain/exam/exam-types";
+import type { KnowledgeBaseStats } from "./domain/documents/document-types";
+import type { KnowledgeIndexBusyState } from "./app/index/index-types";
+import type { RetrievalMode, VectorIndexStats } from "./domain/retrieval/retrieval-types";
+import type { VaultCoachSettings } from "./app/config/settings-types";
 
 /**
  * UI 层和设置页能调用的插件能力。
