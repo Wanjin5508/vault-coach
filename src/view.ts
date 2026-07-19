@@ -34,6 +34,8 @@ import type { KnowledgeBaseStats } from "./domain/documents/document-types";
 import type { RetrievalMode, VectorIndexStats } from "./domain/retrieval/retrieval-types";
 import { VIEW_NAME_VAULT_COACH, VIEW_TYPE_VAULT_COACH } from "./constants";
 import { translate, type TranslationKey } from "./i18n";
+import { ChatController, type ChatControllerEvent } from "./presentation/controllers/chat-controller";
+import { ChatView } from "./presentation/views/chat-view";
 
 type InteractionMode = "qa" | "exam";
 type ExamViewPhase = "setup" | "generating" | "taking" | "evaluating" | "review" | "history";
@@ -59,6 +61,10 @@ export class VaultCoachView extends ItemView {
 
     // 当前是否正等待插件完成检索回复
     private isBusy = false;
+
+    private readonly chatController: ChatController;
+    private readonly chatView: ChatView;
+    private readonly unsubscribeChatController: () => void;
 
     // 应用事件在交互进行中到达时，延后完整重绘，避免替换仍被异步流程引用的 DOM。
     private hasDeferredRefresh = false;
@@ -103,6 +109,9 @@ export class VaultCoachView extends ItemView {
     constructor(leaf: WorkspaceLeaf, plugin: VaultCoachPluginApi) {
         super(leaf);
         this.plugin = plugin;
+        this.chatController = new ChatController(plugin);
+        this.chatView = new ChatView(this.app, this, this.chatController);
+        this.unsubscribeChatController = this.chatController.subscribe((event) => this.handleChatControllerEvent(event));
     }
 
     /**
@@ -148,6 +157,9 @@ export class VaultCoachView extends ItemView {
     async onClose(): Promise<void> {
         await Promise.resolve();
         this.clearPostOpenStyleRefreshTimers();
+        this.chatView.dispose();
+        this.unsubscribeChatController();
+        this.chatController.dispose();
         this.clearStreamingTimer();
         // 只清理插件自己的内容区。清空 containerEl 会移除 Obsidian 的视图外壳，
         // 在某些冷启动/首次打开路径下会导致后续渲染缺少正常的样式和布局上下文。
@@ -159,13 +171,23 @@ export class VaultCoachView extends ItemView {
      * 对外暴露的刷新方法，设置变化或会话重置后由主插件调用。
      */
     public refresh(): void {
-        if (this.isBusy) {
+        if (this.isInteractionBusy()) {
             this.hasDeferredRefresh = true;
             return;
         }
 
         this.hasDeferredRefresh = false;
         this.render();
+    }
+
+    private isInteractionBusy(): boolean {
+        return this.isBusy || this.chatController.getState().busy;
+    }
+
+    private handleChatControllerEvent(event: ChatControllerEvent): void {
+        if (event.type === "busy-changed" && !event.busy && this.hasDeferredRefresh) {
+            this.refresh();
+        }
     }
 
     /**
@@ -205,7 +227,7 @@ export class VaultCoachView extends ItemView {
 
         // 首次打开时 Obsidian 可能稍晚才让插件 styles.css 生效。这里只在用户尚未开始
         // 输入/生成时补一次完整渲染，避免为了修复冷启动排版而清掉用户正在编辑的内容。
-        if (this.isBusy || (this.inputEl?.isConnected && this.inputEl.value.length > 0)) {
+        if (this.isInteractionBusy() || this.chatView.hasInputText()) {
             return;
         }
 
@@ -241,13 +263,13 @@ export class VaultCoachView extends ItemView {
         this.renderHeader(rootEl);
 
         if (this.activeInteractionMode === "exam") {
+            this.chatView.detach();
             this.renderExamArea(rootEl);
             this.restorePendingExamAreaScroll();
             return;
         }
 
-        this.renderMessageArea(rootEl);
-        this.renderInputArea(rootEl);
+        this.chatView.render(rootEl);
     }
 
     /**
@@ -332,7 +354,7 @@ export class VaultCoachView extends ItemView {
         const rebuildButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
             text: indexBusyState.busy ? this.t("view.rebuildIndexBusy") : this.t("view.rebuildIndex"),
         });
-        rebuildButtonEl.disabled = indexBusyState.busy || this.isBusy;
+        rebuildButtonEl.disabled = indexBusyState.busy || this.isInteractionBusy();
         rebuildButtonEl.addEventListener("click", () => {
             void this.handleRebuildIndex();
         });
@@ -344,7 +366,7 @@ export class VaultCoachView extends ItemView {
                 type: "button",
             },
         });
-        clearIndexButtonEl.disabled = indexBusyState.busy || this.isBusy;
+        clearIndexButtonEl.disabled = indexBusyState.busy || this.isInteractionBusy();
         clearIndexButtonEl.addEventListener("click", () => {
             void this.handleClearIndex();
         });
@@ -404,27 +426,26 @@ export class VaultCoachView extends ItemView {
     private renderQaToolbar(toolbarEl: HTMLDivElement, indexBusy: boolean): void {
         const retrievalGroupEl: HTMLDivElement = toolbarEl.createDiv({ cls: "vault-coach-retrieval-group"});
         retrievalGroupEl.createSpan({text: `${this.t("view.retrievalModeLabel")} `});
-        this.retrievalModeSelectEl = retrievalGroupEl.createEl("select");
-        this.addRetrievalOption("keyword", this.t("view.retrieval.keyword"));
-        this.addRetrievalOption("vector", this.t("view.retrieval.vector"));
-        this.addRetrievalOption("hybrid", this.t("view.retrieval.hybrid"));
-        this.retrievalModeSelectEl.value = this.plugin.getRuntimeRetrievalMode();
-        this.retrievalModeSelectEl.disabled = this.isBusy || indexBusy;
-        this.retrievalModeSelectEl.addEventListener("change", () => {
-            const value: string = this.retrievalModeSelectEl.value;
+        const retrievalModeSelectEl: HTMLSelectElement = retrievalGroupEl.createEl("select");
+        this.addRetrievalOption(retrievalModeSelectEl, "keyword", this.t("view.retrieval.keyword"));
+        this.addRetrievalOption(retrievalModeSelectEl, "vector", this.t("view.retrieval.vector"));
+        this.addRetrievalOption(retrievalModeSelectEl, "hybrid", this.t("view.retrieval.hybrid"));
+        retrievalModeSelectEl.value = this.chatController.getRetrievalMode();
+        retrievalModeSelectEl.disabled = this.isInteractionBusy() || indexBusy;
+        retrievalModeSelectEl.addEventListener("change", () => {
+            const value: string = retrievalModeSelectEl.value;
             if (value === "keyword" || value === "vector" || value === "hybrid" ) {
-                this.plugin.setRuntimeRetrievalMode(value);
+                this.chatController.setRetrievalMode(value);
             }
         });
 
         const resetButtonEl: HTMLButtonElement = toolbarEl.createEl("button", {
             text: this.t("view.resetConversation"),
         });
-        resetButtonEl.disabled = this.isBusy;
+        resetButtonEl.disabled = this.isInteractionBusy();
         resetButtonEl.addEventListener("click", () => {
-            this.plugin.resetConversation();
-            void this.renderMessages();
-            this.focusInput();
+            this.chatController.resetConversation();
+            this.chatView.focusInput();
         });
     }
 
@@ -490,8 +511,8 @@ export class VaultCoachView extends ItemView {
     /**
      * 向检索模式选择器添加选项。
      */
-    private addRetrievalOption(value: RetrievalMode, label: string): void {
-        const optionEl: HTMLOptionElement = this.retrievalModeSelectEl.createEl("option");
+    private addRetrievalOption(selectEl: HTMLSelectElement, value: RetrievalMode, label: string): void {
+        const optionEl: HTMLOptionElement = selectEl.createEl("option");
         optionEl.value = value;
         optionEl.text = label;
     }
@@ -2604,21 +2625,18 @@ export class VaultCoachView extends ItemView {
      * 手动重建知识库索引。
      */
     private async handleRebuildIndex(): Promise<void> {
-        if (this.isBusy || this.plugin.getKnowledgeIndexBusyState().busy) {
+        if (this.isInteractionBusy() || this.plugin.getKnowledgeIndexBusyState().busy) {
             return;
         }
 
         this.isBusy = true;
-        this.sendButtonEl?.setAttribute("disabled", "true");
-        this.retrievalModeSelectEl?.setAttribute("disabled", "true");
-
         try {
             await this.plugin.rebuildKnowledgeBase(true);
         } finally {
             this.isBusy = false;
             this.refresh();
             if (this.activeInteractionMode === "qa") {
-                this.focusInput();
+                this.chatView.focusInput();
             }
         }
     }
@@ -2627,7 +2645,7 @@ export class VaultCoachView extends ItemView {
      * 清空已构建的知识库索引。
      */
     private async handleClearIndex(): Promise<void> {
-        if (this.isBusy || this.plugin.getKnowledgeIndexBusyState().busy) {
+        if (this.isInteractionBusy() || this.plugin.getKnowledgeIndexBusyState().busy) {
             return;
         }
 
