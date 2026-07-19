@@ -3,11 +3,12 @@ import { VAULT_COACH_HIDDEN_DIR_PATH, VIEW_TYPE_VAULT_COACH } from "./constants"
 import { ExamEngine } from "./exam/exam-engine";
 import { ExamSessionStore } from "./exam/exam-session-store";
 import { ExamEvaluationService } from "./domain/exam/exam-evaluation-service";
+import { ChatService } from "./app/chat/chat-service";
+import { KnowledgeIndexCoordinator } from "./app/index/knowledge-index-coordinator";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { VaultKnowledgeBase } from "./knowledge-base";
 import { LocalModelClient } from "./model-client";
 import { ObsidianDocumentFileMetadataReader } from "./infrastructure/obsidian/obsidian-document-file-metadata-reader";
-import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { LongTermMemoryService } from "./memory/memory-service";
 import { registerVaultCoachCommands, registerVaultCoachRibbon } from "./plugin/command-registry";
 import { VaultCoachPersistentStore } from "./persistent-store";
@@ -52,32 +53,23 @@ import { VaultCoachView } from "./view";
 export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
     settings: VaultCoachSettings = DEFAULT_SETTINGS;
 
-    private messages: ChatMessage[] = [];
-
     private knowledgeBase!: VaultKnowledgeBase;
     private vectorStore!: VectorStore;
     private ragEngine!: AdvancedRagEngine;
+    private chatService!: ChatService;
     private examEngine!: ExamEngine;
     private examEvaluationService!: ExamEvaluationService;
     private examSessionStore!: ExamSessionStore;
     private memoryService!: LongTermMemoryService;
     private persistentStore!: VaultCoachPersistentStore;
+    private indexCoordinator!: KnowledgeIndexCoordinator;
 
-    private knowledgeBaseDirty = true;
-    private vectorIndexDirty = true;
-    private runtimeRetrievalMode: RetrievalMode = DEFAULT_SETTINGS.defaultRetrievalMode;
 
     // 自动增量同步所需的队列与计时器。
     private readonly pendingChangedKnowledgePaths: Set<string> = new Set<string>();
     private autoIndexDebounceTimer: number | null = null;
     private autoIndexMaxWaitTimer: number | null = null;
     private isSyncingKnowledgeBase = false;
-    private activeKnowledgeIndexAbortController: AbortController | null = null;
-    private knowledgeIndexBusyState: KnowledgeIndexBusyState = {
-        busy: false,
-        phase: null,
-        startedAt: null,
-    };
     private lastAutoIndexAt: number | null = null;
     private hasShownOllamaEmbeddingCpuFallbackNotice = false;
 
@@ -88,6 +80,38 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
         return translate(key, replacements);
     }
 
+    private get knowledgeBaseDirty(): boolean {
+        return this.indexCoordinator.getTextDirty();
+    }
+
+    private set knowledgeBaseDirty(value: boolean) {
+        this.indexCoordinator.setTextDirty(value);
+    }
+
+    private get vectorIndexDirty(): boolean {
+        return this.indexCoordinator.getVectorDirty();
+    }
+
+    private set vectorIndexDirty(value: boolean) {
+        this.indexCoordinator.setVectorDirty(value);
+    }
+
+    private get knowledgeIndexBusyState(): KnowledgeIndexBusyState {
+        return this.indexCoordinator.getBusyState();
+    }
+
+    private set knowledgeIndexBusyState(value: KnowledgeIndexBusyState) {
+        this.indexCoordinator.replaceBusyState(value);
+    }
+
+    private get activeKnowledgeIndexAbortController(): AbortController | null {
+        return this.indexCoordinator.getActiveAbortController();
+    }
+
+    private set activeKnowledgeIndexAbortController(value: AbortController | null) {
+        this.indexCoordinator.setActiveAbortController(value);
+    }
+
     /**
      * Obsidian 加载插件时调用。
      *
@@ -96,7 +120,8 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
     async onload(): Promise<void> {
         await this.loadSettings();
 
-        this.runtimeRetrievalMode = this.settings.defaultRetrievalMode;
+        this.chatService = new ChatService(() => this.settings);
+        this.indexCoordinator = new KnowledgeIndexCoordinator(() => this.refreshAllViews());
         this.persistentStore = new VaultCoachPersistentStore(this.app, this.manifest.id);
         this.knowledgeBase = new VaultKnowledgeBase(this.app, () => this.settings);
         this.vectorStore = new EmbeddedExactVectorStore(this.persistentStore);
@@ -104,12 +129,12 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
             this.knowledgeBase,
             this.vectorStore,
             () => this.settings,
-            () => this.runtimeRetrievalMode,
+            () => this.chatService.getRuntimeRetrievalMode(),
             () => this.getCloudApiKey(),
         );
         this.memoryService = new LongTermMemoryService(
             () => this.settings,
-            () => this.messages,
+            () => this.chatService.getMessagesForMemory(),
             this.ragEngine,
         );
         this.examEngine = new ExamEngine(
@@ -126,11 +151,20 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
             ),
         );
         this.examSessionStore = new ExamSessionStore(this.app, (key, replacements) => this.t(key, replacements));
+        this.chatService.setDependencies({
+            ragEngine: this.ragEngine,
+            memoryService: this.memoryService,
+            ensureKnowledgeBaseReady: () => this.ensureKnowledgeBaseReady(),
+            getKnowledgeScopeDescription: () => this.getKnowledgeScopeDescription(),
+            persist: () => this.persistRuntimeState(),
+            getDefaultGreeting: () => this.getEffectiveDefaultGreeting(),
+            onGenerationFinished: () => this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded(),
+        });
 
         await this.restorePersistentState();
         await this.restoreKnowledgeBaseSnapshot();
 
-        if (this.messages.length === 0) {
+        if (this.chatService.getMessages().length === 0) {
             this.resetConversation();
         }
 
@@ -158,6 +192,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
     onunload(): void {
         this.abortKnowledgeIndexBuild(false);
         this.clearAutoIndexTimers();
+        this.indexCoordinator.dispose();
     }
 
     /**
@@ -504,7 +539,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 获取运行时检索模式。
      */
     getRuntimeRetrievalMode(): RetrievalMode {
-        return this.runtimeRetrievalMode;
+        return this.chatService.getRuntimeRetrievalMode();
     }
 
     /**
@@ -529,7 +564,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 设置运行时检索模式。
      */
     setRuntimeRetrievalMode(mode: RetrievalMode): void {
-        this.runtimeRetrievalMode = mode;
+        this.chatService.setRuntimeRetrievalMode(mode);
         this.refreshAllViews();
     }
 
@@ -537,7 +572,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 获取当前对话消息。
      */
     getMessages(): ChatMessage[] {
-        return this.messages;
+        return this.chatService.getMessages();
     }
 
     /**
@@ -551,41 +586,21 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 追加并持久化用户消息。
      */
     async appendUserMessage(text: string): Promise<void> {
-        this.messages.push({
-            role: "user",
-            text,
-            createdAt: Date.now(),
-        });
-        this.trimMessages();
-        await this.persistRuntimeState();
+        await this.chatService.appendUserMessage(text);
     }
 
     /**
      * 追加助手消息。
      */
     addAssistantMessage(text: string, sources: AnswerSource[], generationDurationMs?: number): void {
-        this.messages.push({
-            role: "assistant",
-            text: normalizeObsidianMarkdown(text),
-            createdAt: Date.now(),
-            generationDurationMs,
-            sources,
-        });
-        this.trimMessages();
+        this.chatService.addAssistantMessage(text, sources, generationDurationMs);
     }
 
     /**
      * 重置当前会话。
      */
     resetConversation(): void {
-        this.messages = [
-            {
-                role: "assistant",
-                text: this.getEffectiveDefaultGreeting(),
-                createdAt: Date.now(),
-            },
-        ];
-        void this.persistRuntimeState();
+        this.chatService.resetConversation();
     }
 
     /**
@@ -786,44 +801,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 视图发送消息时调用，内部负责流式生成、记忆更新与持久化。
      */
     async streamAssistantTurn(userText: string, handlers?: StreamHandlers): Promise<AssistantAnswer> {
-        const generationStartedAt: number = Date.now();
-        let firstChunkDurationMs: number | null = null;
-        const effectiveHandlers: StreamHandlers = {
-            ...handlers,
-            onToken: (token: string) => {
-                if (firstChunkDurationMs === null && token.length > 0) {
-                    firstChunkDurationMs = Math.max(0, Date.now() - generationStartedAt);
-                }
-                handlers?.onToken?.(token);
-            },
-        };
-        await this.ensureKnowledgeBaseReady();
-
-        const memoryContext: string = this.memoryService.buildContext(userText);
-        try {
-            const answer: AssistantAnswer = await this.ragEngine.streamAnswerQuestion(
-                userText,
-                this.messages,
-                this.getKnowledgeScopeDescription(),
-                memoryContext,
-                effectiveHandlers,
-            );
-
-            const generationDurationMs: number = firstChunkDurationMs ?? Math.max(0, Date.now() - generationStartedAt);
-            const answerWithDuration: AssistantAnswer = {
-                ...answer,
-                generationDurationMs,
-            };
-            this.addAssistantMessage(answerWithDuration.text, answerWithDuration.sources, generationDurationMs);
-            if (!effectiveHandlers.abortSignal?.aborted) {
-                await this.memoryService.updateFromAssistantTurn(userText, answerWithDuration.text);
-            }
-            await this.persistRuntimeState();
-
-            return answerWithDuration;
-        } finally {
-            this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
-        }
+        return this.chatService.streamAssistantTurn(userText, handlers);
     }
 
     /**
@@ -1023,11 +1001,10 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
             return;
         }
 
-        this.messages = state.messages ?? [];
+        this.chatService.hydrate(state.messages ?? []);
         this.memoryService.hydrate(state.memories ?? []);
         this.lastAutoIndexAt = state.lastAutoIndexAt ?? null;
         const restoredGreeting: boolean = this.refreshRestoredDefaultGreeting();
-        this.trimMessages();
         this.memoryService.trim();
         if (restoredGreeting) {
             await this.persistRuntimeState();
@@ -1038,7 +1015,8 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 恢复状态后刷新内置欢迎语。
      */
     private refreshRestoredDefaultGreeting(): boolean {
-        const firstMessage: ChatMessage | undefined = this.messages[0];
+        const messages: ChatMessage[] = this.chatService.getMessages();
+        const firstMessage: ChatMessage | undefined = messages[0];
         if (!firstMessage || firstMessage.role !== "assistant" || !isBuiltInDefaultGreeting(firstMessage.text)) {
             return false;
         }
@@ -1048,10 +1026,11 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
             return false;
         }
 
-        this.messages[0] = {
+        messages[0] = {
             ...firstMessage,
             text: effectiveGreeting,
         };
+        this.chatService.hydrate(messages);
         return true;
     }
 
@@ -1133,7 +1112,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      */
     private async persistRuntimeState(): Promise<void> {
         const state: PersistedPluginState = {
-            messages: [...this.messages],
+            messages: this.chatService.getMessages(),
             memories: this.memoryService.getAll(),
             lastAutoIndexAt: this.lastAutoIndexAt,
         };
@@ -1177,26 +1156,6 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
             this.settings.llmBaseUrl.trim().replace(/\/+$/, ""),
             this.settings.embeddingModel.trim(),
         ].join("::");
-    }
-
-    /**
-     * 裁剪持久化消息数量，保留欢迎语和最近上下文。
-     */
-    private trimMessages(): void {
-        const maxMessages: number = Math.max(1, this.settings.maxConversationMessages);
-        if (this.messages.length <= maxMessages) {
-            return;
-        }
-
-        const greeting: ChatMessage | undefined = this.messages.find((message: ChatMessage) => message.role === "assistant");
-        const tail: ChatMessage[] = this.messages.slice(-maxMessages);
-
-        if (greeting && !tail.includes(greeting)) {
-            this.messages = [greeting, ...tail.slice(1)];
-            return;
-        }
-
-        this.messages = tail;
     }
 
     /**
