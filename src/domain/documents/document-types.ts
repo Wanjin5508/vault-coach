@@ -152,3 +152,10 @@ export interface KnowledgeBaseSyncResult {
     removedChunkIds: string[];
     affectedFiles: string[];
 }
+
+/** Keyword-search result produced by the document index. */
+export interface KeywordSearchHit {
+    chunk: IndexedChunk;
+    score: number;
+    matchedTokens: string[];
+}

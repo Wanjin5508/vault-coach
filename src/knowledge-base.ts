@@ -3,6 +3,7 @@ import { VAULT_COACH_HIDDEN_DIR_PATH } from "./constants";
 import { createDocumentId, hashArrayBuffer, hashString, type DocumentParser, DocumentParserRegistry } from "./document-parser";
 import { MarkdownDocumentParser } from "./markdown-document-parser";
 import { PdfDocumentParser } from "./pdf-document-parser";
+import type { DocumentIndexReader } from "./domain/documents/document-index-reader";
 import type {
     ChunkContentKind,
     DocumentLocator,
@@ -10,6 +11,7 @@ import type {
     KnowledgeBaseFileRecord,
     KnowledgeBaseStats,
     KnowledgeBaseSyncResult,
+    KeywordSearchHit,
     ParsedDocument,
     ParsedDocumentBlock,
 } from "./domain/documents/document-types";
@@ -19,7 +21,6 @@ import type {
     ExamScopeSelection,
     ExamScopeSnapshot,
 } from "./domain/exam/exam-types";
-import type { KeywordSearchHit } from "./domain/retrieval/retrieval-types";
 import type { KnowledgeBaseSnapshot } from "./infrastructure/storage/storage-types";
 import type { VaultCoachSettings } from "./app/config/settings-types";
 
@@ -37,7 +38,7 @@ const DOCUMENT_PARSER_LAYER_VERSION = "document-parser-v2";
  * - 它不直接关心 LLM 生成回答；
  * - 它只负责“把知识文件变成可检索的数据结构”。
  */
-export class VaultKnowledgeBase {
+export class VaultKnowledgeBase implements DocumentIndexReader {
     private readonly app: App;
     // 使用函数注入设置读取器，确保每次索引或检索都能拿到最新设置。
     private readonly getSettings: () => VaultCoachSettings;
@@ -113,23 +114,16 @@ export class VaultKnowledgeBase {
     }
 
     /**
-     * 获取考试文件的内容哈希，用于画像缓存键。
+     * 按 ID 读取单个索引块。
      */
-    getExamFileContentHash(filePath: string): string | null {
-        return this.fileHashes.get(normalizePath(filePath)) ?? null;
+    getChunkById(chunkId: string): IndexedChunk | null {
+        return this.chunkMap.get(chunkId) ?? null;
     }
 
     /**
-     * 获取某个考试文件对应的 chunk。
+     * 按 ID 批量读取索引块，并保留调用方传入的顺序。
      */
-    getExamFileChunks(filePath: string): IndexedChunk[] {
-        return this.getChunksForFilePath(normalizePath(filePath));
-    }
-
-    /**
-     * 按 chunkId 批量读取 chunk。
-     */
-    getExamChunksByIds(chunkIds: string[]): IndexedChunk[] {
+    getChunksByIds(chunkIds: readonly string[]): IndexedChunk[] {
         const chunks: IndexedChunk[] = [];
         for (const chunkId of chunkIds) {
             const chunk: IndexedChunk | undefined = this.chunkMap.get(chunkId);
@@ -141,22 +135,72 @@ export class VaultKnowledgeBase {
     }
 
     /**
-     * 读取考试文件原文。
-     *
-     * Markdown 文件返回原始内容；非 Markdown 文档返回已解析 chunk 的拼接文本。
+     * 读取某个 Vault 文件的全部已索引 chunk。
      */
-    async readExamFileContent(filePath: string): Promise<string | null> {
+    getChunksByFilePath(filePath: string): IndexedChunk[] {
+        return this.getChunksForFilePath(normalizePath(filePath));
+    }
+
+    /**
+     * 获取某个文件的索引元数据。
+     */
+    getFileRecord(filePath: string): KnowledgeBaseFileRecord | null {
+        const record: KnowledgeBaseFileRecord | undefined = this.fileRecords.get(normalizePath(filePath));
+        if (!record) {
+            return null;
+        }
+
+        return {
+            ...record,
+            chunkIds: [...record.chunkIds],
+        };
+    }
+
+    /**
+     * 读取文档原始文本；非 Markdown 文档使用已解析 chunk 的拼接文本。
+     */
+    async readDocumentText(filePath: string): Promise<string | null> {
         const abstractFile = this.app.vault.getAbstractFileByPath(normalizePath(filePath));
         if (!(abstractFile instanceof TFile)) {
             return null;
         }
 
         if (!this.isMarkdownPath(abstractFile.path)) {
-            const chunks: IndexedChunk[] = this.getChunksForFilePath(abstractFile.path);
+            const chunks: IndexedChunk[] = this.getChunksByFilePath(abstractFile.path);
             return chunks.map((chunk: IndexedChunk) => chunk.text).join("\n\n");
         }
 
         return this.app.vault.cachedRead(abstractFile);
+    }
+
+    /**
+     * 获取考试文件的内容哈希，用于画像缓存键。
+     */
+    getExamFileContentHash(filePath: string): string | null {
+        return this.fileHashes.get(normalizePath(filePath)) ?? null;
+    }
+
+    /**
+     * 获取某个考试文件对应的 chunk。
+     */
+    getExamFileChunks(filePath: string): IndexedChunk[] {
+        return this.getChunksByFilePath(filePath);
+    }
+
+    /**
+     * 按 chunkId 批量读取 chunk。
+     */
+    getExamChunksByIds(chunkIds: string[]): IndexedChunk[] {
+        return this.getChunksByIds(chunkIds);
+    }
+
+    /**
+     * 读取考试文件原文。
+     *
+     * Markdown 文件返回原始内容；非 Markdown 文档返回已解析 chunk 的拼接文本。
+     */
+    async readExamFileContent(filePath: string): Promise<string | null> {
+        return this.readDocumentText(filePath);
     }
 
     /**

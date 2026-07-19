@@ -1,5 +1,5 @@
 import { DEFAULT_RRF_K } from "./constants";
-import { VaultKnowledgeBase } from "./knowledge-base";
+import type { DocumentIndexReader } from "./domain/documents/document-index-reader";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { LocalModelClient } from "./model-client";
 import { detectQuestionLanguage, type QuestionLanguage } from "./question-language";
@@ -91,7 +91,7 @@ interface ExamEvaluationPayload {
  * 高级 RAG 引擎。
  */
 export class AdvancedRagEngine {
-    private readonly knowledgeBase: VaultKnowledgeBase;
+    private readonly documentIndex: DocumentIndexReader;
     private readonly vectorStore: VectorStore;
     private readonly getSettings: () => VaultCoachSettings;
     private readonly getRuntimeRetrievalMode: () => RetrievalMode;
@@ -105,13 +105,13 @@ export class AdvancedRagEngine {
     };
 
     constructor(
-        knowledgeBase: VaultKnowledgeBase,
+        documentIndex: DocumentIndexReader,
         vectorStore: VectorStore,
         getSettings: () => VaultCoachSettings,
         getRuntimeRetrievalMode: () => RetrievalMode,
         getCloudApiKey: () => string | null,
     ) {
-        this.knowledgeBase = knowledgeBase;
+        this.documentIndex = documentIndex;
         this.vectorStore = vectorStore;
         this.getSettings = getSettings;
         this.getRuntimeRetrievalMode = getRuntimeRetrievalMode;
@@ -171,7 +171,7 @@ export class AdvancedRagEngine {
             return this.getVectorIndexStats();
         }
 
-        const chunks: IndexedChunk[] = this.knowledgeBase.getAllChunks();
+        const chunks: IndexedChunk[] = this.documentIndex.getAllChunks();
         if (chunks.length === 0) {
             return this.getVectorIndexStats();
         }
@@ -1119,7 +1119,7 @@ export class AdvancedRagEngine {
     private async retrieveCandidates(query: string, mode: RetrievalMode): Promise<RetrievalCandidate[]> {
         if (mode === "keyword") {
             return this.buildCandidatesFromKeywordHits(
-                this.knowledgeBase.searchKeyword(query, this.getSettings().keywordSearchTopK),
+                this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK),
             );
         }
 
@@ -1130,12 +1130,12 @@ export class AdvancedRagEngine {
             } catch (error: unknown) {
                 console.error("[VaultCoach] 向量检索失败，将回退到关键词检索。", error);
                 return this.buildCandidatesFromKeywordHits(
-                    this.knowledgeBase.searchKeyword(query, this.getSettings().keywordSearchTopK),
+                    this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK),
                 );
             }
         }
 
-        const keywordHits: KeywordSearchHit[] = this.knowledgeBase.searchKeyword(query, this.getSettings().keywordSearchTopK);
+        const keywordHits: KeywordSearchHit[] = this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK);
         let vectorHits: VectorSearchHit[] = [];
         try {
             vectorHits = await this.searchVector(query);
@@ -1160,7 +1160,7 @@ export class AdvancedRagEngine {
             { topK: this.getSettings().vectorSearchTopK },
         );
         const chunksById: Map<string, IndexedChunk> = new Map<string, IndexedChunk>(
-            this.knowledgeBase.getExamChunksByIds(vectorHits.map((hit: VectorStoreHit) => hit.chunkId))
+            this.documentIndex.getChunksByIds(vectorHits.map((hit: VectorStoreHit) => hit.chunkId))
                 .map((chunk: IndexedChunk) => [chunk.id, chunk]),
         );
 

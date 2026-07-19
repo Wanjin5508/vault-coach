@@ -1,5 +1,7 @@
 import type { DocumentLocator, IndexedChunk, KnowledgeDocumentType } from "../documents/document-types";
 
+export type { KeywordSearchHit } from "../documents/document-types";
+
 export type RetrievalMode = "keyword" | "vector" | "hybrid";
 
 export interface AnswerSource {
@@ -51,12 +53,6 @@ export interface VectorStoreStats {
     persistedBytes: number;
     loadedBytes: number;
     lastUpdatedAt: number | null;
-}
-
-export interface KeywordSearchHit {
-    chunk: IndexedChunk;
-    score: number;
-    matchedTokens: string[];
 }
 
 export interface VectorSearchHit {
