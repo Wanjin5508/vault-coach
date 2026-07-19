@@ -1,0 +1,164 @@
+import type { App } from "obsidian";
+import { ExamEngine } from "../exam/exam-engine";
+import { ExamSessionStore } from "../exam/exam-session-store";
+import { ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
+import { VaultKnowledgeBase } from "../knowledge-base";
+import { LocalModelClient } from "../model-client";
+import { ObsidianDocumentFileMetadataReader } from "../infrastructure/obsidian/obsidian-document-file-metadata-reader";
+import { LongTermMemoryService } from "../memory/memory-service";
+import { VaultCoachPersistentStore } from "../persistent-store";
+import { AdvancedRagEngine } from "../rag-engine";
+import { EmbeddedExactVectorStore } from "../vector-store";
+import { ChatService } from "./chat/chat-service";
+import { KnowledgeIndexCoordinator } from "./index/knowledge-index-coordinator";
+import { VaultCoachApplication } from "./vault-coach-application";
+import type { TranslationKey } from "../i18n";
+import type { KnowledgeIndexViewState } from "./application-api";
+import type { VaultCoachSettings } from "./config/settings-types";
+import type { ExamScopeSelection } from "../domain/exam/exam-types";
+import type { VectorStore } from "../domain/retrieval/retrieval-types";
+
+/** Host callbacks needed to connect application services to the Obsidian plugin lifecycle. */
+export interface ApplicationContainerDependencies {
+    app: App;
+    pluginId: string;
+    getSettings(): VaultCoachSettings;
+    getCloudApiKey(): string | null;
+    getDefaultGreeting(): string;
+    getKnowledgeScopeDescription(): string;
+    ensureKnowledgeBaseReady(): Promise<void>;
+    persistRuntimeState(): Promise<void>;
+    onGenerationFinished(): void;
+    translate(key: TranslationKey, replacements?: Record<string, string | number>): string;
+    getFullScopeLabel(): string;
+    getNoEligibleChunksMessage(): string;
+    normalizeFolderPaths(folderPaths: string[]): string[];
+    normalizeSelection(selection: ExamScopeSelection): ExamScopeSelection;
+    getIndexState(): KnowledgeIndexViewState;
+    rebuildIndex(signal?: AbortSignal): Promise<void>;
+    clearIndex(): Promise<void>;
+    abortIndex(): void;
+}
+
+/** Concrete services retained for the legacy plugin adapter during incremental migration. */
+export interface ApplicationContainerServices {
+    knowledgeBase: VaultKnowledgeBase;
+    vectorStore: VectorStore;
+    ragEngine: AdvancedRagEngine;
+    chatService: ChatService;
+    examEngine: ExamEngine;
+    examEvaluationService: ExamEvaluationService;
+    examSessionStore: ExamSessionStore;
+    memoryService: LongTermMemoryService;
+    persistentStore: VaultCoachPersistentStore;
+    indexCoordinator: KnowledgeIndexCoordinator;
+}
+
+/**
+ * Composition boundary for application services.
+ *
+ * Obsidian-bound infrastructure is created here exactly once. Presentation code
+ * only receives the grouped application facade, while the legacy plugin can use
+ * `services` until the compatibility adapter is introduced in the next step.
+ */
+export interface ApplicationContainer {
+    application: VaultCoachApplication;
+    services: ApplicationContainerServices;
+    dispose(): Promise<void>;
+}
+
+export function createApplicationContainer(dependencies: ApplicationContainerDependencies): ApplicationContainer {
+    const persistentStore = new VaultCoachPersistentStore(dependencies.app, dependencies.pluginId);
+    const knowledgeBase = new VaultKnowledgeBase(dependencies.app, () => dependencies.getSettings());
+    const vectorStore = new EmbeddedExactVectorStore(persistentStore);
+    const chatService = new ChatService(() => dependencies.getSettings());
+    const ragEngine = new AdvancedRagEngine(
+        knowledgeBase,
+        vectorStore,
+        () => dependencies.getSettings(),
+        () => chatService.getRuntimeRetrievalMode(),
+        () => dependencies.getCloudApiKey(),
+    );
+    const memoryService = new LongTermMemoryService(
+        () => dependencies.getSettings(),
+        () => chatService.getMessagesForMemory(),
+        ragEngine,
+    );
+    const examEngine = new ExamEngine(
+        dependencies.app,
+        knowledgeBase,
+        new ObsidianDocumentFileMetadataReader(dependencies.app),
+        () => dependencies.getSettings(),
+        () => dependencies.getCloudApiKey(),
+    );
+    const examEvaluationService = new ExamEvaluationService(
+        new LocalModelClient(
+            () => dependencies.getSettings(),
+            () => dependencies.getCloudApiKey(),
+        ),
+    );
+    const examSessionStore = new ExamSessionStore(
+        dependencies.app,
+        (key, replacements) => dependencies.translate(key, replacements),
+    );
+
+    let application: VaultCoachApplication | null = null;
+    const indexCoordinator = new KnowledgeIndexCoordinator(() => application?.notifyIndexStateChanged());
+
+    chatService.setDependencies({
+        ragEngine,
+        memoryService,
+        ensureKnowledgeBaseReady: () => dependencies.ensureKnowledgeBaseReady(),
+        getKnowledgeScopeDescription: () => dependencies.getKnowledgeScopeDescription(),
+        persist: () => dependencies.persistRuntimeState(),
+        getDefaultGreeting: () => dependencies.getDefaultGreeting(),
+        onGenerationFinished: () => dependencies.onGenerationFinished(),
+    });
+
+    const applicationInstance = new VaultCoachApplication({
+        chatService,
+        examEngine,
+        examEvaluationService,
+        examSessionStore,
+        getScopeOptions: () => {
+            const stats = knowledgeBase.getStats();
+            return [{
+                id: "__all__",
+                label: dependencies.getFullScopeLabel(),
+                folderPath: null,
+                fileCount: stats.fileCount,
+                chunkCount: stats.chunkCount,
+            }, ...examEngine.getScopeOptions()];
+        },
+        normalizeFolderPaths: (folderPaths) => dependencies.normalizeFolderPaths(folderPaths),
+        normalizeSelection: (selection) => dependencies.normalizeSelection(selection),
+        ensureKnowledgeBaseReady: () => dependencies.ensureKnowledgeBaseReady(),
+        getFullScopeLabel: () => dependencies.getFullScopeLabel(),
+        getNoEligibleChunksMessage: () => dependencies.getNoEligibleChunksMessage(),
+        getIndexState: () => dependencies.getIndexState(),
+        rebuildIndex: (signal) => dependencies.rebuildIndex(signal),
+        clearIndex: () => dependencies.clearIndex(),
+        abortIndex: () => dependencies.abortIndex(),
+    });
+    application = applicationInstance;
+
+    return {
+        application: applicationInstance,
+        services: {
+            knowledgeBase,
+            vectorStore,
+            ragEngine,
+            chatService,
+            examEngine,
+            examEvaluationService,
+            examSessionStore,
+            memoryService,
+            persistentStore,
+            indexCoordinator,
+        },
+        async dispose(): Promise<void> {
+            await applicationInstance.dispose();
+            indexCoordinator.dispose();
+        },
+    };
+}

@@ -1,22 +1,20 @@
 import { Notice, normalizePath, Plugin, TAbstractFile, WorkspaceLeaf } from "obsidian";
 import { VAULT_COACH_HIDDEN_DIR_PATH, VIEW_TYPE_VAULT_COACH } from "./constants";
-import { ExamEngine } from "./exam/exam-engine";
-import { ExamSessionStore } from "./exam/exam-session-store";
-import { ExamEvaluationService } from "./domain/exam/exam-evaluation-service";
-import { ChatService } from "./app/chat/chat-service";
-import { KnowledgeIndexCoordinator } from "./app/index/knowledge-index-coordinator";
+import { createApplicationContainer, type ApplicationContainer } from "./app/application-container";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
-import { VaultKnowledgeBase } from "./knowledge-base";
-import { LocalModelClient } from "./model-client";
-import { ObsidianDocumentFileMetadataReader } from "./infrastructure/obsidian/obsidian-document-file-metadata-reader";
-import { LongTermMemoryService } from "./memory/memory-service";
 import { registerVaultCoachCommands, registerVaultCoachRibbon } from "./plugin/command-registry";
-import { VaultCoachPersistentStore } from "./persistent-store";
 import type { VaultCoachPluginApi } from "./plugin-api";
-import { AdvancedRagEngine } from "./rag-engine";
 import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
 import { getErrorMessage, isAbortError } from "./utils/errors";
-import { EmbeddedExactVectorStore } from "./vector-store";
+import type { ExamEngine } from "./exam/exam-engine";
+import type { ExamSessionStore } from "./exam/exam-session-store";
+import type { ExamEvaluationService } from "./domain/exam/exam-evaluation-service";
+import type { ChatService } from "./app/chat/chat-service";
+import type { KnowledgeIndexCoordinator } from "./app/index/knowledge-index-coordinator";
+import type { VaultKnowledgeBase } from "./knowledge-base";
+import type { LongTermMemoryService } from "./memory/memory-service";
+import type { VaultCoachPersistentStore } from "./persistent-store";
+import type { AdvancedRagEngine } from "./rag-engine";
 import type {
     AnswerSource,
     AssistantAnswer,
@@ -63,6 +61,8 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
     private memoryService!: LongTermMemoryService;
     private persistentStore!: VaultCoachPersistentStore;
     private indexCoordinator!: KnowledgeIndexCoordinator;
+    private applicationContainer!: ApplicationContainer;
+    private unsubscribeApplicationEvents: (() => void) | null = null;
 
 
     // 自动增量同步所需的队列与计时器。
@@ -120,46 +120,45 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
     async onload(): Promise<void> {
         await this.loadSettings();
 
-        this.chatService = new ChatService(() => this.settings);
-        this.indexCoordinator = new KnowledgeIndexCoordinator(() => this.refreshAllViews());
-        this.persistentStore = new VaultCoachPersistentStore(this.app, this.manifest.id);
-        this.knowledgeBase = new VaultKnowledgeBase(this.app, () => this.settings);
-        this.vectorStore = new EmbeddedExactVectorStore(this.persistentStore);
-        this.ragEngine = new AdvancedRagEngine(
-            this.knowledgeBase,
-            this.vectorStore,
-            () => this.settings,
-            () => this.chatService.getRuntimeRetrievalMode(),
-            () => this.getCloudApiKey(),
-        );
-        this.memoryService = new LongTermMemoryService(
-            () => this.settings,
-            () => this.chatService.getMessagesForMemory(),
-            this.ragEngine,
-        );
-        this.examEngine = new ExamEngine(
-            this.app,
-            this.knowledgeBase,
-            new ObsidianDocumentFileMetadataReader(this.app),
-            () => this.settings,
-            () => this.getCloudApiKey(),
-        );
-        this.examEvaluationService = new ExamEvaluationService(
-            new LocalModelClient(
-                () => this.settings,
-                () => this.getCloudApiKey(),
-            ),
-        );
-        this.examSessionStore = new ExamSessionStore(this.app, (key, replacements) => this.t(key, replacements));
-        this.chatService.setDependencies({
-            ragEngine: this.ragEngine,
-            memoryService: this.memoryService,
-            ensureKnowledgeBaseReady: () => this.ensureKnowledgeBaseReady(),
-            getKnowledgeScopeDescription: () => this.getKnowledgeScopeDescription(),
-            persist: () => this.persistRuntimeState(),
+        this.applicationContainer = createApplicationContainer({
+            app: this.app,
+            pluginId: this.manifest.id,
+            getSettings: () => this.settings,
+            getCloudApiKey: () => this.getCloudApiKey(),
             getDefaultGreeting: () => this.getEffectiveDefaultGreeting(),
+            getKnowledgeScopeDescription: () => this.getKnowledgeScopeDescription(),
+            ensureKnowledgeBaseReady: () => this.ensureKnowledgeBaseReady(),
+            persistRuntimeState: () => this.persistRuntimeState(),
             onGenerationFinished: () => this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded(),
+            translate: (key, replacements) => this.t(key, replacements),
+            getFullScopeLabel: () => this.t("exam.scope.fullCurrentKnowledgeBase"),
+            getNoEligibleChunksMessage: () => this.t("exam.notice.noChunks"),
+            normalizeFolderPaths: (folderPaths) => this.normalizeExamFolderPaths(folderPaths),
+            normalizeSelection: (selection) => this.normalizeExamScopeSelection(selection),
+            getIndexState: () => ({
+                textDirty: this.isTextIndexDirty(),
+                vectorDirty: this.isVectorIndexDirty(),
+                busy: this.getKnowledgeIndexBusyState(),
+                stats: this.getKnowledgeBaseStats(),
+                vectorStats: this.getVectorIndexStats(),
+            }),
+            rebuildIndex: (signal) => this.rebuildKnowledgeBase(false, signal),
+            clearIndex: () => this.clearKnowledgeIndex(false),
+            abortIndex: () => this.abortKnowledgeIndexBuild(false),
         });
+        ({
+            knowledgeBase: this.knowledgeBase,
+            vectorStore: this.vectorStore,
+            ragEngine: this.ragEngine,
+            chatService: this.chatService,
+            examEngine: this.examEngine,
+            examEvaluationService: this.examEvaluationService,
+            examSessionStore: this.examSessionStore,
+            memoryService: this.memoryService,
+            persistentStore: this.persistentStore,
+            indexCoordinator: this.indexCoordinator,
+        } = this.applicationContainer.services);
+        this.unsubscribeApplicationEvents = this.applicationContainer.application.subscribe(() => this.refreshAllViews());
 
         await this.restorePersistentState();
         await this.restoreKnowledgeBaseSnapshot();
@@ -192,7 +191,9 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
     onunload(): void {
         this.abortKnowledgeIndexBuild(false);
         this.clearAutoIndexTimers();
-        this.indexCoordinator.dispose();
+        this.unsubscribeApplicationEvents?.();
+        this.unsubscribeApplicationEvents = null;
+        void this.applicationContainer.dispose();
     }
 
     /**
@@ -572,7 +573,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 获取当前对话消息。
      */
     getMessages(): ChatMessage[] {
-        return this.chatService.getMessages();
+        return [...this.applicationContainer.application.chat.getMessages()];
     }
 
     /**
@@ -586,7 +587,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 追加并持久化用户消息。
      */
     async appendUserMessage(text: string): Promise<void> {
-        await this.chatService.appendUserMessage(text);
+        await this.applicationContainer.application.chat.appendUserMessage(text);
     }
 
     /**
@@ -600,7 +601,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 重置当前会话。
      */
     resetConversation(): void {
-        this.chatService.resetConversation();
+        this.applicationContainer.application.chat.resetConversation();
     }
 
     /**
@@ -801,7 +802,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 视图发送消息时调用，内部负责流式生成、记忆更新与持久化。
      */
     async streamAssistantTurn(userText: string, handlers?: StreamHandlers): Promise<AssistantAnswer> {
-        return this.chatService.streamAssistantTurn(userText, handlers);
+        return this.applicationContainer.application.chat.streamAssistantTurn(userText, handlers);
     }
 
     /**

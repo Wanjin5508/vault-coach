@@ -60,6 +60,9 @@ export class VaultCoachView extends ItemView {
     // 当前是否正等待插件完成检索回复
     private isBusy = false;
 
+    // 应用事件在交互进行中到达时，延后完整重绘，避免替换仍被异步流程引用的 DOM。
+    private hasDeferredRefresh = false;
+
     // 当前交互模式：普通问答或考试。
     private activeInteractionMode: InteractionMode = "qa";
 
@@ -156,6 +159,12 @@ export class VaultCoachView extends ItemView {
      * 对外暴露的刷新方法，设置变化或会话重置后由主插件调用。
      */
     public refresh(): void {
+        if (this.isBusy) {
+            this.hasDeferredRefresh = true;
+            return;
+        }
+
+        this.hasDeferredRefresh = false;
         this.render();
     }
 
@@ -220,6 +229,7 @@ export class VaultCoachView extends ItemView {
      * 完整渲染当前视图。
      */
     private render(): void {
+        this.hasDeferredRefresh = false;
         const { contentEl } = this;
         contentEl.empty();
 
@@ -2578,10 +2588,14 @@ export class VaultCoachView extends ItemView {
         } finally {
             this.isBusy = false;
             this.activeAbortController = null;
-            this.sendButtonEl.disabled = false;
-            this.stopButtonEl.disabled = true;
-            this.inputEl.disabled = false;
-            this.retrievalModeSelectEl.disabled = false;
+            if (this.hasDeferredRefresh) {
+                this.refresh();
+            } else {
+                this.sendButtonEl.disabled = false;
+                this.stopButtonEl.disabled = true;
+                this.inputEl.disabled = false;
+                this.retrievalModeSelectEl.disabled = false;
+            }
             this.focusInput();
         }
     }
