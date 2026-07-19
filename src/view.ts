@@ -35,7 +35,9 @@ import type { RetrievalMode, VectorIndexStats } from "./domain/retrieval/retriev
 import { VIEW_NAME_VAULT_COACH, VIEW_TYPE_VAULT_COACH } from "./constants";
 import { translate, type TranslationKey } from "./i18n";
 import { ChatController, type ChatControllerEvent } from "./presentation/controllers/chat-controller";
+import { ExamController, type ExamControllerEvent } from "./presentation/controllers/exam-controller";
 import { ChatView } from "./presentation/views/chat-view";
+import { ExamView } from "./presentation/views/exam-view";
 
 type InteractionMode = "qa" | "exam";
 type ExamViewPhase = "setup" | "generating" | "taking" | "evaluating" | "review" | "history";
@@ -65,6 +67,9 @@ export class VaultCoachView extends ItemView {
     private readonly chatController: ChatController;
     private readonly chatView: ChatView;
     private readonly unsubscribeChatController: () => void;
+    private readonly examController: ExamController;
+    private readonly examView: ExamView;
+    private readonly unsubscribeExamController: () => void;
 
     // 应用事件在交互进行中到达时，延后完整重绘，避免替换仍被异步流程引用的 DOM。
     private hasDeferredRefresh = false;
@@ -112,6 +117,9 @@ export class VaultCoachView extends ItemView {
         this.chatController = new ChatController(plugin);
         this.chatView = new ChatView(this.app, this, this.chatController);
         this.unsubscribeChatController = this.chatController.subscribe((event) => this.handleChatControllerEvent(event));
+        this.examController = new ExamController(plugin, (key, replacements) => this.t(key, replacements));
+        this.examView = new ExamView(this.app, this, this.examController);
+        this.unsubscribeExamController = this.examController.subscribe((event) => this.handleExamControllerEvent(event));
     }
 
     /**
@@ -160,6 +168,9 @@ export class VaultCoachView extends ItemView {
         this.chatView.dispose();
         this.unsubscribeChatController();
         this.chatController.dispose();
+        this.examView.dispose();
+        this.unsubscribeExamController();
+        this.examController.dispose();
         this.clearStreamingTimer();
         // 只清理插件自己的内容区。清空 containerEl 会移除 Obsidian 的视图外壳，
         // 在某些冷启动/首次打开路径下会导致后续渲染缺少正常的样式和布局上下文。
@@ -181,12 +192,26 @@ export class VaultCoachView extends ItemView {
     }
 
     private isInteractionBusy(): boolean {
-        return this.isBusy || this.chatController.getState().busy;
+        return this.isBusy || this.chatController.getState().busy || this.examController.getState().busy;
     }
 
     private handleChatControllerEvent(event: ChatControllerEvent): void {
         if (event.type === "busy-changed" && !event.busy && this.hasDeferredRefresh) {
             this.refresh();
+        }
+    }
+
+    private handleExamControllerEvent(event: ExamControllerEvent): void {
+        if (event.type === "notice") {
+            const replacements = event.error === undefined
+                ? event.replacements
+                : { ...event.replacements, message: createShortErrorMessage(event.error) };
+            new Notice(this.t(event.key, replacements));
+            return;
+        }
+
+        if (this.activeInteractionMode === "exam") {
+            this.renderPreservingExamScroll();
         }
     }
 
@@ -264,7 +289,7 @@ export class VaultCoachView extends ItemView {
 
         if (this.activeInteractionMode === "exam") {
             this.chatView.detach();
-            this.renderExamArea(rootEl);
+            this.examView.render(rootEl);
             this.restorePendingExamAreaScroll();
             return;
         }
