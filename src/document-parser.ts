@@ -3,7 +3,7 @@ import type {
     DocumentParseContext,
     KnowledgeDocumentType,
     ParsedDocument,
-} from "./types";
+} from "./domain/documents/document-types";
 
 /**
  * 文档解析模块。

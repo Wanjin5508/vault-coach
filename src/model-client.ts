@@ -1,11 +1,10 @@
 import { requestUrl } from "obsidian";
 import type {
     LocalChatMessage,
-    QueryRewriteResult,
-    RerankResultItem,
-    StreamHandlers,
-    VaultCoachSettings,
-} from "./types"
+} from "./domain/model/model-types";
+import type { QueryRewriteResult, RerankResultItem } from "./domain/retrieval/retrieval-types";
+import type { StreamHandlers } from "./app/chat/chat-types";
+import type { VaultCoachSettings } from "./app/config/settings-types";
 import { detectQuestionLanguage, type QuestionLanguage } from "./question-language";
 
 /**

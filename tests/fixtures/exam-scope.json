@@ -1,0 +1,91 @@
+{
+  "selection": {
+    "selectedFolderPaths": ["知识库"],
+    "excludedFilePaths": ["知识库/排除.md"],
+    "forceIncludedFilePaths": ["知识库/强制包含.md"]
+  },
+  "fileOptions": [
+    {
+      "filePath": "知识库/主题.md",
+      "fileName": "主题.md",
+      "parentFolder": "知识库",
+      "chunkCount": 2,
+      "permanentlyExcluded": false
+    },
+    {
+      "filePath": "知识库/排除.md",
+      "fileName": "排除.md",
+      "parentFolder": "知识库",
+      "chunkCount": 1,
+      "permanentlyExcluded": false
+    },
+    {
+      "filePath": "知识库/规则排除.md",
+      "fileName": "规则排除.md",
+      "parentFolder": "知识库",
+      "chunkCount": 1,
+      "permanentlyExcluded": true,
+      "permanentExcludeReason": "task-list"
+    },
+    {
+      "filePath": "知识库/强制包含.md",
+      "fileName": "强制包含.md",
+      "parentFolder": "知识库",
+      "chunkCount": 1,
+      "permanentlyExcluded": false
+    }
+  ],
+  "chunks": [
+    {
+      "id": "chunk-theme-1",
+      "documentId": "markdown:知识库/主题.md",
+      "documentType": "markdown",
+      "filePath": "知识库/主题.md",
+      "fileName": "主题.md",
+      "headingPath": ["主题", "基础"],
+      "primaryHeading": "基础",
+      "text": "主题基础知识。",
+      "searchableText": "主题 基础 主题基础知识。",
+      "locator": {"type": "markdown", "filePath": "知识库/主题.md", "heading": "基础"},
+      "contentKind": "text"
+    },
+    {
+      "id": "chunk-theme-2",
+      "documentId": "markdown:知识库/主题.md",
+      "documentType": "markdown",
+      "filePath": "知识库/主题.md",
+      "fileName": "主题.md",
+      "headingPath": ["主题", "进阶"],
+      "primaryHeading": "进阶",
+      "text": "主题进阶知识。",
+      "searchableText": "主题 进阶 主题进阶知识。",
+      "locator": {"type": "markdown", "filePath": "知识库/主题.md", "heading": "进阶"},
+      "contentKind": "text"
+    },
+    {
+      "id": "chunk-forced-1",
+      "documentId": "markdown:知识库/强制包含.md",
+      "documentType": "markdown",
+      "filePath": "知识库/强制包含.md",
+      "fileName": "强制包含.md",
+      "headingPath": ["强制"],
+      "primaryHeading": "强制",
+      "text": "强制包含内容。",
+      "searchableText": "强制 强制包含内容。",
+      "locator": {"type": "markdown", "filePath": "知识库/强制包含.md", "heading": "强制"},
+      "contentKind": "text"
+    }
+  ],
+  "profiles": [
+    {
+      "filePath": "知识库/主题.md",
+      "decision": "partial",
+      "confidence": 0.9,
+      "reasonCodes": [],
+      "eligibleHeadingPaths": [["主题", "基础"]],
+      "excludedHeadingPaths": [["主题", "进阶"]],
+      "topics": ["基础"],
+      "estimatedQuestionCapacity": 1
+    }
+  ]
+}

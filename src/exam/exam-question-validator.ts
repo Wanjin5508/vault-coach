@@ -1,8 +1,8 @@
 import type {
     ExamQuestionReview,
     GeneratedExamQuestionCandidate,
-    IndexedChunk,
-} from "../types";
+} from "../domain/exam/exam-types";
+import type { IndexedChunk } from "../domain/documents/document-types";
 import {
     normalizeWhitespace,
     stripInternalExamLabels,

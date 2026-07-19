@@ -1,38 +1,28 @@
 import { DEFAULT_RRF_K } from "./constants";
-import { VaultKnowledgeBase } from "./knowledge-base";
+import type { DocumentIndexReader } from "./domain/documents/document-index-reader";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { LocalModelClient } from "./model-client";
 import { detectQuestionLanguage, type QuestionLanguage } from "./question-language";
 import type {
     AnswerSource,
     AssistantAnswer,
-    ChatMessage,
-    ExamBlueprint,
-    ExamBlueprintItem,
-    ExamEvaluation,
-    ExamEvaluationItem,
-    ExamQuestion,
-    ExamScopeSelection,
-    ExamScopeSnapshot,
-    ExamSession,
-    IndexedChunk,
-    KnowledgeBaseSyncResult,
     KeywordSearchHit,
-    LocalChatMessage,
     QueryRewriteResult,
     RerankedCandidate,
     RetrievalCandidate,
     RetrievalMode,
     RerankResultItem,
-    StreamHandlers,
     VectorIndexStats,
     VectorRecord,
     VectorSearchHit,
     VectorStore,
     VectorStoreHit,
     VectorStoreStats,
-    VaultCoachSettings,
-} from "./types";
+} from "./domain/retrieval/retrieval-types";
+import type { ChatMessage, StreamHandlers } from "./app/chat/chat-types";
+import type { IndexedChunk, KnowledgeBaseSyncResult } from "./domain/documents/document-types";
+import type { LocalChatMessage } from "./domain/model/model-types";
+import type { VaultCoachSettings } from "./app/config/settings-types";
 
 /**
  * RAG 引擎模块。
@@ -56,51 +46,10 @@ interface PreparedAnswer {
 }
 
 /**
- * 旧版考试生成链路的题目 JSON 结构。
- */
-interface GeneratedExamQuestionPayload {
-    id?: string;
-    question?: string;
-    reference_answer?: string;
-    rubric?: string;
-    source_paths?: string[];
-}
-
-/**
- * 旧版考试生成链路的试卷 JSON 结构。
- */
-interface GeneratedExamPayload {
-    title?: string;
-    questions?: GeneratedExamQuestionPayload[];
-}
-
-/**
- * 旧版考试评分链路的单题 JSON 结构。
- */
-interface ExamEvaluationItemPayload {
-    id?: string;
-    question_id?: string;
-    score?: number;
-    max_score?: number;
-    feedback?: string;
-    improvement?: string;
-}
-
-/**
- * 旧版考试评分链路的整卷 JSON 结构。
- */
-interface ExamEvaluationPayload {
-    score?: number;
-    max_score?: number;
-    overall_feedback?: string;
-    items?: ExamEvaluationItemPayload[];
-}
-
-/**
  * 高级 RAG 引擎。
  */
 export class AdvancedRagEngine {
-    private readonly knowledgeBase: VaultKnowledgeBase;
+    private readonly documentIndex: DocumentIndexReader;
     private readonly vectorStore: VectorStore;
     private readonly getSettings: () => VaultCoachSettings;
     private readonly getRuntimeRetrievalMode: () => RetrievalMode;
@@ -114,13 +63,13 @@ export class AdvancedRagEngine {
     };
 
     constructor(
-        knowledgeBase: VaultKnowledgeBase,
+        documentIndex: DocumentIndexReader,
         vectorStore: VectorStore,
         getSettings: () => VaultCoachSettings,
         getRuntimeRetrievalMode: () => RetrievalMode,
         getCloudApiKey: () => string | null,
     ) {
-        this.knowledgeBase = knowledgeBase;
+        this.documentIndex = documentIndex;
         this.vectorStore = vectorStore;
         this.getSettings = getSettings;
         this.getRuntimeRetrievalMode = getRuntimeRetrievalMode;
@@ -180,7 +129,7 @@ export class AdvancedRagEngine {
             return this.getVectorIndexStats();
         }
 
-        const chunks: IndexedChunk[] = this.knowledgeBase.getAllChunks();
+        const chunks: IndexedChunk[] = this.documentIndex.getAllChunks();
         if (chunks.length === 0) {
             return this.getVectorIndexStats();
         }
@@ -419,636 +368,6 @@ export class AdvancedRagEngine {
     }
 
     /**
-     * 旧版考试会话生成入口。
-     *
-     * 当前主考试链路已拆分到 ExamEngine；保留该方法用于兼容现有调用和评分链路。
-     */
-    async generateExamSession(
-        scopeLabel: string,
-        selection: ExamScopeSelection,
-        chunks: IndexedChunk[],
-        questionCount: number,
-        scopeSnapshot: ExamScopeSnapshot,
-    ): Promise<ExamSession> {
-        const contextChunks: IndexedChunk[] = this.selectExamContextChunks(chunks, 18, 12000);
-        if (contextChunks.length === 0) {
-            throw new Error("当前考试范围内没有可用的知识库片段。");
-        }
-
-        const requestedQuestionCount: number = Math.max(1, Math.min(10, Math.floor(questionCount)));
-        const blueprint: ExamBlueprint = this.buildExamBlueprint(scopeLabel, contextChunks, requestedQuestionCount);
-        const plannedQuestionCount: number = blueprint.plannedQuestionCount;
-        if (plannedQuestionCount === 0) {
-            throw new Error("当前考试范围内没有足够内容生成考试蓝图。");
-        }
-        const sourcePathFallbacks: string[] = Array.from(new Set(contextChunks.map((chunk: IndexedChunk) => chunk.filePath))).slice(0, 5);
-        const messages: LocalChatMessage[] = [
-            {
-                role: "system",
-                content: [
-                    "你是 VaultCoach 的考试出题器。",
-                    "你的任务是严格基于用户提供的 Obsidian 知识库上下文生成测试题。",
-                    "必须遵守：",
-                    "1. 只根据给定上下文出题，不要引入上下文之外的事实。",
-                    "2. 题目应该考察理解、解释、对比、应用，而不是只做原文抄写。",
-                    "3. 使用与上下文主要语言一致的语言；如果中英文混合，默认使用中文。",
-                    "4. 输出严格 JSON，不要使用 Markdown，不要包裹代码块。",
-                    "5. 每题必须包含清晰的参考答案和评分标准。",
-                    "6. 所有字符串必须是合法 JSON string；不要在字符串内部直接换行。",
-                    "7. 字段值中不要使用未转义的英文双引号；需要引用时优先使用中文引号或单引号。",
-                    "8. 题目、参考答案和评分标准中不要出现 EXCERPT_ID、SOURCE_PATH、HEADING、片段编号等内部上下文标记。",
-                    "9. 评分标准必须使用 100 分制；不要出现 2 分、5 分、10 分等非满分 100 的总分口径。",
-                    "10. 必须按用户提供的考试蓝图逐项出题，不能新增蓝图之外的主题或来源。",
-                ].join("\n"),
-            },
-            {
-                role: "user",
-                content: [
-                    `考试范围：${scopeLabel}`,
-                    `请求题目数量：${requestedQuestionCount}`,
-                    `蓝图计划题目数量：${plannedQuestionCount}`,
-                    "",
-                    "请输出 JSON，schema 如下：",
-                    "{",
-                    "  \"title\": \"测试标题\",",
-                    "  \"questions\": [",
-                    "    {",
-                    "      \"id\": \"q1\",",
-                    "      \"question\": \"题目\",",
-                    "      \"reference_answer\": \"参考答案\",",
-                    "      \"rubric\": \"评分标准\",",
-                    "      \"source_paths\": [\"来源文件路径\"]",
-                    "    }",
-                    "  ]",
-                    "}",
-                    "",
-                    "考试蓝图：",
-                    this.buildExamBlueprintBlock(blueprint),
-                    "",
-                    "知识库上下文：",
-                    this.buildExamContextBlock(contextChunks),
-                ].join("\n"),
-            },
-        ];
-
-        const payload: GeneratedExamPayload = await this.generateParsedJsonAnswer<GeneratedExamPayload>(
-            messages,
-            0.1,
-            this.buildGeneratedExamJsonSchemaDescription(),
-            "考试题目生成",
-        );
-        const questions: ExamQuestion[] = this.normalizeGeneratedExamQuestions(
-            payload.questions ?? [],
-            plannedQuestionCount,
-            sourcePathFallbacks,
-            contextChunks,
-        );
-
-        if (questions.length === 0) {
-            throw new Error("模型没有生成可用题目。");
-        }
-
-        const now: number = Date.now();
-        return {
-            id: this.createExamId(now),
-            title: this.normalizeText(payload.title, "VaultCoach 测试"),
-            createdAt: now,
-            scopeLabel,
-            selectedFolderPaths: [...selection.selectedFolderPaths],
-            excludedFilePaths: [...selection.excludedFilePaths],
-            forceIncludedFilePaths: [...selection.forceIncludedFilePaths],
-            scopeSnapshot,
-            blueprint,
-            questions,
-            userAnswers: questions.map(() => ""),
-            evaluation: null,
-            savedPath: null,
-            status: "draft",
-        };
-    }
-
-    /**
-     * 对用户提交的考试答案进行模型评分。
-     */
-    async evaluateExamSession(session: ExamSession, userAnswers: string[]): Promise<ExamEvaluation> {
-        const answerBlocks: string[] = session.questions.map((question: ExamQuestion, index: number) => {
-            const userAnswer: string = userAnswers[index]?.trim() ?? "";
-            return [
-                `## ${question.id}`,
-                `题目：${question.question}`,
-                `参考答案：${question.referenceAnswer}`,
-                `评分标准：${question.rubric}`,
-                `用户答案：${userAnswer.length > 0 ? userAnswer : "（未作答）"}`,
-            ].join("\n");
-        });
-
-        const messages: LocalChatMessage[] = [
-            {
-                role: "system",
-                content: [
-                    "你是 VaultCoach 的考试评分器。",
-                    "你的任务是根据题目、参考答案、评分标准和用户答案进行稳定评分。",
-                    "必须遵守：",
-                    "1. 只评价用户答案是否覆盖参考答案中的关键点。",
-                    "2. 不要因为表达方式不同而扣分，只要含义正确即可。",
-                    "3. 未作答或明显无关答案应给低分。",
-                    "4. 每题 max_score 必须是 100，score 必须是 0 到 100 的数字。",
-                    "5. 总分 score 是所有题目百分制得分的平均值，max_score 必须是 100。",
-                    "6. 输出严格 JSON，不要使用 Markdown，不要包裹代码块。",
-                    "7. 所有字符串必须是合法 JSON string；不要在字符串内部直接换行。",
-                    "8. 字段值中不要使用未转义的英文双引号；需要引用时优先使用中文引号或单引号。",
-                ].join("\n"),
-            },
-            {
-                role: "user",
-                content: [
-                    `测试标题：${session.title}`,
-                    `题目数量：${session.questions.length}`,
-                    "",
-                    "请输出 JSON，schema 如下：",
-                    "{",
-                    "  \"score\": 82,",
-                    "  \"max_score\": 100,",
-                    "  \"overall_feedback\": \"总体反馈\",",
-                    "  \"items\": [",
-                    "    {",
-                    "      \"question_id\": \"q1\",",
-                    "      \"score\": 80,",
-                    "      \"max_score\": 100,",
-                    "      \"feedback\": \"本题反馈\",",
-                    "      \"improvement\": \"改进建议\"",
-                    "    }",
-                    "  ]",
-                    "}",
-                    "",
-                    "待评分内容：",
-                    answerBlocks.join("\n\n"),
-                ].join("\n"),
-            },
-        ];
-
-        const payload: ExamEvaluationPayload = await this.generateParsedJsonAnswer<ExamEvaluationPayload>(
-            messages,
-            0,
-            this.buildExamEvaluationJsonSchemaDescription(),
-            "考试评分",
-        );
-        return this.normalizeExamEvaluation(payload, session.questions);
-    }
-
-    /**
-     * 调用模型生成 JSON，并在解析失败时请求模型修复。
-     */
-    private async generateParsedJsonAnswer<T>(
-        messages: LocalChatMessage[],
-        temperature: number,
-        schemaDescription: string,
-        taskLabel: string,
-    ): Promise<T> {
-        const rawJson: string = await this.client.generateJsonAnswer(messages, temperature);
-
-        try {
-            return this.parseJsonObject(rawJson) as T;
-        } catch (parseError: unknown) {
-            console.warn(`[VaultCoach] ${taskLabel}返回的 JSON 无法直接解析，尝试让模型修复。`, parseError);
-        }
-
-        const repairMessages: LocalChatMessage[] = [
-            {
-                role: "system",
-                content: [
-                    "你是一个严格 JSON 修复器。",
-                    "你的任务是把用户提供的模型输出修复为可以被 JSON.parse 解析的 JSON。",
-                    "必须遵守：",
-                    "1. 只输出 JSON 对象，不要输出 Markdown、解释或代码块。",
-                    "2. 不要新增、删除或改写字段含义。",
-                    "3. 修复未转义双引号、字符串内部原始换行、尾随逗号等语法问题。",
-                    "4. 如果某个字符串需要换行，请改为普通空格或使用 \\n 转义。",
-                    "5. 输出必须符合用户给出的 schema。",
-                ].join("\n"),
-            },
-            {
-                role: "user",
-                content: [
-                    `任务：${taskLabel}`,
-                    "",
-                    "目标 schema：",
-                    schemaDescription,
-                    "",
-                    "待修复的原始输出：",
-                    this.truncateModelOutputForRepair(rawJson),
-                ].join("\n"),
-            },
-        ];
-
-        const repairedJson: string = await this.client.generateJsonAnswer(repairMessages, 0);
-        try {
-            return this.parseJsonObject(repairedJson) as T;
-        } catch (repairError: unknown) {
-            console.error(`[VaultCoach] ${taskLabel}的 JSON 修复仍然失败。`, repairError);
-            throw new Error(`${taskLabel}失败：模型返回的 JSON 无法解析，请重试或换用更稳定的聊天模型。`);
-        }
-    }
-
-    /**
-     * 考试生成 JSON schema 文本。
-     */
-    private buildGeneratedExamJsonSchemaDescription(): string {
-        return [
-            "{",
-            "  \"title\": \"测试标题\",",
-            "  \"questions\": [",
-            "    {",
-            "      \"id\": \"q1\",",
-            "      \"question\": \"题目\",",
-            "      \"reference_answer\": \"参考答案\",",
-            "      \"rubric\": \"评分标准\",",
-            "      \"source_paths\": [\"来源文件路径\"]",
-            "    }",
-            "  ]",
-            "}",
-        ].join("\n");
-    }
-
-    /**
-     * 考试评分 JSON schema 文本。
-     */
-    private buildExamEvaluationJsonSchemaDescription(): string {
-        return [
-            "{",
-            "  \"score\": 82,",
-            "  \"max_score\": 100,",
-            "  \"overall_feedback\": \"总体反馈\",",
-            "  \"items\": [",
-            "    {",
-            "      \"question_id\": \"q1\",",
-            "      \"score\": 80,",
-            "      \"max_score\": 100,",
-            "      \"feedback\": \"本题反馈\",",
-            "      \"improvement\": \"改进建议\"",
-            "    }",
-            "  ]",
-            "}",
-        ].join("\n");
-    }
-
-    /**
-     * 截断待修复的模型输出，避免 JSON 修复 prompt 过长。
-     */
-    private truncateModelOutputForRepair(rawText: string): string {
-        const maxCharacters = 16000;
-        if (rawText.length <= maxCharacters) {
-            return rawText;
-        }
-
-        return `${rawText.slice(0, maxCharacters)}\n...`;
-    }
-
-    /**
-     * 构建旧版考试蓝图。
-     */
-    private buildExamBlueprint(scopeLabel: string, contextChunks: IndexedChunk[], requestedQuestionCount: number): ExamBlueprint {
-        const plannedQuestionCount: number = Math.min(requestedQuestionCount, contextChunks.length);
-        const questionTypes: ExamBlueprintItem["questionType"][] = [
-            "explanation",
-            "comparison",
-            "application",
-            "reasoning",
-            "process",
-        ];
-        const difficulties: ExamBlueprintItem["difficulty"][] = [
-            "basic",
-            "intermediate",
-            "advanced",
-        ];
-        const items: ExamBlueprintItem[] = [];
-
-        for (let index = 0; index < plannedQuestionCount; index += 1) {
-            const chunk: IndexedChunk | undefined = contextChunks[index];
-            if (!chunk) {
-                continue;
-            }
-
-            const topic: string = chunk.primaryHeading ?? chunk.fileName.replace(/\.md$/i, "");
-            items.push({
-                id: `bp${index + 1}`,
-                topic,
-                learningObjective: `考察用户是否理解「${topic}」并能基于来源内容作答。`,
-                questionType: questionTypes[index % questionTypes.length] ?? "explanation",
-                difficulty: difficulties[Math.min(difficulties.length - 1, Math.floor(index / Math.max(1, Math.ceil(plannedQuestionCount / difficulties.length))))] ?? "basic",
-                sourceChunkIds: [chunk.id],
-            });
-        }
-
-        return {
-            title: `${scopeLabel} 测试蓝图`,
-            requestedQuestionCount,
-            plannedQuestionCount: items.length,
-            items,
-        };
-    }
-
-    /**
-     * 将蓝图格式化为模型可读文本。
-     */
-    private buildExamBlueprintBlock(blueprint: ExamBlueprint): string {
-        return blueprint.items.map((item: ExamBlueprintItem, index: number) => {
-            return [
-                `BLUEPRINT_ITEM: ${item.id}`,
-                `QUESTION_INDEX: ${index + 1}`,
-                `TOPIC: ${item.topic}`,
-                `LEARNING_OBJECTIVE: ${item.learningObjective}`,
-                `QUESTION_TYPE: ${item.questionType}`,
-                `DIFFICULTY: ${item.difficulty}`,
-                `SOURCE_CHUNK_IDS: ${item.sourceChunkIds.join(", ")}`,
-            ].join("\n");
-        }).join("\n\n");
-    }
-
-    /**
-     * 选择考试上下文 chunk，并尽量覆盖多个文件。
-     */
-    private selectExamContextChunks(chunks: IndexedChunk[], maxChunks: number, maxCharacters: number): IndexedChunk[] {
-        const chunksByFilePath: Map<string, IndexedChunk[]> = new Map<string, IndexedChunk[]>();
-        for (const chunk of chunks) {
-            const fileChunks: IndexedChunk[] = chunksByFilePath.get(chunk.filePath) ?? [];
-            fileChunks.push(chunk);
-            chunksByFilePath.set(chunk.filePath, fileChunks);
-        }
-
-        const filePaths: string[] = Array.from(chunksByFilePath.keys()).sort((leftPath: string, rightPath: string) => {
-            return leftPath.localeCompare(rightPath);
-        });
-        const selectedChunks: IndexedChunk[] = [];
-        let round = 0;
-
-        while (selectedChunks.length < maxChunks) {
-            let addedInRound = false;
-            for (const filePath of filePaths) {
-                const fileChunks: IndexedChunk[] | undefined = chunksByFilePath.get(filePath);
-                const chunk: IndexedChunk | undefined = fileChunks?.[round];
-                if (!chunk) {
-                    continue;
-                }
-
-                selectedChunks.push(chunk);
-                addedInRound = true;
-                if (selectedChunks.length >= maxChunks) {
-                    break;
-                }
-            }
-
-            if (!addedInRound) {
-                break;
-            }
-            round += 1;
-        }
-
-        return this.limitChunksByCharacters(selectedChunks, maxCharacters);
-    }
-
-    /**
-     * 按字符预算限制 chunk 数量。
-     */
-    private limitChunksByCharacters(chunks: IndexedChunk[], maxCharacters: number): IndexedChunk[] {
-        const selectedChunks: IndexedChunk[] = [];
-        let usedCharacters = 0;
-
-        for (const chunk of chunks) {
-            const nextSize: number = chunk.text.length + chunk.filePath.length + 80;
-            if (selectedChunks.length > 0 && usedCharacters + nextSize > maxCharacters) {
-                break;
-            }
-
-            selectedChunks.push(chunk);
-            usedCharacters += nextSize;
-        }
-
-        return selectedChunks;
-    }
-
-    /**
-     * 构造考试生成 prompt 中的上下文块。
-     */
-    private buildExamContextBlock(chunks: IndexedChunk[]): string {
-        return chunks.map((chunk: IndexedChunk, index: number) => {
-            const headingLabel: string = chunk.headingPath.length > 0
-                ? chunk.headingPath.join(" > ")
-                : "（无标题）";
-            return [
-                `<excerpt id="E${index + 1}">`,
-                `SOURCE_PATH: ${chunk.filePath}`,
-                `HEADING: ${headingLabel}`,
-                "TEXT:",
-                chunk.text,
-                "</excerpt>",
-            ].join("\n");
-        }).join("\n\n");
-    }
-
-    /**
-     * 规范化模型生成的考试题。
-     */
-    private normalizeGeneratedExamQuestions(
-        payloadQuestions: GeneratedExamQuestionPayload[],
-        questionCount: number,
-        sourcePathFallbacks: string[],
-        contextChunks: IndexedChunk[],
-    ): ExamQuestion[] {
-        const questions: ExamQuestion[] = [];
-        const allowedSourcePaths: Set<string> = new Set(contextChunks.map((chunk: IndexedChunk) => chunk.filePath));
-        const normalizedQuestionFingerprints: Set<string> = new Set<string>();
-
-        for (let index = 0; index < payloadQuestions.length && questions.length < questionCount; index += 1) {
-            const payloadQuestion: GeneratedExamQuestionPayload | undefined = payloadQuestions[index];
-            if (!payloadQuestion) {
-                continue;
-            }
-
-            const question: string = this.stripInternalContextLabels(this.normalizeText(payloadQuestion.question, ""));
-            const referenceAnswer: string = this.stripInternalContextLabels(this.normalizeText(payloadQuestion.reference_answer, ""));
-            const rubric: string = this.normalizeRubricText(this.stripInternalContextLabels(this.normalizeText(payloadQuestion.rubric, "")));
-
-            if (question.length === 0 || referenceAnswer.length === 0 || rubric.length === 0) {
-                continue;
-            }
-
-            if (referenceAnswer.length < 24) {
-                continue;
-            }
-
-            const questionFingerprint: string = this.normalizeExamQuestionFingerprint(question);
-            if (questionFingerprint.length > 0 && normalizedQuestionFingerprints.has(questionFingerprint)) {
-                continue;
-            }
-
-            const fallbackId: string = `q${questions.length + 1}`;
-            const sourcePaths: string[] = Array.isArray(payloadQuestion.source_paths)
-                ? payloadQuestion.source_paths
-                    .filter((path: unknown): path is string => typeof path === "string")
-                    .map((path: string) => path.trim())
-                    .filter((path: string) => path.length > 0 && allowedSourcePaths.has(path))
-                : [];
-            const finalSourcePaths: string[] = sourcePaths.length > 0
-                ? Array.from(new Set(sourcePaths))
-                : sourcePathFallbacks.filter((path: string) => allowedSourcePaths.has(path));
-
-            if (finalSourcePaths.length === 0) {
-                continue;
-            }
-
-            questions.push({
-                id: this.normalizeQuestionId(payloadQuestion.id, fallbackId),
-                question,
-                referenceAnswer,
-                rubric,
-                sourcePaths: finalSourcePaths,
-            });
-            if (questionFingerprint.length > 0) {
-                normalizedQuestionFingerprints.add(questionFingerprint);
-            }
-        }
-
-        return questions;
-    }
-
-    /**
-     * 生成题目去重指纹。
-     */
-    private normalizeExamQuestionFingerprint(question: string): string {
-        return question
-            .toLowerCase()
-            .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "")
-            .slice(0, 80);
-    }
-
-    /**
-     * 清理考试题目中的内部上下文标签。
-     */
-    private stripInternalContextLabels(value: string): string {
-        return value
-            .replace(/上下文\s*\d+/gi, "")
-            .replace(/context\s*\d+/gi, "")
-            .replace(/excerpt[_\s-]*id\s*[:：]?\s*E?\d+/gi, "")
-            .replace(/SOURCE_PATH\s*[:：][^\n。；;]*/g, "")
-            .replace(/HEADING\s*[:：][^\n。；;]*/g, "")
-            .replace(/\bE\d+\b/g, "")
-            .replace(/\s{2,}/g, " ")
-            .replace(/\s+([，。；：！？,.!?;:])/g, "$1")
-            .trim();
-    }
-
-    /**
-     * 将评分标准统一为 100 分制。
-     */
-    private normalizeRubricText(value: string): string {
-        const cleanedValue: string = value
-            .replace(/满分\s*\d+\s*分/g, "满分 100 分")
-            .replace(/总分\s*\d+\s*分/g, "总分 100 分")
-            .replace(/每(?:个|点|项)?\s*\d+\s*分/g, "按覆盖程度给分")
-            .trim();
-
-        if (/100\s*分|百分制/.test(cleanedValue)) {
-            return cleanedValue;
-        }
-
-        return `本题按 100 分制评分；${cleanedValue}`;
-    }
-
-    /**
-     * 规范化模型评分结果。
-     */
-    private normalizeExamEvaluation(payload: ExamEvaluationPayload, questions: ExamQuestion[]): ExamEvaluation {
-        const itemPayloads: ExamEvaluationItemPayload[] = Array.isArray(payload.items) ? payload.items : [];
-        const items: ExamEvaluationItem[] = questions.map((question: ExamQuestion, index: number) => {
-            const payloadItem: ExamEvaluationItemPayload | undefined = itemPayloads.find((item: ExamEvaluationItemPayload) => {
-                return item.question_id === question.id || item.id === question.id;
-            }) ?? itemPayloads[index];
-
-            return {
-                questionId: question.id,
-                score: this.clampScore(payloadItem?.score ?? 0, 0, 100),
-                maxScore: 100,
-                feedback: this.normalizeText(payloadItem?.feedback, "未提供本题反馈。"),
-                improvement: this.normalizeText(payloadItem?.improvement, "请对照参考答案补全关键点。"),
-            };
-        });
-
-        const scoreFromItems: number = items.length > 0
-            ? Math.round(items.reduce((sum: number, item: ExamEvaluationItem) => {
-                return sum + (item.score / Math.max(1, item.maxScore)) * (100 / items.length);
-            }, 0))
-            : 0;
-
-        return {
-            score: this.clampScore(payload.score ?? scoreFromItems, 0, 100),
-            maxScore: 100,
-            overallFeedback: this.normalizeText(payload.overall_feedback, "评分完成。"),
-            items,
-        };
-    }
-
-    /**
-     * 从模型文本中解析 JSON 对象。
-     */
-    private parseJsonObject(rawText: string): unknown {
-        const trimmedText: string = rawText.trim()
-            .replace(/^```(?:json)?\s*/i, "")
-            .replace(/```$/i, "")
-            .trim();
-
-        try {
-            return JSON.parse(trimmedText) as unknown;
-        } catch {
-            const startIndex: number = trimmedText.indexOf("{");
-            const endIndex: number = trimmedText.lastIndexOf("}");
-            if (startIndex >= 0 && endIndex > startIndex) {
-                return JSON.parse(trimmedText.slice(startIndex, endIndex + 1)) as unknown;
-            }
-
-            throw new Error("模型输出不是有效 JSON。");
-        }
-    }
-
-    /**
-     * 规范化题目 ID。
-     */
-    private normalizeQuestionId(value: string | undefined, fallback: string): string {
-        const normalizedValue: string = this.normalizeText(value, fallback).toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
-        return normalizedValue.length > 0 ? normalizedValue : fallback;
-    }
-
-    /**
-     * 规范化模型返回文本。
-     */
-    private normalizeText(value: string | undefined, fallback: string): string {
-        if (typeof value !== "string") {
-            return fallback;
-        }
-
-        const trimmedValue: string = value.trim();
-        return trimmedValue.length > 0 ? trimmedValue : fallback;
-    }
-
-    /**
-     * 将分数裁剪到指定范围。
-     */
-    private clampScore(value: number, min: number, max: number): number {
-        if (!Number.isFinite(value)) {
-            return min;
-        }
-
-        return Math.max(min, Math.min(max, Math.round(value)));
-    }
-
-    /**
-     * 生成稳定的考试 ID。
-     */
-    private createExamId(timestamp: number): string {
-        return `exam_${new Date(timestamp).toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
-    }
-
-    /**
      * 准备回答所需的检索结果、来源和模型消息。
      */
     private async prepareAnswer(
@@ -1128,7 +447,7 @@ export class AdvancedRagEngine {
     private async retrieveCandidates(query: string, mode: RetrievalMode): Promise<RetrievalCandidate[]> {
         if (mode === "keyword") {
             return this.buildCandidatesFromKeywordHits(
-                this.knowledgeBase.searchKeyword(query, this.getSettings().keywordSearchTopK),
+                this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK),
             );
         }
 
@@ -1139,12 +458,12 @@ export class AdvancedRagEngine {
             } catch (error: unknown) {
                 console.error("[VaultCoach] 向量检索失败，将回退到关键词检索。", error);
                 return this.buildCandidatesFromKeywordHits(
-                    this.knowledgeBase.searchKeyword(query, this.getSettings().keywordSearchTopK),
+                    this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK),
                 );
             }
         }
 
-        const keywordHits: KeywordSearchHit[] = this.knowledgeBase.searchKeyword(query, this.getSettings().keywordSearchTopK);
+        const keywordHits: KeywordSearchHit[] = this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK);
         let vectorHits: VectorSearchHit[] = [];
         try {
             vectorHits = await this.searchVector(query);
@@ -1169,7 +488,7 @@ export class AdvancedRagEngine {
             { topK: this.getSettings().vectorSearchTopK },
         );
         const chunksById: Map<string, IndexedChunk> = new Map<string, IndexedChunk>(
-            this.knowledgeBase.getExamChunksByIds(vectorHits.map((hit: VectorStoreHit) => hit.chunkId))
+            this.documentIndex.getChunksByIds(vectorHits.map((hit: VectorStoreHit) => hit.chunkId))
                 .map((chunk: IndexedChunk) => [chunk.id, chunk]),
         );
 

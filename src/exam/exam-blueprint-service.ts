@@ -3,9 +3,9 @@ import type {
     ExamBlueprint,
     ExamBlueprintItem,
     ExamContentProfile,
-    IndexedChunk,
-    LocalChatMessage,
-} from "../types";
+} from "../domain/exam/exam-types";
+import type { IndexedChunk } from "../domain/documents/document-types";
+import type { LocalChatMessage } from "../domain/model/model-types";
 import { generateParsedJsonAnswer, normalizeWhitespace } from "./exam-utils";
 
 /**

@@ -6,7 +6,7 @@ import type {
     VectorStore,
     VectorStoreHit,
     VectorStoreStats,
-} from "./types";
+} from "./domain/retrieval/retrieval-types";
 
 /**
  * 向量存储模块。
