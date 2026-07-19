@@ -32,4 +32,15 @@ export default tseslint.config(
 		"main.js",
 		".history/**",
 	]),
+	{
+		files: ["tests/**/*.ts", "vitest.config.ts"],
+		languageOptions: {
+			globals: {
+				...globals.node,
+			},
+		},
+		rules: {
+			"import/no-nodejs-modules": "off",
+		},
+	},
 );
