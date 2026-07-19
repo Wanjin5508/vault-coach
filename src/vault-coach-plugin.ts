@@ -2,8 +2,10 @@ import { Notice, normalizePath, Plugin, TAbstractFile, WorkspaceLeaf } from "obs
 import { VAULT_COACH_HIDDEN_DIR_PATH, VIEW_TYPE_VAULT_COACH } from "./constants";
 import { ExamEngine } from "./exam/exam-engine";
 import { ExamSessionStore } from "./exam/exam-session-store";
+import { ExamEvaluationService } from "./domain/exam/exam-evaluation-service";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { VaultKnowledgeBase } from "./knowledge-base";
+import { LocalModelClient } from "./model-client";
 import { ObsidianDocumentFileMetadataReader } from "./infrastructure/obsidian/obsidian-document-file-metadata-reader";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { LongTermMemoryService } from "./memory/memory-service";
@@ -56,6 +58,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
     private vectorStore!: VectorStore;
     private ragEngine!: AdvancedRagEngine;
     private examEngine!: ExamEngine;
+    private examEvaluationService!: ExamEvaluationService;
     private examSessionStore!: ExamSessionStore;
     private memoryService!: LongTermMemoryService;
     private persistentStore!: VaultCoachPersistentStore;
@@ -115,6 +118,12 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
             new ObsidianDocumentFileMetadataReader(this.app),
             () => this.settings,
             () => this.getCloudApiKey(),
+        );
+        this.examEvaluationService = new ExamEvaluationService(
+            new LocalModelClient(
+                () => this.settings,
+                () => this.getCloudApiKey(),
+            ),
         );
         this.examSessionStore = new ExamSessionStore(this.app, (key, replacements) => this.t(key, replacements));
 
@@ -428,7 +437,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      * 评分考试会话，并返回更新后的会话对象。
      */
     async evaluateExamSession(session: ExamSession, userAnswers: string[]): Promise<ExamSession> {
-        const evaluation = await this.ragEngine.evaluateExamSession(session, userAnswers);
+        const evaluation = await this.examEvaluationService.evaluate(session, userAnswers);
         return {
             ...session,
             userAnswers: session.questions.map((_question: ExamQuestion, index: number) => userAnswers[index]?.trim() ?? ""),
