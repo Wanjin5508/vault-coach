@@ -1,4 +1,3 @@
-import { VaultKnowledgeBase } from "../knowledge-base";
 import { LocalModelClient } from "../model-client";
 import type {
     ExamContentProfile,
@@ -7,6 +6,7 @@ import type {
     ExamFileOption,
 } from "../domain/exam/exam-types";
 import type { IndexedChunk } from "../domain/documents/document-types";
+import type { DocumentIndexReader } from "../domain/documents/document-index-reader";
 import type { LocalChatMessage } from "../domain/model/model-types";
 import type { VaultCoachSettings } from "../app/config/settings-types";
 import { clampNumber, generateParsedJsonAnswer, headingPathKey, normalizeHeadingPath, normalizeWhitespace, throwIfAborted } from "./exam-utils";
@@ -91,18 +91,18 @@ const VALID_REASON_CODES: Set<ExamExclusionReason> = new Set<ExamExclusionReason
  * 考试内容画像器。
  */
 export class ExamContentProfiler {
-    private readonly knowledgeBase: VaultKnowledgeBase;
+    private readonly documentIndex: DocumentIndexReader;
     private readonly client: LocalModelClient;
     private readonly store: ExamProfileStore;
     private readonly getSettings: () => VaultCoachSettings;
 
     constructor(
-        knowledgeBase: VaultKnowledgeBase,
+        documentIndex: DocumentIndexReader,
         client: LocalModelClient,
         store: ExamProfileStore,
         getSettings: () => VaultCoachSettings,
     ) {
-        this.knowledgeBase = knowledgeBase;
+        this.documentIndex = documentIndex;
         this.client = client;
         this.store = store;
         this.getSettings = getSettings;
@@ -133,7 +133,7 @@ export class ExamContentProfiler {
             }
 
             options.onProgress?.(index + 1, fileOptions.length);
-            const contentHash: string | null = this.knowledgeBase.getExamFileContentHash(fileOption.filePath);
+            const contentHash: string | null = this.documentIndex.getFileRecord(fileOption.filePath)?.contentHash ?? null;
             if (!contentHash) {
                 profiles.push(this.createProfile(fileOption.filePath, "exclude", 1, ["empty-or-stub"], [], [], [], 0));
                 continue;
@@ -143,7 +143,7 @@ export class ExamContentProfiler {
             if (!options.forceRefresh) {
                 const cachedProfile: ExamContentProfile | null = await this.store.getProfile(cacheKey);
                 if (cachedProfile) {
-                    profiles.push(this.normalizeCachedProfile(cachedProfile, fileOption.filePath, this.knowledgeBase.getExamFileChunks(fileOption.filePath)));
+                    profiles.push(this.normalizeCachedProfile(cachedProfile, fileOption.filePath, this.documentIndex.getChunksByFilePath(fileOption.filePath)));
                     cacheHits += 1;
                     continue;
                 }
@@ -180,8 +180,8 @@ export class ExamContentProfiler {
      * 生成单个文件画像。
      */
     private async profileFile(fileOption: ExamFileOption, abortSignal?: AbortSignal): Promise<ExamContentProfile> {
-        const chunks: IndexedChunk[] = this.knowledgeBase.getExamFileChunks(fileOption.filePath);
-        const content: string = await this.knowledgeBase.readExamFileContent(fileOption.filePath) ?? "";
+        const chunks: IndexedChunk[] = this.documentIndex.getChunksByFilePath(fileOption.filePath);
+        const content: string = await this.documentIndex.readDocumentText(fileOption.filePath) ?? "";
         const deterministicProfile: ExamContentProfile | null = this.buildDeterministicProfile(fileOption.filePath, content, chunks);
         if (deterministicProfile) {
             return deterministicProfile;

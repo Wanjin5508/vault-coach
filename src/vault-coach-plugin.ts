@@ -4,6 +4,7 @@ import { ExamEngine } from "./exam/exam-engine";
 import { ExamSessionStore } from "./exam/exam-session-store";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { VaultKnowledgeBase } from "./knowledge-base";
+import { ObsidianDocumentFileMetadataReader } from "./infrastructure/obsidian/obsidian-document-file-metadata-reader";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
 import { LongTermMemoryService } from "./memory/memory-service";
 import { registerVaultCoachCommands, registerVaultCoachRibbon } from "./plugin/command-registry";
@@ -29,7 +30,7 @@ import type {
     ExamScopeOption,
     ExamSession,
 } from "./domain/exam/exam-types";
-import type { IndexedChunk, KnowledgeBaseStats, KnowledgeBaseSyncResult } from "./domain/documents/document-types";
+import type { KnowledgeBaseStats, KnowledgeBaseSyncResult } from "./domain/documents/document-types";
 import type { KnowledgeBaseSnapshot, PersistedPluginState } from "./infrastructure/storage/storage-types";
 import type { KnowledgeIndexBusyPhase, KnowledgeIndexBusyState } from "./app/index/index-types";
 import type { RetrievalMode, VectorIndexStats, VectorStore } from "./domain/retrieval/retrieval-types";
@@ -111,6 +112,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
         this.examEngine = new ExamEngine(
             this.app,
             this.knowledgeBase,
+            new ObsidianDocumentFileMetadataReader(this.app),
             () => this.settings,
             () => this.getCloudApiKey(),
         );
@@ -355,7 +357,7 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
                 fileCount: stats.fileCount,
                 chunkCount: stats.chunkCount,
             },
-            ...this.knowledgeBase.getExamFolderScopeOptions(),
+            ...this.examEngine.getScopeOptions(),
         ];
     }
 
@@ -364,14 +366,14 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
      */
     getExamFileOptions(selectedFolderPaths: string[]): ExamFileOption[] {
         const normalizedFolderPaths: string[] = this.normalizeExamFolderPaths(selectedFolderPaths);
-        return this.knowledgeBase.getExamFileOptions(normalizedFolderPaths);
+        return this.examEngine.getFileOptions(normalizedFolderPaths);
     }
 
     /**
      * 获取考试范围容量快照。
      */
     getExamScopeSnapshot(selection: ExamScopeSelection): ExamScopeSnapshot {
-        return this.knowledgeBase.getExamScopeSnapshot(this.normalizeExamScopeSelection(selection));
+        return this.examEngine.getScopeSnapshot(this.normalizeExamScopeSelection(selection));
     }
 
     /**
@@ -395,12 +397,10 @@ export default class VaultCoach extends Plugin implements VaultCoachPluginApi {
         await this.ensureKnowledgeBaseReady();
 
         const normalizedSelection: ExamScopeSelection = this.normalizeExamScopeSelection(selection);
-        const chunks: IndexedChunk[] = this.knowledgeBase.getChunksForExamScope(normalizedSelection);
-        if (chunks.length === 0) {
+        const scopeSnapshot: ExamScopeSnapshot = this.examEngine.getScopeSnapshot(normalizedSelection);
+        if (!this.examEngine.hasEligibleChunks(normalizedSelection)) {
             throw new Error(this.t("exam.notice.noChunks"));
         }
-
-        const scopeSnapshot: ExamScopeSnapshot = this.knowledgeBase.getExamScopeSnapshot(normalizedSelection);
         const effectiveQuestionCount: number = scopeSnapshot.estimatedMaxQuestions > 0
             ? Math.min(questionCount, scopeSnapshot.estimatedMaxQuestions)
             : questionCount;

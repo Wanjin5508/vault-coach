@@ -1,17 +1,20 @@
 import { App } from "obsidian";
-import { VaultKnowledgeBase } from "../knowledge-base";
 import { LocalModelClient } from "../model-client";
 import type {
     ExamContentProfile,
+    ExamFileOption,
     ExamGenerationDiagnostics,
     ExamGenerationOptions,
     ExamQuestion,
     ExamScopeAnalysisResult,
+    ExamScopeOption,
     ExamScopeSnapshot,
     ExamScopeSelection,
     ExamSession,
 } from "../domain/exam/exam-types";
 import type { IndexedChunk } from "../domain/documents/document-types";
+import type { DocumentFileMetadataReader } from "../domain/documents/document-file-metadata-reader";
+import type { DocumentIndexReader } from "../domain/documents/document-index-reader";
 import type { VaultCoachSettings } from "../app/config/settings-types";
 import { ExamBlueprintService } from "./exam-blueprint-service";
 import { ExamContentProfiler, EXAM_CONTENT_PROFILE_PROMPT_VERSION } from "./exam-content-profiler";
@@ -28,7 +31,7 @@ import { throwIfAborted } from "./exam-utils";
  * 具体模型调用、题目校验和缓存读写分别下放到对应服务，避免主插件入口承载考试业务细节。
  */
 export class ExamEngine {
-    private readonly knowledgeBase: VaultKnowledgeBase;
+    private readonly documentIndex: DocumentIndexReader;
     private readonly getSettings: () => VaultCoachSettings;
     private readonly client: LocalModelClient;
     private readonly profileStore: ExamProfileStore;
@@ -39,22 +42,43 @@ export class ExamEngine {
 
     constructor(
         app: App,
-        knowledgeBase: VaultKnowledgeBase,
+        documentIndex: DocumentIndexReader,
+        fileMetadataReader: DocumentFileMetadataReader,
         getSettings: () => VaultCoachSettings,
         getCloudApiKey: () => string | null,
     ) {
-        this.knowledgeBase = knowledgeBase;
+        this.documentIndex = documentIndex;
         this.getSettings = getSettings;
         this.client = new LocalModelClient(getSettings, getCloudApiKey);
         this.profileStore = new ExamProfileStore(app);
-        this.scopeService = new ExamScopeService(knowledgeBase);
-        this.profiler = new ExamContentProfiler(knowledgeBase, this.client, this.profileStore, getSettings);
+        this.scopeService = new ExamScopeService(documentIndex, fileMetadataReader, getSettings);
+        this.profiler = new ExamContentProfiler(documentIndex, this.client, this.profileStore, getSettings);
         this.blueprintService = new ExamBlueprintService(this.client);
         this.questionGenerator = new ExamQuestionGenerator(
             this.client,
             new ExamQuestionValidator(),
             getSettings,
         );
+    }
+
+    /** 获取可选考试目录。 */
+    getScopeOptions(): ExamScopeOption[] {
+        return this.scopeService.getFolderScopeOptions();
+    }
+
+    /** 获取指定目录中的考试文件选项。 */
+    getFileOptions(folderPaths: string[]): ExamFileOption[] {
+        return this.scopeService.getFileOptions(folderPaths);
+    }
+
+    /** 获取考试范围的容量快照。 */
+    getScopeSnapshot(selection: ExamScopeSelection): ExamScopeSnapshot {
+        return this.scopeService.getScopeSnapshot(selection);
+    }
+
+    /** Whether the selected scope contains any rule-eligible document chunks. */
+    hasEligibleChunks(selection: ExamScopeSelection): boolean {
+        return this.scopeService.getChunksForScope(selection).length > 0;
     }
 
     /**
@@ -172,7 +196,7 @@ export class ExamEngine {
         durations.profilingMs = durations.scopeMs;
         throwIfAborted(options.abortSignal);
 
-        const eligibleChunks: IndexedChunk[] = this.knowledgeBase.getExamChunksByIds(analysis.eligibleChunkIds);
+        const eligibleChunks: IndexedChunk[] = this.documentIndex.getChunksByIds(analysis.eligibleChunkIds);
         if (eligibleChunks.length === 0) {
             throw new Error("当前考试范围内没有通过规则和智能筛选的可用片段。");
         }
@@ -311,7 +335,7 @@ export class ExamEngine {
      */
     private buildManualOnlyProfiles(resolvedScope: ExamResolvedScope): ExamContentProfile[] {
         return resolvedScope.candidateFiles.map((fileOption) => {
-            const chunks: IndexedChunk[] = this.knowledgeBase.getExamFileChunks(fileOption.filePath);
+            const chunks: IndexedChunk[] = this.documentIndex.getChunksByFilePath(fileOption.filePath);
             return {
                 filePath: fileOption.filePath,
                 decision: "include",
