@@ -156,10 +156,14 @@ function createBasicGraphFixtureVault(): MutableFixtureVault {
     return new MutableFixtureVault({
         "overview.md": readFixture("overview.md"),
         "details.md": readFixture("details.md"),
-        ".vault-coach/ignored.md": readFixture(".vault-coach/ignored.md"),
+        ".vault-coach/ignored.md": readHiddenFixture(),
     });
 }
 
 function readFixture(relativePath: string): string {
     return readFileSync(`${fixtureRoot}${relativePath}`, "utf8");
+}
+
+function readHiddenFixture(): string {
+    return readFileSync(fileURLToPath(new URL("./fixtures/vault-graph/hidden/ignored.md", import.meta.url)), "utf8");
 }
