@@ -16,6 +16,8 @@ import { ExamController, type ExamViewState } from "../controllers/exam-controll
 /** Renders the exam interface and delegates every state change to ExamController. */
 export class ExamView {
     private answerEls: HTMLTextAreaElement[] = [];
+    private examAreaEl: HTMLDivElement | null = null;
+    private pendingAreaScrollTop: number | null = null;
 
     constructor(
         private readonly app: App,
@@ -26,33 +28,49 @@ export class ExamView {
     render(rootEl: HTMLDivElement): void {
         this.answerEls = [];
         const examAreaEl = rootEl.createDiv({ cls: "vault-coach-exam-area" });
+        this.examAreaEl = examAreaEl;
         const state = this.controller.getState();
 
         if (state.phase === "history") {
             this.renderHistory(examAreaEl, state);
-            return;
-        }
-        if (state.phase === "generating") {
+        } else if (state.phase === "generating") {
             this.renderBusyState(examAreaEl, state.progressLabel || this.t("exam.generating"), true);
-            return;
-        }
-        if (state.phase === "evaluating") {
+        } else if (state.phase === "evaluating") {
             this.renderBusyState(examAreaEl, this.t("exam.evaluating"));
-            return;
-        }
-        if (!state.session) {
+        } else if (!state.session) {
             this.renderSetup(examAreaEl, state);
-            return;
-        }
-        if (state.phase === "taking" || state.session.status === "draft") {
+        } else if (state.phase === "taking" || state.session.status === "draft") {
             this.renderTaking(examAreaEl, state, state.session);
-            return;
+        } else {
+            this.renderReview(examAreaEl, state, state.session);
         }
-        this.renderReview(examAreaEl, state, state.session);
+        this.restorePendingScrollPosition();
     }
 
     dispose(): void {
         this.answerEls = [];
+        this.examAreaEl = null;
+        this.pendingAreaScrollTop = null;
+    }
+
+    /** Preserve the exam panel position across controller-driven full renders. */
+    preserveScrollPosition(): void {
+        this.pendingAreaScrollTop = this.examAreaEl?.scrollTop ?? null;
+    }
+
+    private restorePendingScrollPosition(): void {
+        if (this.pendingAreaScrollTop === null || !this.examAreaEl) {
+            return;
+        }
+
+        const scrollTop = this.pendingAreaScrollTop;
+        this.pendingAreaScrollTop = null;
+        this.examAreaEl.scrollTop = scrollTop;
+        window.requestAnimationFrame(() => {
+            if (this.examAreaEl?.isConnected) {
+                this.examAreaEl.scrollTop = scrollTop;
+            }
+        });
     }
 
     private t(key: TranslationKey, replacements?: Record<string, string | number>): string {

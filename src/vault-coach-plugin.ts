@@ -9,7 +9,7 @@ import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type Translati
 import { registerVaultCoachCommands, registerVaultCoachRibbon } from "./plugin/command-registry";
 import { LegacyPluginApiAdapter, type LegacyPluginApiHost } from "./presentation/legacy-plugin-api-adapter";
 import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
-import { VaultCoachView } from "./view";
+import { VaultCoachView } from "./presentation/vault-coach-view";
 
 /** Obsidian composition root: lifecycle, UI registration, and thin host adapters only. */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
@@ -31,7 +31,7 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         await this.runtime.initialize();
         this.legacyApi = new LegacyPluginApiAdapter(this.runtime.application, this);
 
-        this.registerView(VIEW_TYPE_VAULT_COACH, (leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this.legacyApi));
+        this.registerView(VIEW_TYPE_VAULT_COACH, (leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this.runtime.application, this.legacyApi));
         registerVaultCoachCommands(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
         registerVaultCoachRibbon(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
         this.addSettingTab(new VaultCoachSettingTab(this.app, this, this.legacyApi));

@@ -60,4 +60,17 @@ describe("architecture import boundaries", () => {
         expect(pluginSource).not.toMatch(concreteServiceImports);
         expect(mainSource).toBe('import VaultCoach from "./vault-coach-plugin";\n\nexport default VaultCoach;');
     });
+
+    it("keeps the ItemView shell small and reserves a non-navigable Progress boundary", () => {
+        const legacyViewSource = sourceOf(join(sourceRoot, "view.ts")).trim();
+        const shellSource = sourceOf(join(sourceRoot, "presentation", "vault-coach-view.ts"));
+        const progressControllerSource = sourceOf(join(sourceRoot, "presentation", "controllers", "progress-controller.ts"));
+        const progressViewSource = sourceOf(join(sourceRoot, "presentation", "views", "progress-view.ts"));
+
+        expect(legacyViewSource).toContain('export { VaultCoachView } from "./presentation/vault-coach-view";');
+        expect(shellSource.split("\n").length).toBeLessThanOrEqual(350);
+        expect(shellSource).not.toMatch(/domain\/exam|ExamGenerationProgress|ExamSession/);
+        expect(progressControllerSource).toContain("isAvailable(): false");
+        expect(progressViewSource).toContain("render(_rootEl");
+    });
 });
