@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -13,6 +13,10 @@ function getTypeScriptFiles(directory: string): string[] {
     });
 }
 
+function getTypeScriptFilesIfPresent(directory: string): string[] {
+    return existsSync(directory) ? getTypeScriptFiles(directory) : [];
+}
+
 function sourceOf(path: string): string {
     return readFileSync(path, "utf8");
 }
@@ -23,6 +27,19 @@ describe("architecture import boundaries", () => {
         const violations = domainFiles.filter((path) => /from\s+["']obsidian["']/.test(sourceOf(path)));
 
         expect(violations.map((path) => relative(sourceRoot, path))).toEqual([]);
+    });
+
+    it("reserves graph domain and persistence boundaries before graph implementation", () => {
+        const graphFiles = getTypeScriptFilesIfPresent(join(sourceRoot, "domain", "graph"));
+        const forbiddenGraphImports = /from\s+["'][^"']*(?:obsidian|model-client|rag-engine|exam(?:-|\b)|presentation|graphology|sigma)[^"']*["']/;
+        const graphViolations = graphFiles.filter((path) => forbiddenGraphImports.test(sourceOf(path)));
+        const runtimeStorageSources = [
+            sourceOf(join(sourceRoot, "persistent-store.ts")),
+            sourceOf(join(sourceRoot, "infrastructure", "storage", "storage-types.ts")),
+        ].join("\n");
+
+        expect(graphViolations.map((path) => relative(sourceRoot, path))).toEqual([]);
+        expect(runtimeStorageSources).not.toMatch(/\b(?:GraphSnapshot|GraphStore|graph-snapshot|layout-state)\b/i);
     });
 
     it("keeps presentation independent from concrete business services", () => {
