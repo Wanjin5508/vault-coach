@@ -393,5 +393,9 @@ function createApplicationGraphReader(): GraphSourceReader {
     }];
     return {
         readAll: () => ({ documents, diagnostics: [] }),
+        readPaths: (filePaths) => ({
+            documents: documents.filter((document) => filePaths.includes(document.filePath)),
+            diagnostics: [],
+        }),
     };
 }

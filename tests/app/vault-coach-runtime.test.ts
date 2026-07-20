@@ -4,6 +4,7 @@ import { GRAPH_SNAPSHOT_PATH } from "../../src/constants";
 import { createDefaultSettings } from "../../src/settings";
 import { VaultCoachRuntime, type VaultCoachRuntimeHost } from "../../src/app/vault-coach-runtime";
 import type { VaultCoachSettings } from "../../src/app/config/settings-types";
+import type { KnowledgeGraphService } from "../../src/app/graph/knowledge-graph-service";
 
 const TEST_CONFIG_DIR = "test-config";
 
@@ -68,11 +69,79 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
 
         await harness.runtime.dispose();
     });
+
+    it("migrates graph links during the same incremental sync that handles a Vault rename", async () => {
+        const harness = createRuntimeHarness();
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+        harness.renameKnowledgeFile("details.md", "renamed-details.md");
+
+        harness.runtime.handleVaultPathRenamed("details.md", "renamed-details.md");
+        await flushPendingKnowledgeBaseSync(harness.runtime);
+
+        const snapshot = await harness.runtime.application.graph.getSnapshot();
+        const link = snapshot?.edges.find((edge) => edge.type === "links_to");
+        expect(snapshot?.nodes.some((node) => node.id === "markdown:details.md")).toBe(false);
+        expect(snapshot?.nodes.some((node) => node.id === "markdown:renamed-details.md")).toBe(true);
+        expect(link).toMatchObject({
+            targetNodeId: "markdown:renamed-details.md",
+            sources: [expect.objectContaining({ targetFilePath: "renamed-details.md" })],
+        });
+        expect(await harness.runtime.application.graph.checkIntegrity()).toEqual({ valid: true, issues: [] });
+
+        await harness.runtime.dispose();
+    });
+
+    it("deduplicates repeated file events and does not fall back to a graph full rebuild", async () => {
+        const harness = createRuntimeHarness();
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+        const graphService = getGraphService(harness.runtime);
+        const graphSync = vi.spyOn(graphService, "syncChangedFiles");
+        const graphRebuild = vi.spyOn(graphService, "rebuildAll");
+
+        harness.runtime.handleVaultPathChanged("overview.md");
+        harness.runtime.handleVaultPathChanged("overview.md");
+        await flushPendingKnowledgeBaseSync(harness.runtime);
+
+        expect(graphSync).toHaveBeenCalledOnce();
+        expect(graphSync.mock.calls[0]?.[0].affectedFiles).toEqual(["overview.md"]);
+        expect(graphRebuild).not.toHaveBeenCalled();
+        await harness.runtime.dispose();
+    });
+
+    it("ignores VaultCoach internal-file events without scheduling a graph update", async () => {
+        const harness = createRuntimeHarness();
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+        const graphService = getGraphService(harness.runtime);
+        const graphSync = vi.spyOn(graphService, "syncChangedFiles");
+
+        harness.runtime.handleVaultPathChanged(".vault-coach/graph/graph-snapshot-v1.json");
+        await flushPendingKnowledgeBaseSync(harness.runtime);
+
+        expect(graphSync).not.toHaveBeenCalled();
+        expect(graphService.getState().dirty).toBe(false);
+        await harness.runtime.dispose();
+    });
+
+    it("clears the persisted and in-memory graph together with the knowledge index", async () => {
+        const harness = createRuntimeHarness();
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+
+        await harness.runtime.clearKnowledgeIndex(false);
+
+        expect(await harness.runtime.application.graph.getSnapshot()).toBeNull();
+        expect(harness.adapter.files.has(GRAPH_SNAPSHOT_PATH)).toBe(false);
+        await harness.runtime.dispose();
+    });
 });
 
 function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = null): {
     runtime: VaultCoachRuntime;
     adapter: InMemoryVaultAdapter;
+    renameKnowledgeFile(oldPath: string, newPath: string): void;
 } {
     const files = new Map<string, { file: TFile; content: string }>([
         ["details.md", {
@@ -127,7 +196,28 @@ function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = nu
     return {
         runtime: new VaultCoachRuntime(host),
         adapter,
+        renameKnowledgeFile: (oldPath, newPath) => {
+            const entry = files.get(oldPath);
+            if (!entry) throw new Error(`Missing fixture file: ${oldPath}`);
+            files.delete(oldPath);
+            files.set(newPath, {
+                file: createFile(newPath, entry.file.stat.mtime + 1),
+                content: entry.content,
+            });
+        },
     };
+}
+
+function flushPendingKnowledgeBaseSync(runtime: VaultCoachRuntime): Promise<void> {
+    return (runtime as unknown as {
+        flushPendingKnowledgeBaseSync(showNotice: boolean): Promise<void>;
+    }).flushPendingKnowledgeBaseSync(false);
+}
+
+function getGraphService(runtime: VaultCoachRuntime): KnowledgeGraphService {
+    return (runtime as unknown as {
+        applicationContainer: { services: { knowledgeGraphService: KnowledgeGraphService } };
+    }).applicationContainer.services.knowledgeGraphService;
 }
 
 class InMemoryVaultAdapter {

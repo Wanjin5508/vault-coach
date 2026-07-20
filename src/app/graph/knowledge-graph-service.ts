@@ -1,11 +1,20 @@
-import { normalizeGraphPath } from "../../domain/graph/graph-id";
+import {
+    createDocumentNodeId,
+    createGraphEdgeId,
+    normalizeGraphPath,
+    sortGraphEdges,
+    sortGraphNodes,
+} from "../../domain/graph/graph-id";
 import { GraphIntegrityService } from "../../domain/graph/graph-integrity-service";
 import type { GraphStore } from "../../domain/graph/graph-store";
+import type { KnowledgeBaseSyncResult } from "../../domain/documents/document-types";
 import type {
     GraphIntegrityReport,
     GraphSnapshotV1,
+    GraphRename,
     GraphSourceDocument,
     GraphSourceLocation,
+    DocumentGraphNode,
     KnowledgeGraphEdge,
     KnowledgeGraphNode,
 } from "../../domain/graph/graph-types";
@@ -23,11 +32,22 @@ export interface GraphSourceReader {
         documents: GraphSourceDocument[];
         diagnostics: GraphSourceDiagnostic[];
     };
+    readPaths(filePaths: readonly string[]): {
+        documents: GraphSourceDocument[];
+        diagnostics: GraphSourceDiagnostic[];
+    };
 }
 
 /** Application port implemented by the pure deterministic graph builder. */
 export interface GraphSnapshotBuilder {
     build(sources: readonly GraphSourceDocument[]): GraphSnapshotV1;
+    buildFragment(
+        sources: readonly GraphSourceDocument[],
+        knownDocuments: readonly DocumentGraphNode[],
+    ): {
+        nodes: KnowledgeGraphNode[];
+        edges: KnowledgeGraphEdge[];
+    };
 }
 
 export interface KnowledgeGraphState {
@@ -84,6 +104,99 @@ export class KnowledgeGraphService {
             await this.store.save(snapshot);
             signal?.throwIfAborted();
 
+            this.snapshot = cloneSnapshot(snapshot);
+            this.diagnostics = cloneDiagnostics(sourceResult.diagnostics);
+            this.dirty = this.diagnostics.length > 0;
+            this.lastError = null;
+            return cloneSnapshot(snapshot);
+        } catch (error: unknown) {
+            this.dirty = true;
+            this.lastError = describeError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Replaces only facts contributed by changed files. A missing requested
+     * source means that file was deleted or moved out of the knowledge scope.
+     *
+     * A paired rename preserves links from unchanged documents by migrating
+     * their target endpoint and evidence path to the new document identity.
+     */
+    async syncChangedFiles(
+        syncResult: Pick<KnowledgeBaseSyncResult, "affectedFiles">,
+        renames: readonly GraphRename[] = [],
+        signal?: AbortSignal,
+    ): Promise<GraphSnapshotV1> {
+        if (!this.snapshot) return this.rebuildAll(signal);
+
+        const normalizedAffectedPaths = normalizePaths(syncResult.affectedFiles);
+        const normalizedRenames = normalizeRenames(renames);
+        if (normalizedAffectedPaths.length === 0 && normalizedRenames.length === 0) {
+            return cloneSnapshot(this.snapshot);
+        }
+
+        try {
+            signal?.throwIfAborted();
+            const pathsToRead = normalizePaths([
+                ...normalizedAffectedPaths,
+                ...normalizedRenames.map((rename) => rename.newPath),
+            ]);
+            const sourceResult = this.sourceReader.readPaths(pathsToRead);
+            signal?.throwIfAborted();
+
+            const previousSnapshot = this.snapshot;
+            const replacementPaths = new Set<string>([
+                ...normalizedAffectedPaths,
+                ...normalizedRenames.flatMap((rename) => [rename.oldPath, rename.newPath]),
+            ]);
+            const currentSourcesByPath = new Map<string, GraphSourceDocument>(
+                sourceResult.documents.map((document) => [normalizeGraphPath(document.filePath), document]),
+            );
+            const previousDocumentsByPath = new Map<string, DocumentGraphNode>(
+                previousSnapshot.nodes
+                    .filter((node): node is DocumentGraphNode => node.type === "document")
+                    .map((node) => [node.filePath, node]),
+            );
+            const migrations = createRenameMigrations(
+                normalizedRenames,
+                previousDocumentsByPath,
+                currentSourcesByPath,
+            );
+            const migrationByOldDocumentId = new Map(migrations.map((migration) => [migration.oldDocumentId, migration]));
+            const pathsWithCurrentDocuments = new Set(currentSourcesByPath.keys());
+            const removedDocumentIds = new Set(
+                Array.from(previousDocumentsByPath.values())
+                    .filter((document) => replacementPaths.has(document.filePath))
+                    .filter((document) => !pathsWithCurrentDocuments.has(document.filePath))
+                    .filter((document) => !migrationByOldDocumentId.has(document.id))
+                    .map((document) => document.id),
+            );
+
+            const retainedNodes = previousSnapshot.nodes.filter((node) => {
+                return node.type === "tag" || !replacementPaths.has(node.filePath);
+            });
+            const knownDocuments = retainedNodes.filter((node): node is DocumentGraphNode => node.type === "document");
+            const fragment = this.builder.buildFragment(sourceResult.documents, knownDocuments);
+            const mergedNodes = mergeNodes(retainedNodes, fragment.nodes);
+            const migratedEdges = previousSnapshot.edges
+                .filter((edge) => !edge.sources.some((source) => replacementPaths.has(source.sourceFilePath)))
+                .map((edge) => migrateEdgeTarget(edge, migrationByOldDocumentId))
+                .filter((edge): edge is KnowledgeGraphEdge => edge !== null)
+                .filter((edge) => !removedDocumentIds.has(edge.targetNodeId));
+            const mergedEdges = mergeEdges(migratedEdges, fragment.edges);
+            const snapshot = createSnapshot(
+                pruneOrphanedTagNodes(mergedNodes, mergedEdges),
+                mergedEdges,
+            );
+            const report = this.integrityService.check(snapshot);
+            if (!report.valid) {
+                throw new Error(`图谱完整性校验失败：${report.issues.map((issue) => issue.code).join(", ")}`);
+            }
+
+            signal?.throwIfAborted();
+            await this.store.save(snapshot);
+            signal?.throwIfAborted();
             this.snapshot = cloneSnapshot(snapshot);
             this.diagnostics = cloneDiagnostics(sourceResult.diagnostics);
             this.dirty = this.diagnostics.length > 0;
@@ -156,6 +269,125 @@ export class KnowledgeGraphService {
             ? cloneIntegrityReport(this.integrityService.check(this.snapshot))
             : { valid: true, issues: [] };
     }
+}
+
+interface RenameMigration {
+    oldDocumentId: string;
+    oldPath: string;
+    newDocumentId: string;
+    newPath: string;
+}
+
+function normalizePaths(paths: readonly string[]): string[] {
+    return Array.from(new Set(paths.map(normalizeGraphPath)))
+        .filter((path) => path.length > 0)
+        .sort(compareStrings);
+}
+
+function normalizeRenames(renames: readonly GraphRename[]): GraphRename[] {
+    const deduped = new Map<string, GraphRename>();
+    for (const rename of renames) {
+        const oldPath = normalizeGraphPath(rename.oldPath);
+        const newPath = normalizeGraphPath(rename.newPath);
+        if (oldPath.length === 0 || newPath.length === 0 || oldPath === newPath) continue;
+        deduped.set(oldPath, { oldPath, newPath });
+    }
+    return Array.from(deduped.values()).sort((left, right) => compareStrings(left.oldPath, right.oldPath));
+}
+
+function createRenameMigrations(
+    renames: readonly GraphRename[],
+    previousDocumentsByPath: ReadonlyMap<string, DocumentGraphNode>,
+    currentSourcesByPath: ReadonlyMap<string, GraphSourceDocument>,
+): RenameMigration[] {
+    return renames.flatMap((rename) => {
+        const previousDocument = previousDocumentsByPath.get(rename.oldPath);
+        const currentSource = currentSourcesByPath.get(rename.newPath);
+        if (!previousDocument || !currentSource) return [];
+        return [{
+            oldDocumentId: previousDocument.id,
+            oldPath: rename.oldPath,
+            newDocumentId: createDocumentNodeId(currentSource.documentId),
+            newPath: rename.newPath,
+        }];
+    });
+}
+
+function mergeNodes(
+    retainedNodes: readonly KnowledgeGraphNode[],
+    fragmentNodes: readonly KnowledgeGraphNode[],
+): KnowledgeGraphNode[] {
+    const nodesById = new Map<string, KnowledgeGraphNode>();
+    for (const node of retainedNodes) nodesById.set(node.id, cloneNode(node));
+    for (const node of fragmentNodes) nodesById.set(node.id, cloneNode(node));
+    return sortGraphNodes(Array.from(nodesById.values()));
+}
+
+function mergeEdges(
+    retainedEdges: readonly KnowledgeGraphEdge[],
+    fragmentEdges: readonly KnowledgeGraphEdge[],
+): KnowledgeGraphEdge[] {
+    const edgesById = new Map<string, KnowledgeGraphEdge>();
+    for (const edge of [...retainedEdges, ...fragmentEdges]) {
+        const existing = edgesById.get(edge.id);
+        if (existing) {
+            existing.sources.push(...edge.sources.map(cloneSourceLocation));
+            continue;
+        }
+        edgesById.set(edge.id, cloneEdge(edge));
+    }
+    return sortGraphEdges(Array.from(edgesById.values()));
+}
+
+function migrateEdgeTarget(
+    edge: KnowledgeGraphEdge,
+    migrations: ReadonlyMap<string, RenameMigration>,
+): KnowledgeGraphEdge | null {
+    const migration = migrations.get(edge.targetNodeId);
+    if (!migration) return cloneEdge(edge);
+    if (edge.type !== "links_to" && edge.type !== "embeds") return null;
+    return {
+        ...cloneEdge(edge),
+        id: createGraphEdgeId(edge.type, edge.sourceNodeId, migration.newDocumentId),
+        targetNodeId: migration.newDocumentId,
+        sources: edge.sources.map((source) => ({
+            ...cloneSourceLocation(source),
+            ...(source.targetFilePath === migration.oldPath ? { targetFilePath: migration.newPath } : {}),
+        })),
+    };
+}
+
+function pruneOrphanedTagNodes(
+    nodes: readonly KnowledgeGraphNode[],
+    edges: readonly KnowledgeGraphEdge[],
+): KnowledgeGraphNode[] {
+    const referencedTagIds = new Set(
+        edges
+            .filter((edge) => edge.type === "tagged_with")
+            .map((edge) => edge.targetNodeId),
+    );
+    return nodes.filter((node) => node.type !== "tag" || referencedTagIds.has(node.id));
+}
+
+function createSnapshot(nodes: readonly KnowledgeGraphNode[], edges: readonly KnowledgeGraphEdge[]): GraphSnapshotV1 {
+    const sortedNodes = sortGraphNodes(nodes);
+    const sortedEdges = sortGraphEdges(edges);
+    return {
+        schemaVersion: 1,
+        nodes: sortedNodes,
+        edges: sortedEdges,
+        stats: {
+            documentCount: sortedNodes.filter((node) => node.type === "document").length,
+            sectionCount: sortedNodes.filter((node) => node.type === "section").length,
+            tagCount: sortedNodes.filter((node) => node.type === "tag").length,
+            edgeCount: sortedEdges.length,
+        },
+    };
+}
+
+function compareStrings(left: string, right: string): number {
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
 }
 
 function cloneSnapshot(snapshot: GraphSnapshotV1): GraphSnapshotV1 {

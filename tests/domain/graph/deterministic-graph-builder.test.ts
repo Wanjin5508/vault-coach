@@ -96,6 +96,22 @@ describe("DeterministicGraphBuilder", () => {
         expect(buildGraphSnapshot(shuffled)).toEqual(buildGraphSnapshot(sources));
     });
 
+    it("builds a changed-file fragment that can link to an unchanged known document", () => {
+        const sources = createRichSources();
+        const details = new DeterministicGraphBuilder().build([sources[0]!]).nodes
+            .find((node): node is Extract<typeof node, { type: "document" }> => node.type === "document");
+        if (!details) throw new Error("Expected details document node.");
+
+        const fragment = new DeterministicGraphBuilder().buildFragment([sources[1]!], [details]);
+
+        expect(fragment.edges).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: createGraphEdgeId("links_to", "markdown:notes/overview.md", "markdown:notes/details.md"),
+                type: "links_to",
+            }),
+        ]));
+    });
+
     it("rejects hidden and duplicate graph source documents instead of silently losing facts", () => {
         const source = createRichSources()[0]!;
 

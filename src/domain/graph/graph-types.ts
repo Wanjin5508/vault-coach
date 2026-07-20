@@ -130,6 +130,12 @@ export interface GraphSourceTag {
     endColumn?: number;
 }
 
+/** A paired Vault rename retained until graph edges have been migrated safely. */
+export interface GraphRename {
+    oldPath: string;
+    newPath: string;
+}
+
 export type GraphIntegrityIssueCode =
     | "unsupported-schema"
     | "duplicate-node-id"
