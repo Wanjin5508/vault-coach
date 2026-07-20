@@ -42,6 +42,9 @@ class InMemoryAssessmentStorageAdapter implements AssessmentStorageAdapter {
     }
 
     async rename(oldPath: string, newPath: string): Promise<void> {
+        if (this.files.has(newPath)) {
+            throw new Error("Destination file already exists!");
+        }
         const content = await this.read(oldPath);
         this.files.set(newPath, content);
         this.files.delete(oldPath);
@@ -120,7 +123,24 @@ describe("JsonAssessmentSessionStore", () => {
                 updatedAt: 100,
             }],
         });
-        expect(Array.from(adapter.files.keys()).some((path: string) => path.endsWith(".tmp"))).toBe(false);
+        expect(Array.from(adapter.files.keys()).some((path: string) => path.endsWith(".tmp") || path.endsWith(".bak"))).toBe(false);
+    });
+
+    it("updates an existing session and index when the adapter forbids rename-overwrite", async () => {
+        const adapter = new InMemoryAssessmentStorageAdapter();
+        const store = new JsonAssessmentSessionStore(adapter);
+        const originalDocument = createDocument("session-1", 100);
+        const updatedDocument = createDocument("session-1", 200);
+
+        await store.save(originalDocument);
+        await store.save(updatedDocument);
+
+        const sessionPath = `${ASSESSMENT_SESSIONS_DIR_PATH}/session-1.json`;
+        expect(JSON.parse(adapter.files.get(sessionPath) ?? "")).toEqual(updatedDocument);
+        expect(JSON.parse(adapter.files.get(ASSESSMENT_INDEX_PATH) ?? "")).toMatchObject({
+            entries: [{ sessionId: "session-1", updatedAt: 200 }],
+        });
+        expect(Array.from(adapter.files.keys()).some((path: string) => path.endsWith(".tmp") || path.endsWith(".bak"))).toBe(false);
     });
 
     it("rebuilds a damaged index from session facts without modifying the session JSON", async () => {
@@ -153,6 +173,19 @@ describe("JsonAssessmentSessionStore", () => {
         await expect(store.read("session-1")).resolves.toEqual(document);
 
         expect(adapter.files.has(temporaryPath)).toBe(false);
+        expect(adapter.files.has(`${ASSESSMENT_SESSIONS_DIR_PATH}/session-1.json`)).toBe(true);
+    });
+
+    it("restores a validated backup when an interrupted replacement has no final file", async () => {
+        const adapter = new InMemoryAssessmentStorageAdapter();
+        const store = new JsonAssessmentSessionStore(adapter);
+        const document = createDocument();
+        const backupPath = `${ASSESSMENT_SESSIONS_DIR_PATH}/session-1.json.bak`;
+        adapter.files.set(backupPath, JSON.stringify(document));
+
+        await expect(store.read("session-1")).resolves.toEqual(document);
+
+        expect(adapter.files.has(backupPath)).toBe(false);
         expect(adapter.files.has(`${ASSESSMENT_SESSIONS_DIR_PATH}/session-1.json`)).toBe(true);
     });
 

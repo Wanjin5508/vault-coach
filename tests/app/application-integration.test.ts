@@ -3,6 +3,8 @@ import { ChatService, type ChatServiceDependencies } from "../../src/app/chat/ch
 import type { ChatMessage, StreamHandlers } from "../../src/app/chat/chat-types";
 import { VaultCoachApplication, type VaultCoachApplicationDependencies } from "../../src/app/vault-coach-application";
 import type { VaultCoachSettings } from "../../src/app/config/settings-types";
+import { AssessmentEventFactory } from "../../src/domain/assessment/assessment-event-factory";
+import type { AssessmentSessionDocumentV1 } from "../../src/domain/assessment/assessment-types";
 import type { ExamScopeSelection, ExamSession } from "../../src/domain/exam/exam-types";
 
 function createSession(): ExamSession {
@@ -121,6 +123,11 @@ describe("VaultCoachApplication integration", () => {
         }));
         const savedSession: ExamSession = { ...createSession(), savedPath: ".vault-coach/exams/exam-integration.md", status: "saved" };
         const save = vi.fn(async () => savedSession);
+        const assessmentDocuments = new Map<string, AssessmentSessionDocumentV1>();
+        const saveAssessmentDocument = vi.fn(async (document: AssessmentSessionDocumentV1) => {
+            assessmentDocuments.set(document.sessionId, document);
+        });
+        const writeAssessmentProjection = vi.fn(async (document: AssessmentSessionDocumentV1) => document.examSession);
         const listHistory = vi.fn(async () => [{
             path: savedSession.savedPath!,
             title: savedSession.title,
@@ -145,7 +152,19 @@ describe("VaultCoachApplication integration", () => {
                 createExamSession,
             },
             examEvaluationService: { evaluate },
-            examSessionStore: { save, listHistory },
+            examSessionStore: {
+                save,
+                listHistory,
+                prepareSessionForSave: (session: ExamSession) => ({ ...session, savedPath: ".vault-coach/exams/exam-integration.md", status: "saved" as const }),
+                writeAssessmentProjection,
+            },
+            assessmentSessionStore: {
+                read: async (sessionId: string) => assessmentDocuments.get(sessionId) ?? null,
+                save: saveAssessmentDocument,
+            },
+            assessmentEventFactory: new AssessmentEventFactory({ createEventId: () => "event-integration" }),
+            getAssessmentSavedAt: () => 2,
+            getAssessmentSessionPath: (sessionId: string) => `.vault-coach/assessments/sessions/${sessionId}.json`,
             getScopeOptions: () => [{ id: "__all__", label: "完整知识库", folderPath: null, fileCount: 1, chunkCount: 1 }],
             normalizeFolderPaths: (paths: string[]) => paths,
             normalizeSelection: (selection: ExamScopeSelection) => selection,
@@ -178,7 +197,12 @@ describe("VaultCoachApplication integration", () => {
             evaluatedAt: 1,
         });
         expect(submitted).toMatchObject({ status: "submitted", userAnswers: ["检索增强生成"], evaluation: { score: 90 } });
-        expect(save).toHaveBeenCalledWith(submitted);
+        expect(save).not.toHaveBeenCalled();
+        expect(saveAssessmentDocument).toHaveBeenCalledWith(expect.objectContaining({
+            sessionId: "exam-integration",
+            assessmentEvents: [expect.objectContaining({ id: "event-integration" })],
+        }));
+        expect(writeAssessmentProjection).toHaveBeenCalledOnce();
         expect(saved.savedPath).toBe(".vault-coach/exams/exam-integration.md");
         expect(history).toHaveLength(1);
         expect(events).toEqual(["exam-history-changed"]);

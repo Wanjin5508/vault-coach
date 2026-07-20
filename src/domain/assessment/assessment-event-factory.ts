@@ -23,6 +23,19 @@ export class AssessmentEventFactory {
         session: ExamSession,
         previousEvents: readonly AssessmentEvent[] = [],
     ): AssessmentEventCreationResult {
+        return this.createForQuestionIds(
+            session,
+            session.questions.map((question: ExamQuestion) => question.id),
+            previousEvents,
+        );
+    }
+
+    /** Creates evidence for a selected subset of questions in an evaluated session. */
+    createForQuestionIds(
+        session: ExamSession,
+        questionIds: readonly string[],
+        previousEvents: readonly AssessmentEvent[] = [],
+    ): AssessmentEventCreationResult {
         const conceptBindings = this.createConceptBindings(session);
         if (!session.evaluation) {
             return { events: [], conceptBindings };
@@ -31,14 +44,17 @@ export class AssessmentEventFactory {
         const evaluationByQuestionId: Map<string, ExamEvaluationItem> = new Map<string, ExamEvaluationItem>(
             session.evaluation.items.map((item: ExamEvaluationItem) => [item.questionId, item]),
         );
-        const events: AssessmentEvent[] = session.questions.map((question: ExamQuestion) => {
+        const requestedQuestionIds = new Set<string>(questionIds);
+        const events: AssessmentEvent[] = session.questions
+            .filter((question: ExamQuestion) => requestedQuestionIds.has(question.id))
+            .map((question: ExamQuestion) => {
             const evaluation: ExamEvaluationItem | undefined = evaluationByQuestionId.get(question.id);
             if (!evaluation) {
                 throw new Error(`已评分考试缺少题目 ${question.id} 的评分项。`);
             }
 
             return this.createEvent(session, question, evaluation, previousEvents);
-        });
+            });
 
         return { events, conceptBindings };
     }

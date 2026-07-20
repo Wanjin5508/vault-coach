@@ -33,18 +33,22 @@ export class MarkdownExamReportStore {
         private readonly t: TranslateFn,
     ) {}
 
+    /** Prepares the stable report path without performing any I/O. */
+    prepareSessionForSave(session: ExamSession): ExamSession {
+        return {
+            ...session,
+            savedPath: session.savedPath ?? this.createResultPath(session),
+            status: "saved",
+        };
+    }
+
     /** Saves the legacy Markdown report format used by the current application. */
     async save(session: ExamSession): Promise<ExamSession> {
         await this.ensureResultsDirectory();
 
-        const savedPath: string = session.savedPath ?? this.createResultPath(session);
-        const savedSession: ExamSession = {
-            ...session,
-            savedPath,
-            status: "saved",
-        };
+        const savedSession = this.prepareSessionForSave(session);
 
-        await this.adapter.write(savedPath, formatExamSessionMarkdown(savedSession, this.t));
+        await this.adapter.write(savedSession.savedPath!, formatExamSessionMarkdown(savedSession, this.t));
         return savedSession;
     }
 
@@ -59,19 +63,14 @@ export class MarkdownExamReportStore {
     ): Promise<ExamSession> {
         await this.ensureResultsDirectory();
 
-        const savedPath: string = document.examSession.savedPath ?? this.createResultPath(document.examSession);
-        const projectedSession: ExamSession = {
-            ...document.examSession,
-            savedPath,
-            status: "saved",
-        };
+        const projectedSession = this.prepareSessionForSave(document.examSession);
         const projectedDocument: AssessmentSessionDocumentV1 = {
             ...document,
             examSession: projectedSession,
         };
 
         await this.adapter.write(
-            savedPath,
+            projectedSession.savedPath!,
             formatAssessmentSessionMarkdown(projectedDocument, assessmentSessionPath, this.t),
         );
         return projectedSession;

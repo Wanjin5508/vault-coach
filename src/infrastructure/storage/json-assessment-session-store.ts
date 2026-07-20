@@ -25,6 +25,15 @@ export interface AssessmentStorageAdapter {
     remove(path: string): Promise<void>;
 }
 
+/** Returns the canonical facts path for one validated Assessment Session ID. */
+export function getAssessmentSessionPath(sessionId: string): string {
+    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+        throw new Error(`无效的 Assessment Session ID：${sessionId}`);
+    }
+
+    return normalizePath(`${ASSESSMENT_SESSIONS_DIR_PATH}/${sessionId}.json`);
+}
+
 /**
  * Obsidian Vault-adapter implementation of the M1 Assessment facts store.
  *
@@ -37,10 +46,10 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
     async save(document: AssessmentSessionDocumentV1): Promise<void> {
         await this.ensureDirectories();
         await this.recoverTemporaryFiles();
-        this.assertDocument(document, this.getSessionPath(document.sessionId));
+        this.assertDocument(document, getAssessmentSessionPath(document.sessionId));
 
         await this.writeJsonAtomically(
-            this.getSessionPath(document.sessionId),
+            getAssessmentSessionPath(document.sessionId),
             document,
             (payload: unknown, path: string) => this.assertDocument(payload, path),
         );
@@ -60,7 +69,7 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
     async read(sessionId: string): Promise<AssessmentSessionDocumentV1 | null> {
         await this.ensureDirectories();
         await this.recoverTemporaryFiles();
-        const path = this.getSessionPath(sessionId);
+        const path = getAssessmentSessionPath(sessionId);
         if (!(await this.adapter.exists(path))) {
             return null;
         }
@@ -174,6 +183,7 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
     ): Promise<void> {
         const normalizedPath = normalizePath(path);
         const temporaryPath = `${normalizedPath}.tmp`;
+        const backupPath = `${normalizedPath}.bak`;
         const serialized = JSON.stringify(payload, null, 2);
 
         await this.adapter.write(temporaryPath, serialized);
@@ -185,7 +195,34 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
         }
         assertPayload(temporaryPayload, temporaryPath);
 
-        await this.adapter.rename(temporaryPath, normalizedPath);
+        if (!(await this.adapter.exists(normalizedPath))) {
+            await this.adapter.rename(temporaryPath, normalizedPath);
+            return;
+        }
+
+        // Obsidian's adapter.rename() rejects an existing destination. Keep a
+        // recoverable copy of the old value before replacing it so a failed
+        // move cannot silently discard a session's evidence.
+        if (await this.adapter.exists(backupPath)) {
+            await this.adapter.remove(backupPath);
+        }
+        await this.adapter.write(backupPath, await this.adapter.read(normalizedPath));
+
+        try {
+            await this.adapter.remove(normalizedPath);
+            await this.adapter.rename(temporaryPath, normalizedPath);
+        } catch (error: unknown) {
+            await this.restoreBackup(normalizedPath, backupPath);
+            throw error;
+        }
+
+        try {
+            if (await this.adapter.exists(backupPath)) {
+                await this.adapter.remove(backupPath);
+            }
+        } catch (error: unknown) {
+            console.warn("[VaultCoach] Assessment JSON 已更新，但旧备份文件暂未清理", backupPath, error);
+        }
     }
 
     private async recoverTemporaryFiles(): Promise<void> {
@@ -193,29 +230,77 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
             this.adapter.list(ASSESSMENTS_DIR_PATH),
             this.adapter.list(ASSESSMENT_SESSIONS_DIR_PATH),
         ]);
-        const temporaryPaths = Array.from(new Set(listedDirectories.flatMap((listed) => listed.files)))
-            .filter((path: string) => path.endsWith(".tmp"))
+        const finalPaths = Array.from(new Set(listedDirectories.flatMap((listed) => listed.files)
+            .flatMap((path: string) => this.getStagedFinalPath(path))))
             .sort((left: string, right: string) => left.localeCompare(right));
 
-        for (const temporaryPath of temporaryPaths) {
-            const finalPath = temporaryPath.slice(0, -".tmp".length);
-            if (await this.adapter.exists(finalPath)) {
-                await this.adapter.remove(temporaryPath);
+        for (const finalPath of finalPaths) {
+            await this.recoverStagedFile(finalPath);
+        }
+    }
+
+    private async recoverStagedFile(finalPath: string): Promise<void> {
+        const temporaryPath = `${finalPath}.tmp`;
+        const backupPath = `${finalPath}.bak`;
+        if (await this.adapter.exists(finalPath)) {
+            await this.removeStagedFileIfPresent(temporaryPath);
+            await this.removeStagedFileIfPresent(backupPath);
+            return;
+        }
+
+        for (const stagedPath of [temporaryPath, backupPath]) {
+            if (!(await this.adapter.exists(stagedPath))) {
                 continue;
             }
 
             try {
-                const raw = await this.adapter.read(temporaryPath);
-                const payload: unknown = JSON.parse(raw);
-                if (normalizePath(finalPath) === ASSESSMENT_INDEX_PATH) {
-                    this.assertIndex(payload, temporaryPath);
-                } else {
-                    this.assertDocument(payload, temporaryPath);
-                }
-                await this.adapter.rename(temporaryPath, finalPath);
+                const payload: unknown = JSON.parse(await this.adapter.read(stagedPath));
+                this.assertStagedPayload(payload, finalPath, stagedPath);
+                await this.adapter.rename(stagedPath, finalPath);
+                await this.removeStagedFileIfPresent(temporaryPath);
+                await this.removeStagedFileIfPresent(backupPath);
+                return;
             } catch (error: unknown) {
-                console.warn("[VaultCoach] 保留无法恢复的 Assessment 临时文件", temporaryPath, error);
+                console.warn("[VaultCoach] 保留无法恢复的 Assessment 临时文件", stagedPath, error);
             }
+        }
+    }
+
+    private getStagedFinalPath(path: string): string[] {
+        if (path.endsWith(".tmp")) {
+            return [path.slice(0, -".tmp".length)];
+        }
+        if (path.endsWith(".bak")) {
+            return [path.slice(0, -".bak".length)];
+        }
+
+        return [];
+    }
+
+    private assertStagedPayload(payload: unknown, finalPath: string, stagedPath: string): void {
+        if (normalizePath(finalPath) === ASSESSMENT_INDEX_PATH) {
+            this.assertIndex(payload, stagedPath);
+            return;
+        }
+
+        this.assertDocument(payload, stagedPath);
+    }
+
+    private async restoreBackup(finalPath: string, backupPath: string): Promise<void> {
+        if (await this.adapter.exists(finalPath) || !(await this.adapter.exists(backupPath))) {
+            return;
+        }
+
+        try {
+            await this.adapter.rename(backupPath, finalPath);
+        } catch (error: unknown) {
+            console.error("[VaultCoach] 无法立即恢复 Assessment JSON 备份", backupPath, error);
+        }
+    }
+
+    private async removeStagedFileIfPresent(path: string): Promise<void> {
+        if (await this.adapter.exists(path)) {
+            await this.adapter.remove(path);
         }
     }
 
@@ -228,18 +313,10 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
         }
     }
 
-    private getSessionPath(sessionId: string): string {
-        if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
-            throw new Error(`无效的 Assessment Session ID：${sessionId}`);
-        }
-
-        return normalizePath(`${ASSESSMENT_SESSIONS_DIR_PATH}/${sessionId}.json`);
-    }
-
     private createIndexEntry(document: AssessmentSessionDocumentV1): AssessmentSessionIndexEntry {
         return {
             sessionId: document.sessionId,
-            sessionPath: this.getSessionPath(document.sessionId),
+            sessionPath: getAssessmentSessionPath(document.sessionId),
             reportPath: document.examSession.savedPath,
             title: document.examSession.title,
             createdAt: document.examSession.createdAt,
@@ -306,7 +383,7 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
             if (!this.isRecord(entry)
                 || typeof entry.sessionId !== "string"
                 || typeof entry.sessionPath !== "string"
-                || normalizePath(entry.sessionPath) !== this.getSessionPath(entry.sessionId)
+                || normalizePath(entry.sessionPath) !== getAssessmentSessionPath(entry.sessionId)
                 || (entry.reportPath !== null && typeof entry.reportPath !== "string")
                 || typeof entry.title !== "string"
                 || typeof entry.createdAt !== "number"

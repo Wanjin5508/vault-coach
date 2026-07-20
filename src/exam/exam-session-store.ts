@@ -20,6 +20,10 @@ export class ExamSessionStore {
         this.reports = new MarkdownExamReportStore(app.vault.adapter, t);
     }
 
+    prepareSessionForSave(session: ExamSession): ExamSession {
+        return this.reports.prepareSessionForSave(session);
+    }
+
     async save(session: ExamSession): Promise<ExamSession> {
         return this.reports.save(session);
     }
