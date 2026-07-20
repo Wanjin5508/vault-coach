@@ -26,3 +26,6 @@ data.json
 .VSCodeCounter
 
 kb/
+runtime-state.json
+index-snapshot.json
+knowledge-index/
