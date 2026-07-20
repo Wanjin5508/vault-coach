@@ -137,6 +137,28 @@ export function parseExamHistoryItem(path: string, content: string, stat: Stat |
     };
 }
 
+/** Returns a current report's stable session ID, or null for legacy Markdown. */
+export function parseExamHistorySessionId(content: string): string | null {
+    const frontmatterMatch = /^---\s*$([\s\S]*?)^---\s*$/m.exec(content);
+    const frontmatter = frontmatterMatch?.[1];
+    if (!frontmatter || !/^vaultCoachExam:\s*true\s*$/m.test(frontmatter)) {
+        return null;
+    }
+
+    const examIdMatch = /^examId:\s*(.+?)\s*$/m.exec(frontmatter);
+    const rawExamId = examIdMatch?.[1];
+    if (!rawExamId) {
+        return null;
+    }
+
+    try {
+        const parsedExamId: unknown = JSON.parse(rawExamId);
+        return typeof parsedExamId === "string" && parsedExamId.length > 0 ? parsedExamId : null;
+    } catch {
+        return null;
+    }
+}
+
 function formatDateTime(timestamp: number): string {
     return new Date(timestamp).toLocaleString();
 }

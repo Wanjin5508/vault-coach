@@ -5,6 +5,7 @@ import type { AssessmentEventFactory } from "../domain/assessment/assessment-eve
 import { getQuestionIdsNeedingAssessmentEvents } from "../domain/assessment/assessment-event-fingerprint";
 import {
     ASSESSMENT_SESSION_SCHEMA_VERSION,
+    type AssessmentExamHistoryItem,
     type AssessmentConceptBinding,
     type AssessmentEvent,
     type AssessmentSessionDocumentV1,
@@ -12,8 +13,8 @@ import {
 } from "../domain/assessment/assessment-types";
 import type { ExamEngine } from "../exam/exam-engine";
 import type { ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
-import type { ExamSessionStore } from "../exam/exam-session-store";
-import type { ExamEvaluationMetadata, ExamGenerationOptions, ExamScopeSelection, ExamSession } from "../domain/exam/exam-types";
+import type { ExamSessionStore, MarkdownExamHistoryRecord } from "../exam/exam-session-store";
+import type { ExamEvaluationMetadata, ExamGenerationOptions, ExamHistoryItem, ExamScopeSelection, ExamSession } from "../domain/exam/exam-types";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
@@ -24,6 +25,7 @@ export interface VaultCoachApplicationDependencies {
     assessmentEventFactory: AssessmentEventFactory;
     getAssessmentSavedAt(): number;
     getAssessmentSessionPath(sessionId: string): string;
+    getAssessmentSessionIdFromPath(path: string): string | null;
     getScopeOptions(): ReturnType<ExamEngine["getScopeOptions"]>;
     normalizeFolderPaths(folderPaths: string[]): string[];
     normalizeSelection(selection: ExamScopeSelection): ExamScopeSelection;
@@ -137,14 +139,14 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
             }),
             saveSession: async (session) => this.saveExamSession(session),
             exportSession: (session, folderPath) => dependencies.examSessionStore.export(session, folderPath),
-            listHistory: () => dependencies.examSessionStore.listHistory(),
-            readHistory: (path) => dependencies.examSessionStore.readHistoryContent(path),
+            listHistory: () => this.listExamHistory(),
+            readHistory: (path) => this.readExamHistoryContent(path),
             deleteSession: async (session) => {
                 await dependencies.examSessionStore.deleteSession(session);
                 this.emit({ type: "exam-history-changed" });
             },
             deleteHistory: async (path) => {
-                await dependencies.examSessionStore.deleteHistory(path);
+                await this.deleteExamHistory(path);
                 this.emit({ type: "exam-history-changed" });
             },
         };
@@ -202,6 +204,46 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         return projectedSession;
     }
 
+    private async listExamHistory(): Promise<ExamHistoryItem[]> {
+        const [assessmentItems, markdownRecords] = await Promise.all([
+            this.dependencies.assessmentSessionStore.listHistory(),
+            this.dependencies.examSessionStore.listMarkdownHistoryRecords(),
+        ]);
+        return mergeExamHistory(assessmentItems, markdownRecords);
+    }
+
+    private async readExamHistoryContent(path: string): Promise<string> {
+        const sessionId = this.dependencies.getAssessmentSessionIdFromPath(path);
+        if (!sessionId) {
+            return this.dependencies.examSessionStore.readHistoryContent(path);
+        }
+
+        const document = await this.dependencies.assessmentSessionStore.read(sessionId);
+        if (!document) {
+            throw new Error(`找不到 Assessment Session：${sessionId}`);
+        }
+
+        return this.dependencies.examSessionStore.readOrCreateAssessmentProjection(
+            document,
+            this.dependencies.getAssessmentSessionPath(sessionId),
+        );
+    }
+
+    private async deleteExamHistory(path: string): Promise<void> {
+        const sessionId = this.dependencies.getAssessmentSessionIdFromPath(path);
+        if (!sessionId) {
+            await this.dependencies.examSessionStore.deleteHistory(path);
+            return;
+        }
+
+        const document = await this.dependencies.assessmentSessionStore.read(sessionId);
+        if (!document) {
+            throw new Error(`找不到 Assessment Session：${sessionId}`);
+        }
+
+        await this.dependencies.examSessionStore.deleteSession(document.examSession);
+    }
+
     private emit(event: ApplicationEvent): void {
         this.listeners.forEach((listener) => listener(event));
     }
@@ -217,4 +259,29 @@ function mergeConceptBindings(
     }
 
     return Array.from(bindingsById.values());
+}
+
+function mergeExamHistory(
+    assessmentItems: readonly AssessmentExamHistoryItem[],
+    markdownRecords: readonly MarkdownExamHistoryRecord[],
+): ExamHistoryItem[] {
+    const knownSessionIds = new Set<string>();
+    const items: ExamHistoryItem[] = assessmentItems.map((item: AssessmentExamHistoryItem) => {
+        knownSessionIds.add(item.sessionId);
+        return item;
+    });
+
+    for (const record of markdownRecords) {
+        if (record.sessionId && knownSessionIds.has(record.sessionId)) {
+            continue;
+        }
+        if (record.sessionId) {
+            knownSessionIds.add(record.sessionId);
+        }
+        items.push(record.item);
+    }
+
+    return items.sort((left: ExamHistoryItem, right: ExamHistoryItem) => {
+        return (right.createdAt ?? right.modifiedAt ?? 0) - (left.createdAt ?? left.modifiedAt ?? 0);
+    });
 }

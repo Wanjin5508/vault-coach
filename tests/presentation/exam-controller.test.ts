@@ -207,6 +207,36 @@ describe("ExamController", () => {
         expect(errorLogger).toHaveBeenCalledWith("[VaultCoachExamController] 自动保存考试结果失败", saveError);
     });
 
+    it("keeps history UI calls path-agnostic for structured and legacy records", async () => {
+        const structuredPath = ".vault-coach/assessments/sessions/exam-1.json";
+        const listExamHistory = vi.fn(async () => [{
+            path: structuredPath,
+            title: "结构化记录",
+            createdAt: 1,
+            score: 80,
+            maxScore: 100,
+            modifiedAt: 1,
+        }]);
+        const readExamHistoryContent = vi.fn(async () => "由 JSON 重建的报告");
+        const deleteExamHistory = vi.fn(async () => undefined);
+        const api = {
+            settings: { enableExamSmartFiltering: true },
+            listExamHistory,
+            readExamHistoryContent,
+            deleteExamHistory,
+        } as unknown as VaultCoachPluginApi;
+        const controller = new ExamController(api, (key) => key);
+
+        await controller.showHistory();
+        await controller.loadHistory(structuredPath);
+        await controller.deleteHistory(structuredPath);
+
+        expect(readExamHistoryContent).toHaveBeenCalledWith(structuredPath);
+        expect(deleteExamHistory).toHaveBeenCalledWith(structuredPath);
+        expect(listExamHistory).toHaveBeenCalledTimes(2);
+        expect(controller.getState()).toMatchObject({ phase: "history", selectedHistoryPath: null, selectedHistoryContent: "" });
+    });
+
     it("returns to answer-taking and does not save when evaluation fails", async () => {
         const evaluationError = new Error("model unavailable");
         const errorLogger = vi.spyOn(console, "error").mockImplementation(() => undefined);

@@ -8,6 +8,7 @@ import {
 import {
     ASSESSMENT_INDEX_SCHEMA_VERSION,
     ASSESSMENT_SESSION_SCHEMA_VERSION,
+    type AssessmentExamHistoryItem,
     type AssessmentSessionDocumentV1,
     type AssessmentSessionIndexEntry,
     type AssessmentSessionIndexV1,
@@ -32,6 +33,14 @@ export function getAssessmentSessionPath(sessionId: string): string {
     }
 
     return normalizePath(`${ASSESSMENT_SESSIONS_DIR_PATH}/${sessionId}.json`);
+}
+
+/** Resolves only canonical Assessment Session paths, rejecting path traversal. */
+export function getAssessmentSessionIdFromPath(path: string): string | null {
+    const normalizedPath = normalizePath(path);
+    const match = new RegExp(`^${ASSESSMENT_SESSIONS_DIR_PATH}/([a-zA-Z0-9_-]+)\\.json$`).exec(normalizedPath);
+    const sessionId = match?.[1];
+    return sessionId && getAssessmentSessionPath(sessionId) === normalizedPath ? sessionId : null;
 }
 
 /**
@@ -89,6 +98,15 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
         }
 
         return documents ?? [];
+    }
+
+    async listHistory(): Promise<AssessmentExamHistoryItem[]> {
+        const documents = await this.list();
+        return documents
+            .map((document: AssessmentSessionDocumentV1) => this.createHistoryItem(document))
+            .sort((left: AssessmentExamHistoryItem, right: AssessmentExamHistoryItem) => {
+                return (right.createdAt ?? right.modifiedAt ?? 0) - (left.createdAt ?? left.modifiedAt ?? 0);
+            });
     }
 
     async rebuildIndex(): Promise<AssessmentSessionIndexV1> {
@@ -323,6 +341,21 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
             score: document.examSession.evaluation?.score ?? null,
             maxScore: document.examSession.evaluation?.maxScore ?? null,
             updatedAt: document.savedAt,
+        };
+    }
+
+    private createHistoryItem(document: AssessmentSessionDocumentV1): AssessmentExamHistoryItem {
+        const sessionPath = getAssessmentSessionPath(document.sessionId);
+        return {
+            path: sessionPath,
+            sessionId: document.sessionId,
+            sessionPath,
+            reportPath: document.examSession.savedPath,
+            title: document.examSession.title,
+            createdAt: document.examSession.createdAt,
+            score: document.examSession.evaluation?.score ?? null,
+            maxScore: document.examSession.evaluation?.maxScore ?? null,
+            modifiedAt: document.savedAt,
         };
     }
 

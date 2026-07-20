@@ -1,6 +1,7 @@
 import type {
     AssessmentErrorCode,
     ExamDifficulty,
+    ExamHistoryItem,
     ExamQuestionType,
     ExamSession,
 } from "../exam/exam-types";
@@ -68,6 +69,13 @@ export interface AssessmentSessionIndexV1 {
     entries: AssessmentSessionIndexEntry[];
 }
 
+/** History item backed by an Assessment Session JSON source of truth. */
+export interface AssessmentExamHistoryItem extends ExamHistoryItem {
+    sessionId: string;
+    sessionPath: string;
+    reportPath: string | null;
+}
+
 /** Result returned by the pure event factory before any storage side effect occurs. */
 export interface AssessmentEventCreationResult {
     events: AssessmentEvent[];
@@ -79,5 +87,6 @@ export interface AssessmentSessionStore {
     save(document: AssessmentSessionDocumentV1): Promise<void>;
     read(sessionId: string): Promise<AssessmentSessionDocumentV1 | null>;
     list(): Promise<AssessmentSessionDocumentV1[]>;
+    listHistory(): Promise<AssessmentExamHistoryItem[]>;
     rebuildIndex(): Promise<AssessmentSessionIndexV1>;
 }

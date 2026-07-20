@@ -5,6 +5,7 @@ import {
 } from "../../../src/constants";
 import type { AssessmentSessionDocumentV1 } from "../../../src/domain/assessment/assessment-types";
 import {
+    getAssessmentSessionIdFromPath,
     JsonAssessmentSessionStore,
     type AssessmentStorageAdapter,
 } from "../../../src/infrastructure/storage/json-assessment-session-store";
@@ -143,6 +144,28 @@ describe("JsonAssessmentSessionStore", () => {
         expect(Array.from(adapter.files.keys()).some((path: string) => path.endsWith(".tmp") || path.endsWith(".bak"))).toBe(false);
     });
 
+    it("lists structured history from facts and rejects non-canonical session paths", async () => {
+        const adapter = new InMemoryAssessmentStorageAdapter();
+        const store = new JsonAssessmentSessionStore(adapter);
+        const document = createDocument("session-1", 200);
+
+        await store.save(document);
+
+        await expect(store.listHistory()).resolves.toEqual([{
+            path: `${ASSESSMENT_SESSIONS_DIR_PATH}/session-1.json`,
+            sessionId: "session-1",
+            sessionPath: `${ASSESSMENT_SESSIONS_DIR_PATH}/session-1.json`,
+            reportPath: ".vault-coach/exams/session-1-JSON.md",
+            title: "JSON 考试事实测试",
+            createdAt: 10,
+            score: null,
+            maxScore: null,
+            modifiedAt: 200,
+        }]);
+        expect(getAssessmentSessionIdFromPath(`${ASSESSMENT_SESSIONS_DIR_PATH}/session-1.json`)).toBe("session-1");
+        expect(getAssessmentSessionIdFromPath(`${ASSESSMENT_SESSIONS_DIR_PATH}/../sessions/session-1.json`)).toBeNull();
+    });
+
     it("rebuilds a damaged index from session facts without modifying the session JSON", async () => {
         const adapter = new InMemoryAssessmentStorageAdapter();
         const store = new JsonAssessmentSessionStore(adapter);
@@ -160,6 +183,18 @@ describe("JsonAssessmentSessionStore", () => {
             schemaVersion: 1,
             entries: [{ sessionId: "session-1" }],
         });
+        expect(warn).toHaveBeenCalledOnce();
+    });
+
+    it("excludes a damaged session from structured history without throwing", async () => {
+        const adapter = new InMemoryAssessmentStorageAdapter();
+        const store = new JsonAssessmentSessionStore(adapter);
+        await store.save(createDocument());
+        adapter.files.set(`${ASSESSMENT_SESSIONS_DIR_PATH}/session-1.json`, "{ damaged session");
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+        await expect(store.listHistory()).resolves.toEqual([]);
+
         expect(warn).toHaveBeenCalledOnce();
     });
 

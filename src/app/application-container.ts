@@ -3,7 +3,11 @@ import { AssessmentEventFactory } from "../domain/assessment/assessment-event-fa
 import { ExamEngine } from "../exam/exam-engine";
 import { ExamSessionStore } from "../exam/exam-session-store";
 import { EXAM_EVALUATION_PROMPT_VERSION, ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
-import { getAssessmentSessionPath, JsonAssessmentSessionStore } from "../infrastructure/storage/json-assessment-session-store";
+import {
+    getAssessmentSessionIdFromPath,
+    getAssessmentSessionPath,
+    JsonAssessmentSessionStore,
+} from "../infrastructure/storage/json-assessment-session-store";
 import { VaultKnowledgeBase } from "../knowledge-base";
 import { LocalModelClient } from "../model-client";
 import { ObsidianDocumentFileMetadataReader } from "../infrastructure/obsidian/obsidian-document-file-metadata-reader";
@@ -134,6 +138,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         assessmentEventFactory,
         getAssessmentSavedAt: () => Date.now(),
         getAssessmentSessionPath,
+        getAssessmentSessionIdFromPath,
         getScopeOptions: () => {
             const stats = knowledgeBase.getStats();
             return [{

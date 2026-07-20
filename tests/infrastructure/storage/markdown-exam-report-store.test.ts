@@ -197,8 +197,8 @@ describe("MarkdownExamReportStore", () => {
         expect(adapter.files.has(savedSession.savedPath ?? "")).toBe(false);
         expect(adapter.files.get(sessionPath)).toBe(originalFacts);
 
-        await reportStore.writeAssessmentProjection(document, sessionPath);
-        expect(adapter.files.get(savedSession.savedPath ?? "")).toBe(firstProjection);
+        const recoveredProjection = await reportStore.readOrCreateAssessmentProjection(document, sessionPath);
+        expect(recoveredProjection).toBe(firstProjection);
         expect(adapter.files.get(sessionPath)).toBe(originalFacts);
     });
 

@@ -2,7 +2,12 @@ import { App } from "obsidian";
 import type { AssessmentSessionDocumentV1 } from "../domain/assessment/assessment-types";
 import type { TranslationKey } from "../i18n";
 import type { ExamHistoryItem, ExamSession } from "../domain/exam/exam-types";
-import { MarkdownExamReportStore } from "../infrastructure/storage/markdown-exam-report-store";
+import {
+    MarkdownExamReportStore,
+    type MarkdownExamHistoryRecord,
+} from "../infrastructure/storage/markdown-exam-report-store";
+
+export type { MarkdownExamHistoryRecord } from "../infrastructure/storage/markdown-exam-report-store";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
@@ -43,8 +48,19 @@ export class ExamSessionStore {
         return this.reports.listHistory();
     }
 
+    async listMarkdownHistoryRecords(): Promise<MarkdownExamHistoryRecord[]> {
+        return this.reports.listHistoryRecords();
+    }
+
     async readHistoryContent(path: string): Promise<string> {
         return this.reports.readHistoryContent(path);
+    }
+
+    async readOrCreateAssessmentProjection(
+        document: AssessmentSessionDocumentV1,
+        assessmentSessionPath: string,
+    ): Promise<string> {
+        return this.reports.readOrCreateAssessmentProjection(document, assessmentSessionPath);
     }
 
     async deleteSession(session: ExamSession): Promise<void> {

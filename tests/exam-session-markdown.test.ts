@@ -8,6 +8,7 @@ import {
     formatAssessmentSessionMarkdown,
     formatExamSessionMarkdown,
     parseExamHistoryItem,
+    parseExamHistorySessionId,
 } from "../src/exam/exam-session-markdown";
 import type { AssessmentSessionDocumentV1 } from "../src/domain/assessment/assessment-types";
 import type { ExamEvaluation, ExamSession } from "../src/domain/exam/exam-types";
@@ -164,6 +165,7 @@ describe("exam session markdown compatibility", () => {
             maxScore: 100,
             modifiedAt: 1704165000000,
         });
+        expect(parseExamHistorySessionId(readFixture("current.md"))).toBe("exam_20240102030405");
     });
 
     it("reads legacy Chinese history without frontmatter", () => {
@@ -179,6 +181,7 @@ describe("exam session markdown compatibility", () => {
         expect(item.score).toBe(75);
         expect(item.maxScore).toBe(100);
         expect(item.modifiedAt).toBeNull();
+        expect(parseExamHistorySessionId(readFixture("legacy-zh.md"))).toBeNull();
     });
 
     it("reads legacy English history without frontmatter", () => {

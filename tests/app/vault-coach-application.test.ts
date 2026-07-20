@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { VaultCoachApplication, type VaultCoachApplicationDependencies } from "../../src/app/vault-coach-application";
 import { AssessmentEventFactory } from "../../src/domain/assessment/assessment-event-factory";
-import type { AssessmentSessionDocumentV1 } from "../../src/domain/assessment/assessment-types";
+import type { AssessmentExamHistoryItem, AssessmentSessionDocumentV1 } from "../../src/domain/assessment/assessment-types";
 import type { ExamEvaluation, ExamSession } from "../../src/domain/exam/exam-types";
+import type { MarkdownExamHistoryRecord } from "../../src/exam/exam-session-store";
 
 describe("VaultCoachApplication", () => {
     it("publishes grouped chat use-case events without a presentation dependency", async () => {
@@ -104,6 +105,53 @@ describe("VaultCoachApplication", () => {
         expect(harness.saveAssessmentDocument).toHaveBeenCalledOnce();
         expect(harness.writeAssessmentProjection).toHaveBeenCalledOnce();
     });
+
+    it("merges JSON and legacy history, rebuilds a missing report, and deletes only that report", async () => {
+        const harness = createExamSaveHarness();
+        await harness.application.exam.saveSession(createScoredSession());
+        const structuredPath = ".vault-coach/assessments/sessions/session-1.json";
+        harness.markdownHistoryRecords.push(
+            {
+                item: {
+                    path: ".vault-coach/exams/session-1-结构化证据测试.md",
+                    title: "重复的结构化报告",
+                    createdAt: 1,
+                    score: 80,
+                    maxScore: 100,
+                    modifiedAt: 1,
+                },
+                sessionId: "session-1",
+            },
+            {
+                item: {
+                    path: ".vault-coach/exams/legacy.md",
+                    title: "旧 Markdown 记录",
+                    createdAt: 2,
+                    score: 60,
+                    maxScore: 100,
+                    modifiedAt: 2,
+                },
+                sessionId: null,
+            },
+        );
+
+        const history = await harness.application.exam.listHistory();
+        expect(history.map((item) => item.path)).toEqual([".vault-coach/exams/legacy.md", structuredPath]);
+
+        await expect(harness.application.exam.readHistory(structuredPath)).resolves.toBe("重建的 Markdown 报告");
+        expect(harness.readOrCreateAssessmentProjection).toHaveBeenCalledWith(
+            expect.objectContaining({ sessionId: "session-1" }),
+            structuredPath,
+        );
+
+        await harness.application.exam.deleteHistory(structuredPath);
+        expect(harness.deleteSession).toHaveBeenCalledWith(expect.objectContaining({ id: "session-1" }));
+        expect(harness.documents.has("session-1")).toBe(true);
+
+        await expect(harness.application.exam.readHistory(".vault-coach/exams/legacy.md")).resolves.toBe("旧报告");
+        await harness.application.exam.deleteHistory(".vault-coach/exams/legacy.md");
+        expect(harness.deleteHistory).toHaveBeenCalledWith(".vault-coach/exams/legacy.md");
+    });
 });
 
 interface ExamSaveHarnessOptions {
@@ -115,6 +163,7 @@ interface ExamSaveHarnessOptions {
 function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
     const documents = new Map<string, AssessmentSessionDocumentV1>();
     const callOrder: string[] = [];
+    const markdownHistoryRecords: MarkdownExamHistoryRecord[] = [];
     const saveAssessmentDocument = vi.fn(async (document: AssessmentSessionDocumentV1) => {
         callOrder.push("facts");
         if (options.saveFactsError) {
@@ -129,6 +178,10 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
         }
         return document.examSession;
     });
+    const readOrCreateAssessmentProjection = vi.fn(async () => "重建的 Markdown 报告");
+    const readHistoryContent = vi.fn(async () => "旧报告");
+    const deleteSession = vi.fn(async () => undefined);
+    const deleteHistory = vi.fn(async () => undefined);
     const eventIds = ["event-1", "event-2", "event-3"];
     const application = new VaultCoachApplication({
         chatService: {
@@ -148,16 +201,37 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
                 status: "saved" as const,
             }),
             writeAssessmentProjection,
+            listMarkdownHistoryRecords: async () => markdownHistoryRecords,
+            readOrCreateAssessmentProjection,
+            readHistoryContent,
+            deleteSession,
+            deleteHistory,
         },
         assessmentSessionStore: {
             read: async (sessionId: string) => documents.get(sessionId) ?? null,
             save: saveAssessmentDocument,
+            listHistory: async (): Promise<AssessmentExamHistoryItem[]> => Array.from(documents.values())
+                .map((document: AssessmentSessionDocumentV1) => ({
+                    path: `.vault-coach/assessments/sessions/${document.sessionId}.json`,
+                    sessionId: document.sessionId,
+                    sessionPath: `.vault-coach/assessments/sessions/${document.sessionId}.json`,
+                    reportPath: document.examSession.savedPath,
+                    title: document.examSession.title,
+                    createdAt: document.examSession.createdAt,
+                    score: document.examSession.evaluation?.score ?? null,
+                    maxScore: document.examSession.evaluation?.maxScore ?? null,
+                    modifiedAt: document.savedAt,
+                })),
         },
         assessmentEventFactory: new AssessmentEventFactory({
             createEventId: () => eventIds.shift() ?? "unexpected-event-id",
         }),
         getAssessmentSavedAt: () => 1000,
         getAssessmentSessionPath: (sessionId: string) => `.vault-coach/assessments/sessions/${sessionId}.json`,
+        getAssessmentSessionIdFromPath: (path: string) => {
+            const match = /^\.vault-coach\/assessments\/sessions\/([a-zA-Z0-9_-]+)\.json$/.exec(path);
+            return match?.[1] ?? null;
+        },
         getExamEvaluationMetadata: () => ({
             modelProvider: "ollama",
             modelName: "evaluation-model",
@@ -172,6 +246,11 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
         callOrder,
         saveAssessmentDocument,
         writeAssessmentProjection,
+        readOrCreateAssessmentProjection,
+        readHistoryContent,
+        deleteSession,
+        deleteHistory,
+        markdownHistoryRecords,
     };
 }
 

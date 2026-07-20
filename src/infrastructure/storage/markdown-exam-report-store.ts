@@ -7,9 +7,16 @@ import {
     formatAssessmentSessionMarkdown,
     formatExamSessionMarkdown,
     parseExamHistoryItem,
+    parseExamHistorySessionId,
 } from "../../exam/exam-session-markdown";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
+
+/** Parsed Markdown history with an optional ID for cross-source deduplication. */
+export interface MarkdownExamHistoryRecord {
+    item: ExamHistoryItem;
+    sessionId: string | null;
+}
 
 /** Minimal Vault-adapter surface required by Markdown exam reports. */
 export interface MarkdownExamReportStorageAdapter {
@@ -84,6 +91,11 @@ export class MarkdownExamReportStore {
     }
 
     async listHistory(): Promise<ExamHistoryItem[]> {
+        const records = await this.listHistoryRecords();
+        return records.map((record: MarkdownExamHistoryRecord) => record.item);
+    }
+
+    async listHistoryRecords(): Promise<MarkdownExamHistoryRecord[]> {
         await this.ensureResultsDirectory();
 
         const listedFiles: ListedFiles = await this.adapter.list(EXAM_RESULTS_DIR_PATH);
@@ -91,23 +103,26 @@ export class MarkdownExamReportStore {
             .filter((path: string) => path.toLowerCase().endsWith(".md"))
             .sort((leftPath: string, rightPath: string) => rightPath.localeCompare(leftPath));
 
-        const items: ExamHistoryItem[] = [];
+        const records: MarkdownExamHistoryRecord[] = [];
         for (const path of markdownPaths) {
             try {
                 const [content, stat]: [string, Stat | null] = await Promise.all([
                     this.adapter.read(path),
                     this.adapter.stat(path),
                 ]);
-                items.push(parseExamHistoryItem(path, content, stat, this.t));
+                records.push({
+                    item: parseExamHistoryItem(path, content, stat, this.t),
+                    sessionId: parseExamHistorySessionId(content),
+                });
             } catch (error: unknown) {
                 console.error("[VaultCoach] 读取考试历史失败", error);
             }
         }
 
-        items.sort((left: ExamHistoryItem, right: ExamHistoryItem) => {
-            return (right.createdAt ?? right.modifiedAt ?? 0) - (left.createdAt ?? left.modifiedAt ?? 0);
+        records.sort((left: MarkdownExamHistoryRecord, right: MarkdownExamHistoryRecord) => {
+            return (right.item.createdAt ?? right.item.modifiedAt ?? 0) - (left.item.createdAt ?? left.item.modifiedAt ?? 0);
         });
-        return items;
+        return records;
     }
 
     async readHistoryContent(path: string): Promise<string> {
@@ -115,6 +130,21 @@ export class MarkdownExamReportStore {
         this.assertExamResultPath(normalizedPath);
 
         return this.adapter.read(normalizedPath);
+    }
+
+    /** Reads an existing projection or rebuilds it solely from structured facts. */
+    async readOrCreateAssessmentProjection(
+        document: AssessmentSessionDocumentV1,
+        assessmentSessionPath: string,
+    ): Promise<string> {
+        const preparedSession = this.prepareSessionForSave(document.examSession);
+        const reportPath = preparedSession.savedPath!;
+        if (await this.adapter.exists(reportPath)) {
+            return this.adapter.read(reportPath);
+        }
+
+        await this.writeAssessmentProjection(document, assessmentSessionPath);
+        return this.adapter.read(reportPath);
     }
 
     async deleteSession(session: ExamSession): Promise<void> {
