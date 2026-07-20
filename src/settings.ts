@@ -500,7 +500,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         if (value !== "ollama" && value !== "openai-compatible") return;
         this.plugin.settings.modelProvider = value;
         await this.plugin.saveSettings();
-        this.update();
+        this.refreshDeclarativeSettings();
     }
 
     private async updateLlmBaseUrl(value: unknown): Promise<void> {
@@ -529,7 +529,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         this.plugin.settings.embeddingProvider = value;
         await this.plugin.saveSettings();
         this.plugin.markVectorIndexDirty();
-        this.update();
+        this.refreshDeclarativeSettings();
     }
 
     private async updateEmbeddingTextSetting(
@@ -570,6 +570,21 @@ export class VaultCoachSettingTab extends PluginSettingTab {
 
     private getBooleanValue(value: unknown): boolean | null {
         return typeof value === "boolean" ? value : null;
+    }
+
+    /**
+     * Refresh provider-dependent definitions on Obsidian 1.13+ without
+     * requiring the newer `SettingTab.update()` API on older installations.
+     */
+    private refreshDeclarativeSettings(): void {
+        const settingTab = this as unknown as Record<string, unknown>;
+        const update = settingTab["update"];
+        if (typeof update === "function") {
+            update.call(this);
+            return;
+        }
+
+        this.renderSettings();
     }
 
     /**
