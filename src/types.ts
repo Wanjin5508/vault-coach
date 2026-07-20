@@ -79,6 +79,14 @@ export type {
 } from "./domain/exam/exam-types";
 
 export type {
+    AssessmentConceptBinding,
+    AssessmentEvent,
+    AssessmentEventCreationResult,
+    AssessmentSessionDocumentV1,
+    AssessmentSessionStore,
+} from "./domain/assessment/assessment-types";
+
+export type {
     LocalChatMessage,
 } from "./domain/model/model-types";
 
