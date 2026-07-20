@@ -138,6 +138,7 @@ export type GraphIntegrityIssueCode =
     | "invalid-edge-shape"
     | "invalid-source"
     | "invalid-section-owner"
+    | "invalid-snapshot-stats"
     | "hidden-path-leak"
     | "non-canonical-id"
     | "unsorted-snapshot";

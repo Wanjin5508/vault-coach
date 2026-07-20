@@ -84,6 +84,7 @@ export class GraphIntegrityService {
                 });
             }
         }
+        this.checkStats(snapshot, issues);
 
         return { valid: issues.length === 0, issues };
     }
@@ -271,5 +272,25 @@ export class GraphIntegrityService {
     private hasValidOptionalPosition(source: GraphSourceLocation): boolean {
         return [source.startLine, source.startColumn, source.endLine, source.endColumn]
             .every((value: number | undefined) => value === undefined || (Number.isInteger(value) && value >= 0));
+    }
+
+    private checkStats(snapshot: GraphSnapshotV1, issues: GraphIntegrityIssue[]): void {
+        const expected = {
+            documentCount: snapshot.nodes.filter((node) => node.type === "document").length,
+            sectionCount: snapshot.nodes.filter((node) => node.type === "section").length,
+            tagCount: snapshot.nodes.filter((node) => node.type === "tag").length,
+            edgeCount: snapshot.edges.length,
+        };
+        if (
+            snapshot.stats.documentCount !== expected.documentCount
+            || snapshot.stats.sectionCount !== expected.sectionCount
+            || snapshot.stats.tagCount !== expected.tagCount
+            || snapshot.stats.edgeCount !== expected.edgeCount
+        ) {
+            issues.push({
+                code: "invalid-snapshot-stats",
+                message: "Graph snapshot statistics do not match its nodes and edges.",
+            });
+        }
     }
 }

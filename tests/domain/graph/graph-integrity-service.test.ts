@@ -90,6 +90,16 @@ describe("GraphIntegrityService", () => {
             "unsorted-snapshot",
         ]));
     });
+
+    it("reports snapshot statistics that do not match the persisted graph facts", () => {
+        const snapshot = createValidSnapshot();
+        const invalid: GraphSnapshotV1 = {
+            ...snapshot,
+            stats: { ...snapshot.stats, documentCount: 99 },
+        };
+
+        expect(service.check(invalid).issues.map((issue) => issue.code)).toContain("invalid-snapshot-stats");
+    });
 });
 
 function createValidSnapshot(): GraphSnapshotV1 {

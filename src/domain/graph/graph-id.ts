@@ -94,7 +94,21 @@ export function compareGraphEdgeIds(left: Pick<KnowledgeGraphEdge, "id">, right:
 }
 
 export function compareGraphSourceLocations(left: GraphSourceLocation, right: GraphSourceLocation): number {
-    return compareStrings(createGraphSourceLocationKey(left), createGraphSourceLocationKey(right));
+    return compareStrings(normalizeGraphPath(left.sourceFilePath), normalizeGraphPath(right.sourceFilePath))
+        || compareStrings(createDocumentNodeId(left.sourceDocumentId), createDocumentNodeId(right.sourceDocumentId))
+        || compareStrings(left.sourceKind, right.sourceKind)
+        || compareStrings(
+            left.targetFilePath ? normalizeGraphPath(left.targetFilePath) : "",
+            right.targetFilePath ? normalizeGraphPath(right.targetFilePath) : "",
+        )
+        || compareOptionalNumber(left.startLine, right.startLine)
+        || compareOptionalNumber(left.startColumn, right.startColumn)
+        || compareOptionalNumber(left.endLine, right.endLine)
+        || compareOptionalNumber(left.endColumn, right.endColumn)
+        || compareStrings(
+            JSON.stringify(normalizeGraphSourceLocation(left).chunkIds),
+            JSON.stringify(normalizeGraphSourceLocation(right).chunkIds),
+        );
 }
 
 export function sortGraphNodes(nodes: readonly KnowledgeGraphNode[]): KnowledgeGraphNode[] {
@@ -123,8 +137,12 @@ export function sortAndDedupeGraphSources(sources: readonly GraphSourceLocation[
 }
 
 export function isGraphSourceLocationsSorted(sources: readonly GraphSourceLocation[]): boolean {
-    return isSorted(sources, compareGraphSourceLocations)
-        && sources.length === sortAndDedupeGraphSources(sources).length;
+    const canonicalSources = sortAndDedupeGraphSources(sources);
+    return sources.length === canonicalSources.length
+        && sources.every((source: GraphSourceLocation, index: number) => {
+            const canonicalSource: GraphSourceLocation | undefined = canonicalSources[index];
+            return canonicalSource !== undefined && areGraphSourceLocationsEqual(source, canonicalSource);
+        });
 }
 
 export function isGraphNodesSorted(nodes: readonly KnowledgeGraphNode[]): boolean {
@@ -171,6 +189,19 @@ function createGraphSourceLocationKey(source: GraphSourceLocation): string {
     });
 }
 
+function areGraphSourceLocationsEqual(left: GraphSourceLocation, right: GraphSourceLocation): boolean {
+    return left.sourceFilePath === right.sourceFilePath
+        && left.sourceDocumentId === right.sourceDocumentId
+        && left.sourceKind === right.sourceKind
+        && left.targetFilePath === right.targetFilePath
+        && left.startLine === right.startLine
+        && left.startColumn === right.startColumn
+        && left.endLine === right.endLine
+        && left.endColumn === right.endColumn
+        && left.chunkIds.length === right.chunkIds.length
+        && left.chunkIds.every((chunkId: string, index: number) => chunkId === right.chunkIds[index]);
+}
+
 function cloneGraphNode(node: KnowledgeGraphNode): KnowledgeGraphNode {
     if (node.type === "document") {
         return { ...node };
@@ -203,4 +234,11 @@ function isSorted<T>(items: readonly T[], compare: (left: T, right: T) => number
 function compareStrings(left: string, right: string): number {
     if (left === right) return 0;
     return left < right ? -1 : 1;
+}
+
+function compareOptionalNumber(left: number | undefined, right: number | undefined): number {
+    if (left === right) return 0;
+    if (left === undefined) return -1;
+    if (right === undefined) return 1;
+    return left - right;
 }
