@@ -39,7 +39,7 @@ export class VaultCoachView extends ItemView {
         private readonly plugin: VaultCoachPluginApi,
     ) {
         super(leaf);
-        this.chatController = new ChatController(plugin);
+        this.chatController = new ChatController(plugin, () => this.contentEl.win);
         this.chatView = new ChatView(this.app, this, this.chatController);
         this.unsubscribeChatController = this.chatController.subscribe((event) => this.handleChatControllerEvent(event));
         this.examController = new ExamController(plugin, (key, replacements) => this.t(key, replacements));
