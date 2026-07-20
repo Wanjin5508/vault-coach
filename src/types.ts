@@ -82,6 +82,8 @@ export type {
     AssessmentConceptBinding,
     AssessmentEvent,
     AssessmentEventCreationResult,
+    AssessmentSessionIndexEntry,
+    AssessmentSessionIndexV1,
     AssessmentSessionDocumentV1,
     AssessmentSessionStore,
 } from "./domain/assessment/assessment-types";
