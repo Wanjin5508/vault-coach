@@ -94,7 +94,21 @@ export function compareGraphEdgeIds(left: Pick<KnowledgeGraphEdge, "id">, right:
 }
 
 export function compareGraphSourceLocations(left: GraphSourceLocation, right: GraphSourceLocation): number {
-    return compareStrings(createGraphSourceLocationKey(left), createGraphSourceLocationKey(right));
+    return compareStrings(normalizeGraphPath(left.sourceFilePath), normalizeGraphPath(right.sourceFilePath))
+        || compareStrings(createDocumentNodeId(left.sourceDocumentId), createDocumentNodeId(right.sourceDocumentId))
+        || compareStrings(left.sourceKind, right.sourceKind)
+        || compareStrings(
+            left.targetFilePath ? normalizeGraphPath(left.targetFilePath) : "",
+            right.targetFilePath ? normalizeGraphPath(right.targetFilePath) : "",
+        )
+        || compareOptionalNumber(left.startLine, right.startLine)
+        || compareOptionalNumber(left.startColumn, right.startColumn)
+        || compareOptionalNumber(left.endLine, right.endLine)
+        || compareOptionalNumber(left.endColumn, right.endColumn)
+        || compareStrings(
+            JSON.stringify(normalizeGraphSourceLocation(left).chunkIds),
+            JSON.stringify(normalizeGraphSourceLocation(right).chunkIds),
+        );
 }
 
 export function sortGraphNodes(nodes: readonly KnowledgeGraphNode[]): KnowledgeGraphNode[] {
@@ -220,4 +234,11 @@ function isSorted<T>(items: readonly T[], compare: (left: T, right: T) => number
 function compareStrings(left: string, right: string): number {
     if (left === right) return 0;
     return left < right ? -1 : 1;
+}
+
+function compareOptionalNumber(left: number | undefined, right: number | undefined): number {
+    if (left === right) return 0;
+    if (left === undefined) return -1;
+    if (right === undefined) return 1;
+    return left - right;
 }
