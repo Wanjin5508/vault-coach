@@ -4,9 +4,12 @@ import { describe, expect, it } from "vitest";
 import type { Stat } from "obsidian";
 import type { TranslationKey } from "../src/i18n";
 import {
+    EXAM_MARKDOWN_PROJECTION_VERSION,
+    formatAssessmentSessionMarkdown,
     formatExamSessionMarkdown,
     parseExamHistoryItem,
 } from "../src/exam/exam-session-markdown";
+import type { AssessmentSessionDocumentV1 } from "../src/domain/assessment/assessment-types";
 import type { ExamEvaluation, ExamSession } from "../src/domain/exam/exam-types";
 
 const labels: Record<string, string> = {
@@ -107,6 +110,7 @@ describe("exam session markdown compatibility", () => {
         expect(markdown).toContain("createdAt: 1704164645000");
         expect(markdown).toContain("score: 82");
         expect(markdown).toContain("maxScore: 100");
+        expect(markdown).not.toContain("vaultCoachAssessmentProjection");
         expect(markdown).toContain("# RAG 基础测试");
         expect(markdown).toContain("什么是混合检索？");
         expect(markdown).toContain("结合关键词和向量检索。");
@@ -125,6 +129,27 @@ describe("exam session markdown compatibility", () => {
         expect(markdown).toContain("未作答");
         expect(markdown).toContain("#### 参考答案");
         expect(markdown).toContain("#### 评分标准");
+    });
+
+    it("formats the same assessment facts into an identical Markdown projection", () => {
+        const session = createSession(null);
+        const document: AssessmentSessionDocumentV1 = {
+            schemaVersion: 1,
+            sessionId: session.id,
+            savedAt: 2,
+            examSession: session,
+            assessmentEvents: [],
+            conceptBindings: [],
+        };
+        const sessionPath = `.vault-coach/assessments/sessions/${session.id}.json`;
+
+        const firstProjection = formatAssessmentSessionMarkdown(document, sessionPath, translate);
+        const secondProjection = formatAssessmentSessionMarkdown(document, sessionPath, translate);
+
+        expect(firstProjection).toBe(secondProjection);
+        expect(firstProjection).toContain("vaultCoachAssessmentProjection: true");
+        expect(firstProjection).toContain(`assessmentProjectionVersion: ${EXAM_MARKDOWN_PROJECTION_VERSION}`);
+        expect(firstProjection).toContain(`assessmentSessionPath: ${JSON.stringify(sessionPath)}`);
     });
 
     it("reads current frontmatter history", () => {
