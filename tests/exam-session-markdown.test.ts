@@ -50,10 +50,22 @@ function createSession(evaluation: ExamEvaluation | null): ExamSession {
         questions: [
             {
                 id: "q1",
+                blueprintItemId: "bp-rag",
                 question: "什么是混合检索？",
                 referenceAnswer: "混合检索结合关键词和向量检索。",
                 rubric: "按覆盖关键点的程度使用 100 分制评分。",
+                questionType: "explanation",
+                difficulty: "basic",
+                sourceChunkIds: ["chunk-rag"],
+                evidenceExcerptIds: ["E1"],
                 sourcePaths: ["知识库/RAG/混合检索.md"],
+                conceptIds: ["exam-topic:rag"],
+                generationMetadata: {
+                    modelProvider: "ollama",
+                    modelName: "test-model",
+                    promptVersion: "test/v1",
+                    generatedAt: 1,
+                },
             },
         ],
         userAnswers: ["结合关键词和向量检索。"],

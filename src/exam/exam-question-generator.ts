@@ -3,6 +3,7 @@ import type {
     ExamBlueprint,
     ExamBlueprintItem,
     ExamQuestion,
+    ModelPromptMetadata,
     GeneratedExamQuestionCandidate,
 } from "../domain/exam/exam-types";
 import type { IndexedChunk } from "../domain/documents/document-types";
@@ -10,6 +11,9 @@ import type { LocalChatMessage } from "../domain/model/model-types";
 import type { VaultCoachSettings } from "../app/config/settings-types";
 import { generateParsedJsonAnswer, normalizeWhitespace, throwIfAborted } from "./exam-utils";
 import { ExamCandidateValidation, ExamQuestionValidator } from "./exam-question-validator";
+
+/** Bump only when the question-generation prompt contract changes. */
+export const EXAM_QUESTION_GENERATION_PROMPT_VERSION = "exam-question-generation/v1";
 
 /**
  * 考试题目生成模块。
@@ -53,6 +57,7 @@ export class ExamQuestionGenerator {
         client: LocalModelClient,
         validator: ExamQuestionValidator,
         getSettings: () => VaultCoachSettings,
+        private readonly now: () => number = () => Date.now(),
     ) {
         this.client = client;
         this.validator = validator;
@@ -75,6 +80,10 @@ export class ExamQuestionGenerator {
         const acceptedFingerprints: Set<string> = new Set<string>();
         const generatedCandidates: GeneratedExamQuestionCandidate[] = [];
         const batches: ExamBlueprintItem[][] = this.chunkArray(blueprint.items, this.getBatchSize());
+        const blueprintItemsById: Map<string, ExamBlueprintItem> = new Map<string, ExamBlueprintItem>(
+            blueprint.items.map((item: ExamBlueprintItem) => [item.id, item]),
+        );
+        const generationMetadata = this.createGenerationMetadata();
 
         for (const batch of batches) {
             throwIfAborted(abortSignal);
@@ -137,7 +146,13 @@ export class ExamQuestionGenerator {
 
         return {
             questions: acceptedCandidates.map((candidate: GeneratedExamQuestionCandidate, index: number) => {
-                return this.convertCandidateToQuestion(candidate, chunksById, index + 1);
+                return this.convertCandidateToQuestion(
+                    candidate,
+                    blueprintItemsById,
+                    chunksById,
+                    index + 1,
+                    generationMetadata,
+                );
             }),
             firstPassQuestions: generatedCandidates.length,
             repairedQuestions: fallbackQuestions,
@@ -604,22 +619,66 @@ export class ExamQuestionGenerator {
      */
     private convertCandidateToQuestion(
         candidate: GeneratedExamQuestionCandidate,
+        blueprintItemsById: Map<string, ExamBlueprintItem>,
         chunksById: Map<string, IndexedChunk>,
         index: number,
+        generationMetadata: ModelPromptMetadata & { generatedAt: number },
     ): ExamQuestion {
+        const blueprintItem: ExamBlueprintItem | undefined = blueprintItemsById.get(candidate.blueprintItemId);
+        if (!blueprintItem) {
+            throw new Error(`考试题目缺少对应蓝图项：${candidate.blueprintItemId}`);
+        }
+
+        const sourceChunkIds: string[] = Array.from(new Set(candidate.sourceChunkIds));
         const sourcePaths: string[] = Array.from(new Set(
-            candidate.sourceChunkIds
+            sourceChunkIds
                 .map((chunkId: string) => chunksById.get(chunkId)?.filePath)
                 .filter((filePath: string | undefined): filePath is string => filePath !== undefined),
         ));
 
         return {
             id: `q${index}`,
+            blueprintItemId: blueprintItem.id,
             question: candidate.question,
             referenceAnswer: candidate.referenceAnswer,
             rubric: candidate.rubric,
+            questionType: blueprintItem.questionType,
+            difficulty: blueprintItem.difficulty,
+            sourceChunkIds,
+            evidenceExcerptIds: Array.from(new Set(candidate.evidenceExcerptIds)),
             sourcePaths,
+            conceptIds: [this.createProvisionalConceptId(blueprintItem.topic, blueprintItem.id)],
+            generationMetadata: { ...generationMetadata },
         };
+    }
+
+    /** Creates metadata once for a generation run so every question shares the same provenance context. */
+    private createGenerationMetadata(): ModelPromptMetadata & { generatedAt: number } {
+        const settings: VaultCoachSettings = this.getSettings();
+        return {
+            modelProvider: settings.modelProvider,
+            modelName: settings.modelProvider === "openai-compatible"
+                ? settings.cloudChatModel.trim()
+                : settings.chatModel.trim(),
+            promptVersion: EXAM_QUESTION_GENERATION_PROMPT_VERSION,
+            generatedAt: this.now(),
+        };
+    }
+
+    /**
+     * M1 has no semantic graph yet. Persist a deterministic topic reference so
+     * later graph milestones can map it without rewriting existing questions.
+     */
+    private createProvisionalConceptId(topic: string, blueprintItemId: string): string {
+        const normalizedTopic: string = normalizeWhitespace(topic.normalize("NFKC")).toLowerCase();
+        const stableSource: string = normalizedTopic.length > 0 ? normalizedTopic : blueprintItemId;
+        let hash = 2166136261;
+        for (let index = 0; index < stableSource.length; index += 1) {
+            hash ^= stableSource.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+
+        return `exam-topic:${stableSource.length}:${(hash >>> 0).toString(16)}`;
     }
 
     /**

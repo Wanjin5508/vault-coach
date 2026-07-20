@@ -13,13 +13,35 @@ function createSession(): ExamSession {
         excludedFilePaths: [],
         forceIncludedFilePaths: [],
         questions: [
-            { id: "q1", question: "问题一", referenceAnswer: "答案一", rubric: "100 分制", sourcePaths: [] },
-            { id: "q2", question: "问题二", referenceAnswer: "答案二", rubric: "100 分制", sourcePaths: [] },
+            createQuestion("q1"),
+            createQuestion("q2"),
         ],
         userAnswers: [],
         evaluation: null,
         savedPath: null,
         status: "draft",
+    };
+}
+
+function createQuestion(id: string) {
+    return {
+        id,
+        blueprintItemId: `bp-${id}`,
+        question: `问题${id}`,
+        referenceAnswer: `答案${id}`,
+        rubric: "100 分制",
+        questionType: "explanation" as const,
+        difficulty: "basic" as const,
+        sourceChunkIds: [],
+        evidenceExcerptIds: [],
+        sourcePaths: [],
+        conceptIds: [],
+        generationMetadata: {
+            modelProvider: "ollama",
+            modelName: "test-model",
+            promptVersion: "test/v1",
+            generatedAt: 1,
+        },
     };
 }
 

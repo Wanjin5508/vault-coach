@@ -61,8 +61,10 @@ export type {
     ExamGenerationPhase,
     ExamGenerationProgress,
     ExamHistoryItem,
+    ExamDifficulty,
     ExamQuestion,
     ExamQuestionReview,
+    ExamQuestionType,
     ExamScopeAnalysisResult,
     ExamScopeAnalysisSummary,
     ExamScopeOption,
@@ -71,6 +73,7 @@ export type {
     ExamSession,
     ExamSessionStatus,
     GeneratedExamQuestionCandidate,
+    ModelPromptMetadata,
 } from "./domain/exam/exam-types";
 
 export type {

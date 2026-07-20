@@ -174,8 +174,8 @@ export interface ExamBlueprintItem {
     id: string;
     topic: string;
     learningObjective: string;
-    questionType: "explanation" | "comparison" | "application" | "reasoning" | "process";
-    difficulty: "basic" | "intermediate" | "advanced";
+    questionType: ExamQuestionType;
+    difficulty: ExamDifficulty;
     sourceChunkIds: string[];
 }
 
@@ -186,12 +186,32 @@ export interface ExamBlueprint {
     items: ExamBlueprintItem[];
 }
 
+export type ExamQuestionType = "explanation" | "comparison" | "application" | "reasoning" | "process";
+
+export type ExamDifficulty = "basic" | "intermediate" | "advanced";
+
+/** Identifies the model and prompt contract used to produce a domain value. */
+export interface ModelPromptMetadata {
+    modelProvider: string;
+    modelName: string;
+    promptVersion: string;
+}
+
 export interface ExamQuestion {
     id: string;
+    blueprintItemId: string;
     question: string;
     referenceAnswer: string;
     rubric: string;
+    questionType: ExamQuestionType;
+    difficulty: ExamDifficulty;
+    sourceChunkIds: string[];
+    evidenceExcerptIds: string[];
     sourcePaths: string[];
+    conceptIds: string[];
+    generationMetadata: ModelPromptMetadata & {
+        generatedAt: number;
+    };
 }
 
 export interface ExamEvaluationItem {
