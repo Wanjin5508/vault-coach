@@ -45,6 +45,7 @@ export type {
 } from "./domain/retrieval/retrieval-types";
 
 export type {
+    AssessmentErrorCode,
     ExamBlueprint,
     ExamBlueprintItem,
     ExamContentDecision,
@@ -62,6 +63,7 @@ export type {
     ExamGenerationProgress,
     ExamHistoryItem,
     ExamDifficulty,
+    ExamEvaluationMetadata,
     ExamQuestion,
     ExamQuestionReview,
     ExamQuestionType,

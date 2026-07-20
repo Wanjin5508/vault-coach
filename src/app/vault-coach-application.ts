@@ -4,7 +4,7 @@ import type { ApplicationEvent, ApplicationEventListener } from "./application-e
 import type { ExamEngine } from "../exam/exam-engine";
 import type { ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
 import type { ExamSessionStore } from "../exam/exam-session-store";
-import type { ExamGenerationOptions, ExamScopeSelection } from "../domain/exam/exam-types";
+import type { ExamEvaluationMetadata, ExamGenerationOptions, ExamScopeSelection } from "../domain/exam/exam-types";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
@@ -17,6 +17,7 @@ export interface VaultCoachApplicationDependencies {
     ensureKnowledgeBaseReady(): Promise<void>;
     getFullScopeLabel(): string;
     getNoEligibleChunksMessage(): string;
+    getExamEvaluationMetadata(): ExamEvaluationMetadata;
     getIndexState(): KnowledgeIndexViewState;
     rebuildIndex(signal?: AbortSignal): Promise<void>;
     clearIndex(): Promise<void>;
@@ -114,7 +115,11 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
             submitSession: async (session, answers) => ({
                 ...session,
                 userAnswers: session.questions.map((_question, index) => answers[index]?.trim() ?? ""),
-                evaluation: await dependencies.examEvaluationService.evaluate(session, answers),
+                evaluation: await dependencies.examEvaluationService.evaluate(
+                    session,
+                    answers,
+                    dependencies.getExamEvaluationMetadata(),
+                ),
                 status: "submitted",
             }),
             saveSession: async (session) => {

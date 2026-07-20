@@ -87,6 +87,16 @@ describe("exam session markdown compatibility", () => {
                 maxScore: 100,
                 feedback: "覆盖了主要概念。",
                 improvement: "补充检索融合细节。",
+                coveredKeyPoints: [],
+                missingKeyPoints: [],
+                errorCodes: [],
+                evaluationConfidence: 0,
+                evaluator: {
+                    modelProvider: "ollama",
+                    modelName: "test-model",
+                    promptVersion: "test/v1",
+                    evaluatedAt: 1,
+                },
             }],
         });
 

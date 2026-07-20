@@ -1,7 +1,7 @@
 import type { App } from "obsidian";
 import { ExamEngine } from "../exam/exam-engine";
 import { ExamSessionStore } from "../exam/exam-session-store";
-import { ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
+import { EXAM_EVALUATION_PROMPT_VERSION, ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
 import { VaultKnowledgeBase } from "../knowledge-base";
 import { LocalModelClient } from "../model-client";
 import { ObsidianDocumentFileMetadataReader } from "../infrastructure/obsidian/obsidian-document-file-metadata-reader";
@@ -15,7 +15,7 @@ import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
 import type { VaultCoachSettings } from "./config/settings-types";
-import type { ExamScopeSelection } from "../domain/exam/exam-types";
+import type { ExamEvaluationMetadata, ExamScopeSelection } from "../domain/exam/exam-types";
 import type { VectorStore } from "../domain/retrieval/retrieval-types";
 
 /** Host callbacks needed to connect application services to the Obsidian plugin lifecycle. */
@@ -135,6 +135,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         ensureKnowledgeBaseReady: () => dependencies.ensureKnowledgeBaseReady(),
         getFullScopeLabel: () => dependencies.getFullScopeLabel(),
         getNoEligibleChunksMessage: () => dependencies.getNoEligibleChunksMessage(),
+        getExamEvaluationMetadata: () => createExamEvaluationMetadata(dependencies.getSettings()),
         getIndexState: () => dependencies.getIndexState(),
         rebuildIndex: (signal) => dependencies.rebuildIndex(signal),
         clearIndex: () => dependencies.clearIndex(),
@@ -160,5 +161,16 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             await applicationInstance.dispose();
             indexCoordinator.dispose();
         },
+    };
+}
+
+function createExamEvaluationMetadata(settings: VaultCoachSettings): ExamEvaluationMetadata {
+    return {
+        modelProvider: settings.modelProvider,
+        modelName: settings.modelProvider === "openai-compatible"
+            ? settings.cloudChatModel.trim()
+            : settings.chatModel.trim(),
+        promptVersion: EXAM_EVALUATION_PROMPT_VERSION,
+        evaluatedAt: Date.now(),
     };
 }

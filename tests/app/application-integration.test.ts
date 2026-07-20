@@ -101,7 +101,23 @@ describe("VaultCoachApplication integration", () => {
             score: 90,
             maxScore: 100,
             overallFeedback: "回答完整",
-            items: [{ questionId: "q1", score: 90, maxScore: 100, feedback: "很好", improvement: "补充例子" }],
+            items: [{
+                questionId: "q1",
+                score: 90,
+                maxScore: 100,
+                feedback: "很好",
+                improvement: "补充例子",
+                coveredKeyPoints: ["检索增强生成"],
+                missingKeyPoints: [],
+                errorCodes: [],
+                evaluationConfidence: 0.9,
+                evaluator: {
+                    modelProvider: "ollama",
+                    modelName: "test-model",
+                    promptVersion: "exam-evaluation/test",
+                    evaluatedAt: 1,
+                },
+            }],
         }));
         const savedSession: ExamSession = { ...createSession(), savedPath: ".vault-coach/exams/exam-integration.md", status: "saved" };
         const save = vi.fn(async () => savedSession);
@@ -136,6 +152,12 @@ describe("VaultCoachApplication integration", () => {
             ensureKnowledgeBaseReady,
             getFullScopeLabel: () => "完整知识库",
             getNoEligibleChunksMessage: () => "没有可用片段",
+            getExamEvaluationMetadata: () => ({
+                modelProvider: "ollama",
+                modelName: "test-model",
+                promptVersion: "exam-evaluation/test",
+                evaluatedAt: 1,
+            }),
         } as unknown as VaultCoachApplicationDependencies);
         const events: string[] = [];
         application.subscribe((event) => events.push(event.type));
@@ -149,7 +171,12 @@ describe("VaultCoachApplication integration", () => {
 
         expect(ensureKnowledgeBaseReady).toHaveBeenCalledOnce();
         expect(createExamSession).toHaveBeenCalledWith("完整知识库", selection, 3, expect.objectContaining({ estimatedMaxQuestions: 3 }), {});
-        expect(evaluate).toHaveBeenCalledWith(created, ["检索增强生成"]);
+        expect(evaluate).toHaveBeenCalledWith(created, ["检索增强生成"], {
+            modelProvider: "ollama",
+            modelName: "test-model",
+            promptVersion: "exam-evaluation/test",
+            evaluatedAt: 1,
+        });
         expect(submitted).toMatchObject({ status: "submitted", userAnswers: ["检索增强生成"], evaluation: { score: 90 } });
         expect(save).toHaveBeenCalledWith(submitted);
         expect(saved.savedPath).toBe(".vault-coach/exams/exam-integration.md");

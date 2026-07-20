@@ -197,6 +197,23 @@ export interface ModelPromptMetadata {
     promptVersion: string;
 }
 
+/** Identifies the model and prompt contract used for a completed evaluation. */
+export interface ExamEvaluationMetadata extends ModelPromptMetadata {
+    evaluatedAt: number;
+}
+
+export type AssessmentErrorCode =
+    | "missing-key-point"
+    | "concept-confusion"
+    | "incorrect-causal-relation"
+    | "incorrect-definition"
+    | "incomplete-process"
+    | "incorrect-application"
+    | "unsupported-claim"
+    | "irrelevant-answer"
+    | "no-answer"
+    | "other";
+
 export interface ExamQuestion {
     id: string;
     blueprintItemId: string;
@@ -220,6 +237,11 @@ export interface ExamEvaluationItem {
     maxScore: number;
     feedback: string;
     improvement: string;
+    coveredKeyPoints: string[];
+    missingKeyPoints: string[];
+    errorCodes: AssessmentErrorCode[];
+    evaluationConfidence: number;
+    evaluator: ExamEvaluationMetadata;
 }
 
 export interface ExamEvaluation {

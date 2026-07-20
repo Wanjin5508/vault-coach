@@ -51,6 +51,26 @@ function createSession(questionCount = 1): ExamSession {
     };
 }
 
+function createEvaluationItem(questionId = "question-1") {
+    return {
+        questionId,
+        score: 80,
+        maxScore: 100,
+        feedback: "正确",
+        improvement: "补充细节",
+        coveredKeyPoints: [],
+        missingKeyPoints: [],
+        errorCodes: [],
+        evaluationConfidence: 0,
+        evaluator: {
+            modelProvider: "ollama",
+            modelName: "test-model",
+            promptVersion: "test/v1",
+            evaluatedAt: 1,
+        },
+    };
+}
+
 describe("ExamController", () => {
     it("owns exam generation state, progress, and final cleanup", async () => {
         const deferred = createDeferred<ExamSession>();
@@ -121,7 +141,7 @@ describe("ExamController", () => {
                 score: 80,
                 maxScore: 100,
                 overallFeedback: "不错",
-                items: [{ questionId: "question-1", score: 80, maxScore: 100, feedback: "正确", improvement: "补充细节" }],
+                items: [createEvaluationItem()],
             },
             status: "submitted",
         };
@@ -155,7 +175,7 @@ describe("ExamController", () => {
                 score: 80,
                 maxScore: 100,
                 overallFeedback: "不错",
-                items: [{ questionId: "question-1", score: 80, maxScore: 100, feedback: "正确", improvement: "补充细节" }],
+                items: [createEvaluationItem()],
             },
             status: "submitted",
         };
