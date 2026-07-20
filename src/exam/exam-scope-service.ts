@@ -22,6 +22,21 @@ import {
 } from "./exam-scope-rules";
 
 /**
+ * Sort vault paths by JavaScript code units rather than the host locale.
+ *
+ * `localeCompare()` produces different Chinese ordering under different ICU
+ * builds, which makes scope selection and generated exam input nondeterministic
+ * across developer machines and CI runners.
+ */
+function compareStablePaths(leftPath: string, rightPath: string): number {
+    if (leftPath === rightPath) {
+        return 0;
+    }
+
+    return leftPath < rightPath ? -1 : 1;
+}
+
+/**
  * 规则过滤后的文件分组结果。
  */
 export interface ExamResolvedScope {
@@ -72,7 +87,7 @@ export class ExamScopeService {
         }
 
         return Array.from(folderStats.entries())
-            .sort(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
+            .sort(([leftPath], [rightPath]) => compareStablePaths(leftPath, rightPath))
             .map(([folderPath, stats]) => ({
                 id: folderPath,
                 label: folderPath,
@@ -287,7 +302,7 @@ export class ExamScopeService {
 
                 return normalizedFolderPaths.some((folderPath: string) => isFileInFolder(filePath, folderPath));
             })
-            .sort((leftPath: string, rightPath: string) => leftPath.localeCompare(rightPath));
+            .sort(compareStablePaths);
     }
 
     /** Build a file option together with its permanent exclusion reason. */

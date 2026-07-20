@@ -1,10 +1,28 @@
 import type { Stat } from "obsidian";
+import type { AssessmentSessionDocumentV1 } from "../domain/assessment/assessment-types";
 import type { TranslationKey } from "../i18n";
 import type { ExamEvaluationItem, ExamHistoryItem, ExamQuestion, ExamSession } from "../domain/exam/exam-types";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
-export function formatExamSessionMarkdown(session: ExamSession, t: TranslateFn): string {
+/** Increment when the Markdown projection's own frontmatter contract changes. */
+export const EXAM_MARKDOWN_PROJECTION_VERSION = 1;
+
+interface AssessmentProjectionMetadata {
+    assessmentSchemaVersion: number;
+    assessmentSessionPath: string;
+}
+
+/**
+ * Formats the existing, user-facing Markdown report. The optional metadata is
+ * deliberately limited to frontmatter so a report remains a readable
+ * projection and never becomes a second source of assessment facts.
+ */
+export function formatExamSessionMarkdown(
+    session: ExamSession,
+    t: TranslateFn,
+    projectionMetadata?: AssessmentProjectionMetadata,
+): string {
     const lines: string[] = [
         "---",
         "vaultCoachExam: true",
@@ -13,6 +31,12 @@ export function formatExamSessionMarkdown(session: ExamSession, t: TranslateFn):
         `score: ${session.evaluation?.score ?? ""}`,
         `maxScore: ${session.evaluation?.maxScore ?? ""}`,
         `scope: ${JSON.stringify(session.scopeLabel)}`,
+        ...(projectionMetadata ? [
+            "vaultCoachAssessmentProjection: true",
+            `assessmentSchemaVersion: ${projectionMetadata.assessmentSchemaVersion}`,
+            `assessmentProjectionVersion: ${EXAM_MARKDOWN_PROJECTION_VERSION}`,
+            `assessmentSessionPath: ${JSON.stringify(projectionMetadata.assessmentSessionPath)}`,
+        ] : []),
         "---",
         "",
         `# ${session.title}`,
@@ -78,6 +102,22 @@ export function formatExamSessionMarkdown(session: ExamSession, t: TranslateFn):
     return lines.join("\n");
 }
 
+/**
+ * Formats a stable, human-readable projection of an Assessment Session JSON
+ * document. Assessment events and concept bindings intentionally stay in JSON:
+ * this report is disposable and can be regenerated without changing facts.
+ */
+export function formatAssessmentSessionMarkdown(
+    document: AssessmentSessionDocumentV1,
+    assessmentSessionPath: string,
+    t: TranslateFn,
+): string {
+    return formatExamSessionMarkdown(document.examSession, t, {
+        assessmentSchemaVersion: document.schemaVersion,
+        assessmentSessionPath,
+    });
+}
+
 export function parseExamHistoryItem(path: string, content: string, stat: Stat | null, t: TranslateFn): ExamHistoryItem {
     const title: string = parseFirstMarkdownHeading(content) || sanitizeHistoryTitle(path, t);
     const createdAt: number | null = parseNumberMetadata(content, "createdAt")
@@ -95,6 +135,28 @@ export function parseExamHistoryItem(path: string, content: string, stat: Stat |
         maxScore,
         modifiedAt: stat?.mtime ?? null,
     };
+}
+
+/** Returns a current report's stable session ID, or null for legacy Markdown. */
+export function parseExamHistorySessionId(content: string): string | null {
+    const frontmatterMatch = /^---\s*$([\s\S]*?)^---\s*$/m.exec(content);
+    const frontmatter = frontmatterMatch?.[1];
+    if (!frontmatter || !/^vaultCoachExam:\s*true\s*$/m.test(frontmatter)) {
+        return null;
+    }
+
+    const examIdMatch = /^examId:\s*(.+?)\s*$/m.exec(frontmatter);
+    const rawExamId = examIdMatch?.[1];
+    if (!rawExamId) {
+        return null;
+    }
+
+    try {
+        const parsedExamId: unknown = JSON.parse(rawExamId);
+        return typeof parsedExamId === "string" && parsedExamId.length > 0 ? parsedExamId : null;
+    } catch {
+        return null;
+    }
 }
 
 function formatDateTime(timestamp: number): string {

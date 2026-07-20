@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ChatController, type ChatControllerEvent } from "../../src/presentation/controllers/chat-controller";
+import { ChatController, type ChatControllerEvent, type ChatTimerWindow } from "../../src/presentation/controllers/chat-controller";
 import type { VaultCoachPluginApi } from "../../src/presentation/plugin-api";
 import type { StreamHandlers } from "../../src/app/chat/chat-types";
 import type { AssistantAnswer } from "../../src/domain/retrieval/retrieval-types";
@@ -14,6 +14,24 @@ function createDeferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
         promise,
         resolve(value: T): void {
             resolvePromise?.(value);
+        },
+    };
+}
+
+function createTimerWindow(): ChatTimerWindow {
+    let nextTimerId = 1;
+    const timers = new Map<number, () => void>();
+    return {
+        setInterval(callback: TimerHandler): number {
+            const timerId = nextTimerId;
+            nextTimerId += 1;
+            timers.set(timerId, callback as () => void);
+            return timerId;
+        },
+        clearInterval(timerId: number | undefined): void {
+            if (timerId !== undefined) {
+                timers.delete(timerId);
+            }
         },
     };
 }
@@ -36,7 +54,7 @@ describe("ChatController", () => {
             getKnowledgeIndexBusyState: () => ({ busy: false, phase: null, startedAt: null }),
             getMessages: () => [],
         } as unknown as VaultCoachPluginApi;
-        const controller = new ChatController(api);
+        const controller = new ChatController(api, () => createTimerWindow());
         const events: ChatControllerEvent["type"][] = [];
         controller.subscribe((event) => {
             events.push(event.type);
@@ -74,7 +92,7 @@ describe("ChatController", () => {
             streamAssistantTurn,
             getKnowledgeIndexBusyState: () => ({ busy: false, phase: null, startedAt: null }),
         } as unknown as VaultCoachPluginApi;
-        const controller = new ChatController(api);
+        const controller = new ChatController(api, () => createTimerWindow());
         const sending = controller.send("问题");
 
         await vi.waitFor(() => expect(streamAssistantTurn).toHaveBeenCalledOnce());

@@ -28,6 +28,9 @@ export interface ClipboardPort {
     writeText(text: string): Promise<void>;
 }
 
+export type ChatTimerWindow = Pick<Window, "setInterval" | "clearInterval">;
+export type ChatTimerWindowProvider = () => ChatTimerWindow;
+
 /** Owns chat interaction state and exposes UI-neutral actions. */
 export class ChatController {
     private readonly listeners: Set<ChatControllerListener> = new Set();
@@ -39,9 +42,13 @@ export class ChatController {
         firstTokenDurationMs: null,
     };
     private activeAbortController: AbortController | null = null;
-    private streamingTimerId: ReturnType<typeof globalThis.setInterval> | null = null;
+    private streamingTimerId: number | null = null;
+    private streamingTimerWindow: ChatTimerWindow | null = null;
 
-    constructor(private readonly api: VaultCoachPluginApi) {}
+    constructor(
+        private readonly api: VaultCoachPluginApi,
+        private readonly getTimerWindow: ChatTimerWindowProvider,
+    ) {}
 
     getState(): Readonly<ChatControllerState> {
         return { ...this.state };
@@ -174,7 +181,8 @@ export class ChatController {
             firstTokenDurationMs: null,
         };
         this.emitStreamingTimerUpdate();
-        this.streamingTimerId = globalThis.setInterval(() => this.emitStreamingTimerUpdate(), 1000);
+        this.streamingTimerWindow = this.getTimerWindow();
+        this.streamingTimerId = this.streamingTimerWindow.setInterval(() => this.emitStreamingTimerUpdate(), 1000);
     }
 
     private freezeStreamingTimerAtFirstToken(): void {
@@ -209,8 +217,9 @@ export class ChatController {
             return;
         }
 
-        globalThis.clearInterval(this.streamingTimerId);
+        this.streamingTimerWindow?.clearInterval(this.streamingTimerId);
         this.streamingTimerId = null;
+        this.streamingTimerWindow = null;
     }
 
     private async setBusy(busy: boolean): Promise<void> {

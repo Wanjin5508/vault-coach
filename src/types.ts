@@ -45,6 +45,7 @@ export type {
 } from "./domain/retrieval/retrieval-types";
 
 export type {
+    AssessmentErrorCode,
     ExamBlueprint,
     ExamBlueprintItem,
     ExamContentDecision,
@@ -61,8 +62,11 @@ export type {
     ExamGenerationPhase,
     ExamGenerationProgress,
     ExamHistoryItem,
+    ExamDifficulty,
+    ExamEvaluationMetadata,
     ExamQuestion,
     ExamQuestionReview,
+    ExamQuestionType,
     ExamScopeAnalysisResult,
     ExamScopeAnalysisSummary,
     ExamScopeOption,
@@ -71,7 +75,19 @@ export type {
     ExamSession,
     ExamSessionStatus,
     GeneratedExamQuestionCandidate,
+    ModelPromptMetadata,
 } from "./domain/exam/exam-types";
+
+export type {
+    AssessmentConceptBinding,
+    AssessmentExamHistoryItem,
+    AssessmentEvent,
+    AssessmentEventCreationResult,
+    AssessmentSessionIndexEntry,
+    AssessmentSessionIndexV1,
+    AssessmentSessionDocumentV1,
+    AssessmentSessionStore,
+} from "./domain/assessment/assessment-types";
 
 export type {
     LocalChatMessage,

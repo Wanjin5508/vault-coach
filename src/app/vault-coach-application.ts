@@ -1,22 +1,38 @@
 import type { ChatService } from "./chat/chat-service";
 import type { ChatApplicationApi, ExamApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, ProgressApplicationApi, VaultCoachApplicationApi } from "./application-api";
 import type { ApplicationEvent, ApplicationEventListener } from "./application-events";
+import type { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
+import { getQuestionIdsNeedingAssessmentEvents } from "../domain/assessment/assessment-event-fingerprint";
+import {
+    ASSESSMENT_SESSION_SCHEMA_VERSION,
+    type AssessmentExamHistoryItem,
+    type AssessmentConceptBinding,
+    type AssessmentEvent,
+    type AssessmentSessionDocumentV1,
+    type AssessmentSessionStore,
+} from "../domain/assessment/assessment-types";
 import type { ExamEngine } from "../exam/exam-engine";
 import type { ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
-import type { ExamSessionStore } from "../exam/exam-session-store";
-import type { ExamGenerationOptions, ExamScopeSelection } from "../domain/exam/exam-types";
+import type { ExamSessionStore, MarkdownExamHistoryRecord } from "../exam/exam-session-store";
+import type { ExamEvaluationMetadata, ExamGenerationOptions, ExamHistoryItem, ExamScopeSelection, ExamSession } from "../domain/exam/exam-types";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
     examEngine: ExamEngine;
     examEvaluationService: ExamEvaluationService;
     examSessionStore: ExamSessionStore;
+    assessmentSessionStore: AssessmentSessionStore;
+    assessmentEventFactory: AssessmentEventFactory;
+    getAssessmentSavedAt(): number;
+    getAssessmentSessionPath(sessionId: string): string;
+    getAssessmentSessionIdFromPath(path: string): string | null;
     getScopeOptions(): ReturnType<ExamEngine["getScopeOptions"]>;
     normalizeFolderPaths(folderPaths: string[]): string[];
     normalizeSelection(selection: ExamScopeSelection): ExamScopeSelection;
     ensureKnowledgeBaseReady(): Promise<void>;
     getFullScopeLabel(): string;
     getNoEligibleChunksMessage(): string;
+    getExamEvaluationMetadata(): ExamEvaluationMetadata;
     getIndexState(): KnowledgeIndexViewState;
     rebuildIndex(signal?: AbortSignal): Promise<void>;
     clearIndex(): Promise<void>;
@@ -114,29 +130,158 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
             submitSession: async (session, answers) => ({
                 ...session,
                 userAnswers: session.questions.map((_question, index) => answers[index]?.trim() ?? ""),
-                evaluation: await dependencies.examEvaluationService.evaluate(session, answers),
+                evaluation: await dependencies.examEvaluationService.evaluate(
+                    session,
+                    answers,
+                    dependencies.getExamEvaluationMetadata(),
+                ),
                 status: "submitted",
             }),
-            saveSession: async (session) => {
-                const saved = await dependencies.examSessionStore.save(session);
-                this.emit({ type: "exam-history-changed" });
-                return saved;
-            },
+            saveSession: async (session) => this.saveExamSession(session),
             exportSession: (session, folderPath) => dependencies.examSessionStore.export(session, folderPath),
-            listHistory: () => dependencies.examSessionStore.listHistory(),
-            readHistory: (path) => dependencies.examSessionStore.readHistoryContent(path),
+            listHistory: () => this.listExamHistory(),
+            readHistory: (path) => this.readExamHistoryContent(path),
             deleteSession: async (session) => {
                 await dependencies.examSessionStore.deleteSession(session);
                 this.emit({ type: "exam-history-changed" });
             },
             deleteHistory: async (path) => {
-                await dependencies.examSessionStore.deleteHistory(path);
+                await this.deleteExamHistory(path);
                 this.emit({ type: "exam-history-changed" });
             },
         };
     }
 
+    /**
+     * Persists structured facts before their disposable Markdown projection.
+     * Draft saving retains the legacy report-only behaviour for compatibility.
+     */
+    private async saveExamSession(session: ExamSession): Promise<ExamSession> {
+        const dependencies = this.dependencies;
+        if (!session.evaluation) {
+            const saved = await dependencies.examSessionStore.save(session);
+            this.emit({ type: "exam-history-changed" });
+            return saved;
+        }
+
+        const existingDocument = await dependencies.assessmentSessionStore.read(session.id);
+        const sessionWithExistingReportPath: ExamSession = existingDocument
+            && !session.savedPath
+            && existingDocument.examSession.savedPath
+            ? { ...session, savedPath: existingDocument.examSession.savedPath }
+            : session;
+        const savedSession = dependencies.examSessionStore.prepareSessionForSave(sessionWithExistingReportPath);
+        const previousEvents: readonly AssessmentEvent[] = existingDocument?.assessmentEvents ?? [];
+        const questionIdsNeedingEvents = getQuestionIdsNeedingAssessmentEvents(savedSession, previousEvents);
+        const createdEvidence = dependencies.assessmentEventFactory.createForQuestionIds(
+            savedSession,
+            questionIdsNeedingEvents,
+            previousEvents,
+        );
+        const document: AssessmentSessionDocumentV1 = existingDocument && createdEvidence.events.length === 0
+            ? existingDocument
+            : {
+                schemaVersion: ASSESSMENT_SESSION_SCHEMA_VERSION,
+                sessionId: savedSession.id,
+                savedAt: dependencies.getAssessmentSavedAt(),
+                examSession: savedSession,
+                assessmentEvents: [...previousEvents, ...createdEvidence.events],
+                conceptBindings: mergeConceptBindings(
+                    existingDocument?.conceptBindings ?? [],
+                    createdEvidence.conceptBindings,
+                ),
+            };
+
+        if (document !== existingDocument) {
+            await dependencies.assessmentSessionStore.save(document);
+        }
+
+        const projectedSession = await dependencies.examSessionStore.writeAssessmentProjection(
+            document,
+            dependencies.getAssessmentSessionPath(document.sessionId),
+        );
+        this.emit({ type: "exam-history-changed" });
+        return projectedSession;
+    }
+
+    private async listExamHistory(): Promise<ExamHistoryItem[]> {
+        const [assessmentItems, markdownRecords] = await Promise.all([
+            this.dependencies.assessmentSessionStore.listHistory(),
+            this.dependencies.examSessionStore.listMarkdownHistoryRecords(),
+        ]);
+        return mergeExamHistory(assessmentItems, markdownRecords);
+    }
+
+    private async readExamHistoryContent(path: string): Promise<string> {
+        const sessionId = this.dependencies.getAssessmentSessionIdFromPath(path);
+        if (!sessionId) {
+            return this.dependencies.examSessionStore.readHistoryContent(path);
+        }
+
+        const document = await this.dependencies.assessmentSessionStore.read(sessionId);
+        if (!document) {
+            throw new Error(`找不到 Assessment Session：${sessionId}`);
+        }
+
+        return this.dependencies.examSessionStore.readOrCreateAssessmentProjection(
+            document,
+            this.dependencies.getAssessmentSessionPath(sessionId),
+        );
+    }
+
+    private async deleteExamHistory(path: string): Promise<void> {
+        const sessionId = this.dependencies.getAssessmentSessionIdFromPath(path);
+        if (!sessionId) {
+            await this.dependencies.examSessionStore.deleteHistory(path);
+            return;
+        }
+
+        const document = await this.dependencies.assessmentSessionStore.read(sessionId);
+        if (!document) {
+            throw new Error(`找不到 Assessment Session：${sessionId}`);
+        }
+
+        await this.dependencies.examSessionStore.deleteSession(document.examSession);
+    }
+
     private emit(event: ApplicationEvent): void {
         this.listeners.forEach((listener) => listener(event));
     }
+}
+
+function mergeConceptBindings(
+    existingBindings: readonly AssessmentConceptBinding[],
+    createdBindings: readonly AssessmentConceptBinding[],
+): AssessmentConceptBinding[] {
+    const bindingsById = new Map<string, AssessmentConceptBinding>();
+    for (const binding of [...existingBindings, ...createdBindings]) {
+        bindingsById.set(binding.id, binding);
+    }
+
+    return Array.from(bindingsById.values());
+}
+
+function mergeExamHistory(
+    assessmentItems: readonly AssessmentExamHistoryItem[],
+    markdownRecords: readonly MarkdownExamHistoryRecord[],
+): ExamHistoryItem[] {
+    const knownSessionIds = new Set<string>();
+    const items: ExamHistoryItem[] = assessmentItems.map((item: AssessmentExamHistoryItem) => {
+        knownSessionIds.add(item.sessionId);
+        return item;
+    });
+
+    for (const record of markdownRecords) {
+        if (record.sessionId && knownSessionIds.has(record.sessionId)) {
+            continue;
+        }
+        if (record.sessionId) {
+            knownSessionIds.add(record.sessionId);
+        }
+        items.push(record.item);
+    }
+
+    return items.sort((left: ExamHistoryItem, right: ExamHistoryItem) => {
+        return (right.createdAt ?? right.modifiedAt ?? 0) - (left.createdAt ?? left.modifiedAt ?? 0);
+    });
 }

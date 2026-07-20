@@ -12,6 +12,9 @@ describe("LegacyPluginApiAdapter", () => {
         const rebuild = vi.fn(async () => undefined);
         const clear = vi.fn(async () => undefined);
         const abort = vi.fn();
+        const listHistory = vi.fn(async () => [{ path: ".vault-coach/assessments/sessions/exam-1.json", title: "结构化记录", createdAt: 1, score: 80, maxScore: 100, modifiedAt: 1 }]);
+        const readHistory = vi.fn(async () => "结构化报告");
+        const deleteHistory = vi.fn(async () => undefined);
         const hostRebuild = vi.fn(async () => undefined);
         const hostClear = vi.fn(async () => undefined);
         const hostAbort = vi.fn();
@@ -32,10 +35,10 @@ describe("LegacyPluginApiAdapter", () => {
                 submitSession,
                 saveSession: async (session: unknown) => session,
                 exportSession: async () => "VaultCoach Exams/exam.md",
-                listHistory: async () => [],
-                readHistory: async () => "",
+                listHistory,
+                readHistory,
                 deleteSession: async () => undefined,
-                deleteHistory: async () => undefined,
+                deleteHistory,
             },
             index: {
                 rebuild,
@@ -57,6 +60,9 @@ describe("LegacyPluginApiAdapter", () => {
         adapter.resetConversation();
         await adapter.createExamSession({ selectedFolderPaths: [], excludedFilePaths: [], forceIncludedFilePaths: [] }, 3);
         await adapter.evaluateExamSession({ id: "exam-1" } as never, ["答案"]);
+        await expect(adapter.listExamHistory()).resolves.toHaveLength(1);
+        await expect(adapter.readExamHistoryContent(".vault-coach/assessments/sessions/exam-1.json")).resolves.toBe("结构化报告");
+        await adapter.deleteExamHistory(".vault-coach/assessments/sessions/exam-1.json");
         await adapter.rebuildKnowledgeBase(false);
         await adapter.clearKnowledgeIndex(false);
         adapter.abortKnowledgeIndexBuild(false);
@@ -65,6 +71,9 @@ describe("LegacyPluginApiAdapter", () => {
         expect(resetConversation).toHaveBeenCalledOnce();
         expect(createSession).toHaveBeenCalledOnce();
         expect(submitSession).toHaveBeenCalledOnce();
+        expect(listHistory).toHaveBeenCalledOnce();
+        expect(readHistory).toHaveBeenCalledWith(".vault-coach/assessments/sessions/exam-1.json");
+        expect(deleteHistory).toHaveBeenCalledWith(".vault-coach/assessments/sessions/exam-1.json");
         expect(rebuild).toHaveBeenCalledOnce();
         expect(clear).toHaveBeenCalledOnce();
         expect(abort).toHaveBeenCalledOnce();

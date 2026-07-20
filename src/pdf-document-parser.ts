@@ -755,7 +755,7 @@ function loadPdfJs(): Promise<LoadedPdfJs> {
 function createPdfWorker(pdfjsLib: PdfJsLib, pdfjsWorker: PdfJsWorker): PdfJsWorkerInstance {
     const port: PdfJsLoopbackPort = new PdfJsLoopbackPort();
     pdfjsWorker.WorkerMessageHandler.initializeFromPort(port);
-    const pdfWorkerFactory: PdfWorkerFactory = pdfjsLib.PDFWorker as PdfWorkerFactory;
+    const pdfWorkerFactory: PdfWorkerFactory = pdfjsLib.PDFWorker;
     try {
         return new pdfWorkerFactory({
             port: port as unknown as null,

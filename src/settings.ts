@@ -5,7 +5,7 @@
  * 不直接执行检索、模型调用或考试生成逻辑。
  */
 
-import { App, DropdownComponent, PluginSettingTab, SecretComponent, Setting, normalizePath, type Plugin } from "obsidian";
+import { App, DropdownComponent, PluginSettingTab, SecretComponent, Setting, normalizePath, type Plugin, type SettingDefinitionItem } from "obsidian";
 import {
     DEFAULT_AUTO_INDEX_DEBOUNCE_MS,
     DEFAULT_AUTO_INDEX_FILE_THRESHOLD,
@@ -120,9 +120,470 @@ export class VaultCoachSettingTab extends PluginSettingTab {
     }
 
     /**
-     * Obsidian 每次打开设置页时调用，用于渲染完整设置界面。
+     * Obsidian 1.13.0 之前的设置页回退渲染入口。
      */
     display(): void {
+        this.renderSettings();
+    }
+
+    /**
+     * Declarative settings for Obsidian 1.13.0 and later.
+     *
+     * `display()` remains below as the compatibility path for older Obsidian
+     * versions supported by this plugin. Each definition mirrors the existing
+     * imperative setting, so settings search can index every user-facing name.
+     */
+    getSettingDefinitions(): SettingDefinitionItem[] {
+        return [
+            this.createHeadingDefinition("settings.title"),
+
+            this.createHeadingDefinition("settings.general.heading", "settings.general.desc"),
+            this.createTextDefinition("assistantName", "settings.assistantName.name", "settings.assistantName.desc", this.t("settings.assistantName.placeholder")),
+            this.createTextAreaDefinition("defaultGreeting", "settings.defaultGreeting.name", "settings.defaultGreeting.desc", this.t("settings.defaultGreeting.placeholder")),
+            this.createToggleDefinition("openInRightSidebarOnStartup", "settings.openOnStartup.name"),
+            this.createDropdownDefinition("defaultRetrievalMode", "settings.defaultRetrievalMode.name", "settings.defaultRetrievalMode.desc", {
+                keyword: this.t("view.retrieval.keyword"),
+                vector: this.t("view.retrieval.vector"),
+                hybrid: this.t("view.retrieval.hybrid"),
+            }),
+            this.createToggleDefinition("collapseSourcesByDefault", "settings.collapseSources.name", "settings.collapseSources.desc"),
+
+            this.createHeadingDefinition("settings.knowledge.heading", "settings.knowledge.desc"),
+            this.createDropdownDefinition("knowledgeScopeMode", "settings.scope.name", undefined, {
+                wholeVault: this.t("settings.scope.wholeVault"),
+                specificFolder: this.t("settings.scope.specificFolder"),
+            }),
+            this.createTextDefinition("knowledgeFolder", "settings.folder.name", "settings.folder.desc", this.t("settings.folder.placeholder")),
+            this.createToggleDefinition("enableMarkdownIndexing", "settings.markdownIndexing.name", "settings.markdownIndexing.desc"),
+            this.createToggleDefinition("enablePdfIndexing", "settings.pdfIndexing.name", "settings.pdfIndexing.desc"),
+            this.createNumericTextDefinition("maxPdfFileSizeMb", "settings.maxPdfFileSize.name", "settings.maxPdfFileSize.desc", DEFAULT_MAX_PDF_FILE_SIZE_MB),
+            this.createNumericTextDefinition("maxPdfPageCount", "settings.maxPdfPageCount.name", "settings.maxPdfPageCount.desc", DEFAULT_MAX_PDF_PAGE_COUNT),
+            this.createNumericTextDefinition("chunkSize", "settings.chunkSize.name", "settings.chunkSize.desc", DEFAULT_CHUNK_SIZE),
+            this.createNumericTextDefinition("chunkOverlap", "settings.chunkOverlap.name", "settings.chunkOverlap.desc", DEFAULT_CHUNK_OVERLAP),
+            this.createToggleDefinition("enableAutoIndexSync", "settings.autoSync.name", "settings.autoSync.desc"),
+            this.createNumericTextDefinition("autoIndexFileThreshold", "settings.autoSyncThreshold.name", "settings.autoSyncThreshold.desc", DEFAULT_AUTO_INDEX_FILE_THRESHOLD),
+            this.createNumericTextDefinition("autoIndexDebounceMs", "settings.autoSyncDebounce.name", "settings.autoSyncDebounce.desc", DEFAULT_AUTO_INDEX_DEBOUNCE_MS),
+            this.createNumericTextDefinition("autoIndexMaxWaitMs", "settings.autoSyncMaxWait.name", "settings.autoSyncMaxWait.desc", DEFAULT_AUTO_INDEX_MAX_WAIT_MS),
+
+            this.createHeadingDefinition("settings.exam.heading", "settings.exam.desc"),
+            this.createTextAreaDefinition("examExcludePathPatterns", "settings.examExcludePaths.name", "settings.examExcludePaths.desc", this.t("settings.examExcludePaths.placeholder")),
+            this.createToggleDefinition("enableExamSmartFiltering", "settings.examSmartFiltering.name", "settings.examSmartFiltering.desc"),
+
+            this.createHeadingDefinition("settings.model.heading", "settings.model.desc"),
+            this.createDropdownDefinition("modelProvider", "settings.model.chatProvider.name", "settings.model.chatProvider.desc", this.createModelProviderOptions()),
+            ...(this.usesLocalModel()
+                ? [this.createTextDefinition("llmBaseUrl", "settings.localServiceBaseUrl.name", "settings.localServiceBaseUrl.desc", DEFAULT_OLLAMA_BASE_URL)]
+                : []),
+            ...(this.plugin.settings.modelProvider === "ollama"
+                ? [this.createTextDefinition("chatModel", "settings.localChatModel.name", "settings.localChatModel.desc", DEFAULT_CHAT_MODEL)]
+                : [
+                    this.createTextDefinition("cloudBaseUrl", "settings.cloudChatBaseUrl.name", "settings.cloudChatBaseUrl.desc", DEFAULT_CLOUD_BASE_URL),
+                    this.createTextDefinition("cloudChatModel", "settings.cloudChatModel.name", "settings.cloudChatModel.desc", DEFAULT_CLOUD_CHAT_MODEL),
+                ]),
+            this.createDropdownDefinition("embeddingProvider", "settings.model.embeddingProvider.name", "settings.model.embeddingProvider.desc", this.createModelProviderOptions()),
+            ...(this.plugin.settings.embeddingProvider === "ollama"
+                ? [this.createTextDefinition("embeddingModel", "settings.localEmbeddingModel.name", "settings.localEmbeddingModel.desc", DEFAULT_EMBEDDING_MODEL)]
+                : [
+                    this.createTextDefinition("cloudEmbeddingBaseUrl", "settings.cloudEmbeddingBaseUrl.name", "settings.cloudEmbeddingBaseUrl.desc", DEFAULT_CLOUD_EMBEDDING_BASE_URL),
+                    this.createTextDefinition("cloudEmbeddingModel", "settings.cloudEmbeddingModel.name", "settings.cloudEmbeddingModel.desc", DEFAULT_CLOUD_EMBEDDING_MODEL),
+                ]),
+            ...(this.usesCloudModel() ? [this.createCloudApiKeyDefinition()] : []),
+            this.createTextDefinition("rerankBaseUrl", "settings.rerankBaseUrl.name", "settings.rerankBaseUrl.desc", this.t("settings.rerankBaseUrl.placeholder")),
+            this.createTextDefinition("rerankModel", "settings.rerankModel.name", "settings.rerankModel.desc", this.t("settings.rerankModel.placeholder")),
+
+            this.createHeadingDefinition("settings.memory.heading"),
+            this.createToggleDefinition("enableLongTermMemory", "settings.memory.enable.name", "settings.memory.enable.desc"),
+            this.createNumericTextDefinition("memoryTopK", "settings.memory.topK.name", "settings.memory.topK.desc", DEFAULT_MEMORY_TOP_K),
+            this.createNumericTextDefinition("memoryMaxItems", "settings.memory.maxItems.name", "settings.memory.maxItems.desc", DEFAULT_MEMORY_MAX_ITEMS),
+            this.createNumericTextDefinition("maxConversationMessages", "settings.memory.maxMessages.name", "settings.memory.maxMessages.desc", DEFAULT_MAX_CONVERSATION_MESSAGES),
+
+            this.createHeadingDefinition("settings.advanced.heading", "settings.advanced.desc"),
+            this.createToggleDefinition("enableQueryRewrite", "settings.queryRewrite.name", "settings.queryRewrite.desc"),
+            this.createToggleDefinition("enableVectorRetrieval", "settings.vectorRetrieval.name", "settings.vectorRetrieval.desc"),
+            this.createToggleDefinition("enableRerank", "settings.rerank.enable.name", "settings.rerank.enable.desc"),
+            this.createNumericTextDefinition("keywordSearchTopK", "settings.keywordTopK.name", "settings.keywordTopK.desc", DEFAULT_KEYWORD_TOP_K),
+            this.createNumericTextDefinition("vectorSearchTopK", "settings.vectorTopK.name", "settings.vectorTopK.desc", DEFAULT_VECTOR_TOP_K),
+            this.createNumericTextDefinition("hybridSearchTopK", "settings.hybridTopK.name", "settings.hybridTopK.desc", DEFAULT_HYBRID_TOP_K),
+            this.createNumericTextDefinition("rerankTopK", "settings.rerankTopK.name", "settings.rerankTopK.desc", DEFAULT_RERANK_TOP_K),
+            this.createNumericTextDefinition("contextTopK", "settings.contextTopK.name", "settings.contextTopK.desc", DEFAULT_CONTEXT_TOP_K),
+            this.createNumericTextDefinition("answerSourceLimit", "settings.sourceLimit.name", "settings.sourceLimit.desc", DEFAULT_SOURCE_LIMIT),
+            this.createNumericTextDefinition("generationTemperature", "settings.temperature.name", "settings.temperature.desc", DEFAULT_GENERATION_TEMPERATURE),
+        ];
+    }
+
+    getControlValue(key: string): unknown {
+        const value = this.plugin.settings[key as keyof VaultCoachSettings];
+        return typeof value === "number" ? String(value) : value;
+    }
+
+    async setControlValue(key: string, value: unknown): Promise<void> {
+        switch (key) {
+            case "assistantName":
+                return this.updateAssistantName(value);
+            case "defaultGreeting":
+                return this.updateDefaultGreeting(value);
+            case "openInRightSidebarOnStartup":
+            case "collapseSourcesByDefault":
+            case "enableAutoIndexSync":
+            case "enableLongTermMemory":
+            case "enableQueryRewrite":
+            case "enableRerank":
+                return this.updateBooleanSetting(key, value);
+            case "defaultRetrievalMode":
+                return this.updateDefaultRetrievalMode(value);
+            case "knowledgeScopeMode":
+                return this.updateKnowledgeScopeMode(value);
+            case "knowledgeFolder":
+                return this.updateKnowledgeFolder(value);
+            case "enableMarkdownIndexing":
+            case "enablePdfIndexing":
+                return this.updateTextIndexSetting(key, value);
+            case "maxPdfFileSizeMb":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_MAX_PDF_FILE_SIZE_MB, true);
+            case "maxPdfPageCount":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_MAX_PDF_PAGE_COUNT, true);
+            case "chunkSize":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_CHUNK_SIZE, true);
+            case "chunkOverlap":
+                return this.updateNonNegativeIntegerSetting(key, value, DEFAULT_CHUNK_OVERLAP, true);
+            case "autoIndexFileThreshold":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_AUTO_INDEX_FILE_THRESHOLD);
+            case "autoIndexDebounceMs":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_AUTO_INDEX_DEBOUNCE_MS);
+            case "autoIndexMaxWaitMs":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_AUTO_INDEX_MAX_WAIT_MS);
+            case "examExcludePathPatterns":
+                return this.updateExamExcludePathPatterns(value);
+            case "enableExamSmartFiltering":
+                return this.updateExamSmartFiltering(value);
+            case "modelProvider":
+                return this.updateModelProvider(value);
+            case "llmBaseUrl":
+                return this.updateLlmBaseUrl(value);
+            case "chatModel":
+                return this.updateTrimmedTextSetting(key, value, DEFAULT_CHAT_MODEL);
+            case "cloudBaseUrl":
+                return this.updateTrimmedTextSetting(key, value, DEFAULT_CLOUD_BASE_URL);
+            case "cloudChatModel":
+                return this.updateTrimmedTextSetting(key, value, DEFAULT_CLOUD_CHAT_MODEL);
+            case "embeddingProvider":
+                return this.updateEmbeddingProvider(value);
+            case "embeddingModel":
+                return this.updateEmbeddingTextSetting(key, value, DEFAULT_EMBEDDING_MODEL);
+            case "cloudEmbeddingBaseUrl":
+                return this.updateEmbeddingTextSetting(key, value, DEFAULT_CLOUD_EMBEDDING_BASE_URL);
+            case "cloudEmbeddingModel":
+                return this.updateEmbeddingTextSetting(key, value, DEFAULT_CLOUD_EMBEDDING_MODEL);
+            case "rerankBaseUrl":
+            case "rerankModel":
+                return this.updateTrimmedTextSetting(key, value, "");
+            case "memoryTopK":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_MEMORY_TOP_K);
+            case "memoryMaxItems":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_MEMORY_MAX_ITEMS);
+            case "maxConversationMessages":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_MAX_CONVERSATION_MESSAGES);
+            case "enableVectorRetrieval":
+                return this.updateVectorRetrieval(value);
+            case "keywordSearchTopK":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_KEYWORD_TOP_K);
+            case "vectorSearchTopK":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_VECTOR_TOP_K);
+            case "hybridSearchTopK":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_HYBRID_TOP_K);
+            case "rerankTopK":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_RERANK_TOP_K);
+            case "contextTopK":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_CONTEXT_TOP_K);
+            case "answerSourceLimit":
+                return this.updatePositiveIntegerSetting(key, value, DEFAULT_SOURCE_LIMIT);
+            case "generationTemperature":
+                return this.updateTemperature(value);
+            default:
+                return;
+        }
+    }
+
+    private createHeadingDefinition(nameKey: TranslationKey, descKey?: TranslationKey): SettingDefinitionItem {
+        return {
+            name: this.t(nameKey),
+            desc: descKey ? this.t(descKey) : undefined,
+            render: (setting) => {
+                setting.setHeading();
+            },
+        };
+    }
+
+    private createToggleDefinition(
+        key: keyof VaultCoachSettings,
+        nameKey: TranslationKey,
+        descKey?: TranslationKey,
+    ): SettingDefinitionItem {
+        return {
+            name: this.t(nameKey),
+            desc: descKey ? this.t(descKey) : undefined,
+            control: { type: "toggle", key },
+        };
+    }
+
+    private createTextDefinition(
+        key: keyof VaultCoachSettings,
+        nameKey: TranslationKey,
+        descKey?: TranslationKey,
+        placeholder?: string,
+    ): SettingDefinitionItem {
+        return {
+            name: this.t(nameKey),
+            desc: descKey ? this.t(descKey) : undefined,
+            control: { type: "text", key, placeholder },
+        };
+    }
+
+    private createTextAreaDefinition(
+        key: keyof VaultCoachSettings,
+        nameKey: TranslationKey,
+        descKey?: TranslationKey,
+        placeholder?: string,
+    ): SettingDefinitionItem {
+        return {
+            name: this.t(nameKey),
+            desc: descKey ? this.t(descKey) : undefined,
+            control: { type: "textarea", key, placeholder },
+        };
+    }
+
+    private createNumericTextDefinition(
+        key: keyof VaultCoachSettings,
+        nameKey: TranslationKey,
+        descKey: TranslationKey,
+        fallback: number,
+    ): SettingDefinitionItem {
+        return this.createTextDefinition(key, nameKey, descKey, String(fallback));
+    }
+
+    private createDropdownDefinition(
+        key: keyof VaultCoachSettings,
+        nameKey: TranslationKey,
+        descKey: TranslationKey | undefined,
+        options: Record<string, string>,
+    ): SettingDefinitionItem {
+        return {
+            name: this.t(nameKey),
+            desc: descKey ? this.t(descKey) : undefined,
+            control: { type: "dropdown", key, options },
+        };
+    }
+
+    private createCloudApiKeyDefinition(): SettingDefinitionItem {
+        return {
+            name: this.t("settings.cloudApiKey.name"),
+            desc: this.t("settings.cloudApiKey.desc"),
+            render: (setting) => {
+                setting.addComponent((containerEl) => new SecretComponent(this.app, containerEl)
+                    .setValue(this.plugin.settings.cloudApiKeySecretName)
+                    .onChange((value: string) => {
+                        void this.updateCloudApiKeySecretName(value);
+                    }));
+            },
+        };
+    }
+
+    private createModelProviderOptions(): Record<string, string> {
+        return {
+            ollama: this.t("settings.model.localOllama"),
+            "openai-compatible": this.t("settings.model.openAICompatible"),
+        };
+    }
+
+    private async updateAssistantName(value: unknown): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings.assistantName = text.trim() || "VaultCoach";
+        await this.plugin.saveSettings();
+        this.plugin.refreshAllViews();
+    }
+
+    private async updateDefaultGreeting(value: unknown): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings.defaultGreeting = text.trim() || getDefaultGreeting();
+        await this.plugin.saveSettings();
+    }
+
+    private async updateBooleanSetting(
+        key: "openInRightSidebarOnStartup" | "collapseSourcesByDefault" | "enableAutoIndexSync" | "enableLongTermMemory" | "enableQueryRewrite" | "enableRerank",
+        value: unknown,
+    ): Promise<void> {
+        const enabled = this.getBooleanValue(value);
+        if (enabled === null) return;
+        this.plugin.settings[key] = enabled;
+        await this.plugin.saveSettings();
+    }
+
+    private async updateDefaultRetrievalMode(value: unknown): Promise<void> {
+        if (value !== "keyword" && value !== "vector" && value !== "hybrid") return;
+        this.plugin.settings.defaultRetrievalMode = value;
+        this.plugin.setRuntimeRetrievalMode(value);
+        await this.plugin.saveSettings();
+        this.plugin.refreshAllViews();
+    }
+
+    private async updateKnowledgeScopeMode(value: unknown): Promise<void> {
+        if (value !== "wholeVault" && value !== "specificFolder") return;
+        this.plugin.settings.knowledgeScopeMode = value;
+        await this.plugin.saveSettings();
+        this.plugin.markKnowledgeBaseDirty();
+    }
+
+    private async updateKnowledgeFolder(value: unknown): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings.knowledgeFolder = this.normalizeFolderPath(text);
+        await this.plugin.saveSettings();
+        this.plugin.markKnowledgeBaseDirty();
+    }
+
+    private async updateTextIndexSetting(
+        key: "enableMarkdownIndexing" | "enablePdfIndexing",
+        value: unknown,
+    ): Promise<void> {
+        const enabled = this.getBooleanValue(value);
+        if (enabled === null) return;
+        this.plugin.settings[key] = enabled;
+        await this.plugin.saveSettings();
+        this.plugin.markKnowledgeBaseDirty();
+    }
+
+    private async updatePositiveIntegerSetting(
+        key: "maxPdfFileSizeMb" | "maxPdfPageCount" | "chunkSize" | "autoIndexFileThreshold" | "autoIndexDebounceMs" | "autoIndexMaxWaitMs" | "memoryTopK" | "memoryMaxItems" | "maxConversationMessages" | "keywordSearchTopK" | "vectorSearchTopK" | "hybridSearchTopK" | "rerankTopK" | "contextTopK" | "answerSourceLimit",
+        value: unknown,
+        fallback: number,
+        marksTextIndexDirty = false,
+    ): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings[key] = this.parsePositiveInteger(text, fallback);
+        await this.plugin.saveSettings();
+        if (marksTextIndexDirty) this.plugin.markKnowledgeBaseDirty();
+    }
+
+    private async updateNonNegativeIntegerSetting(
+        key: "chunkOverlap",
+        value: unknown,
+        fallback: number,
+        marksTextIndexDirty = false,
+    ): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings[key] = this.parseNonNegativeInteger(text, fallback);
+        await this.plugin.saveSettings();
+        if (marksTextIndexDirty) this.plugin.markKnowledgeBaseDirty();
+    }
+
+    private async updateExamExcludePathPatterns(value: unknown): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings.examExcludePathPatterns = text;
+        await this.plugin.saveSettings();
+        this.plugin.refreshAllViews();
+    }
+
+    private async updateExamSmartFiltering(value: unknown): Promise<void> {
+        const enabled = this.getBooleanValue(value);
+        if (enabled === null) return;
+        this.plugin.settings.enableExamSmartFiltering = enabled;
+        await this.plugin.saveSettings();
+        this.plugin.refreshAllViews();
+    }
+
+    private async updateModelProvider(value: unknown): Promise<void> {
+        if (value !== "ollama" && value !== "openai-compatible") return;
+        this.plugin.settings.modelProvider = value;
+        await this.plugin.saveSettings();
+        this.refreshDeclarativeSettings();
+    }
+
+    private async updateLlmBaseUrl(value: unknown): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings.llmBaseUrl = text.trim() || DEFAULT_OLLAMA_BASE_URL;
+        await this.plugin.saveSettings();
+        if (this.plugin.settings.embeddingProvider === "ollama") {
+            this.plugin.markVectorIndexDirty();
+        }
+    }
+
+    private async updateTrimmedTextSetting(
+        key: "chatModel" | "cloudBaseUrl" | "cloudChatModel" | "rerankBaseUrl" | "rerankModel",
+        value: unknown,
+        fallback: string,
+    ): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings[key] = text.trim() || fallback;
+        await this.plugin.saveSettings();
+    }
+
+    private async updateEmbeddingProvider(value: unknown): Promise<void> {
+        if (value !== "ollama" && value !== "openai-compatible") return;
+        this.plugin.settings.embeddingProvider = value;
+        await this.plugin.saveSettings();
+        this.plugin.markVectorIndexDirty();
+        this.refreshDeclarativeSettings();
+    }
+
+    private async updateEmbeddingTextSetting(
+        key: "embeddingModel" | "cloudEmbeddingBaseUrl" | "cloudEmbeddingModel",
+        value: unknown,
+        fallback: string,
+    ): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings[key] = text.trim() || fallback;
+        await this.plugin.saveSettings();
+        this.plugin.markVectorIndexDirty();
+    }
+
+    private async updateCloudApiKeySecretName(value: string): Promise<void> {
+        this.plugin.settings.cloudApiKeySecretName = value;
+        await this.plugin.saveSettings();
+    }
+
+    private async updateVectorRetrieval(value: unknown): Promise<void> {
+        const enabled = this.getBooleanValue(value);
+        if (enabled === null) return;
+        this.plugin.settings.enableVectorRetrieval = enabled;
+        await this.plugin.saveSettings();
+        this.plugin.markVectorIndexDirty();
+    }
+
+    private async updateTemperature(value: unknown): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        this.plugin.settings.generationTemperature = this.parseTemperature(text, DEFAULT_GENERATION_TEMPERATURE);
+        await this.plugin.saveSettings();
+    }
+
+    private getStringValue(value: unknown): string | null {
+        return typeof value === "string" ? value : null;
+    }
+
+    private getBooleanValue(value: unknown): boolean | null {
+        return typeof value === "boolean" ? value : null;
+    }
+
+    /**
+     * Refresh provider-dependent definitions on Obsidian 1.13+ without
+     * requiring the newer `SettingTab.update()` API on older installations.
+     */
+    private refreshDeclarativeSettings(): void {
+        const settingTab = this as unknown as Record<string, unknown>;
+        const update = settingTab["update"];
+        if (typeof update === "function") {
+            update.call(this);
+            return;
+        }
+
         this.renderSettings();
     }
 

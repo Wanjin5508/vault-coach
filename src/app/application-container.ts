@@ -1,7 +1,13 @@
 import type { App } from "obsidian";
+import { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
 import { ExamEngine } from "../exam/exam-engine";
 import { ExamSessionStore } from "../exam/exam-session-store";
-import { ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
+import { EXAM_EVALUATION_PROMPT_VERSION, ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
+import {
+    getAssessmentSessionIdFromPath,
+    getAssessmentSessionPath,
+    JsonAssessmentSessionStore,
+} from "../infrastructure/storage/json-assessment-session-store";
 import { VaultKnowledgeBase } from "../knowledge-base";
 import { LocalModelClient } from "../model-client";
 import { ObsidianDocumentFileMetadataReader } from "../infrastructure/obsidian/obsidian-document-file-metadata-reader";
@@ -15,7 +21,8 @@ import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
 import type { VaultCoachSettings } from "./config/settings-types";
-import type { ExamScopeSelection } from "../domain/exam/exam-types";
+import type { ExamEvaluationMetadata, ExamScopeSelection } from "../domain/exam/exam-types";
+import type { AssessmentSessionStore } from "../domain/assessment/assessment-types";
 import type { VectorStore } from "../domain/retrieval/retrieval-types";
 
 /** Host callbacks needed to connect application services to the Obsidian plugin lifecycle. */
@@ -49,6 +56,8 @@ export interface ApplicationContainerServices {
     examEngine: ExamEngine;
     examEvaluationService: ExamEvaluationService;
     examSessionStore: ExamSessionStore;
+    assessmentSessionStore: AssessmentSessionStore;
+    assessmentEventFactory: AssessmentEventFactory;
     memoryService: LongTermMemoryService;
     persistentStore: VaultCoachPersistentStore;
     indexCoordinator: KnowledgeIndexCoordinator;
@@ -101,6 +110,11 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         dependencies.app,
         (key, replacements) => dependencies.translate(key, replacements),
     );
+    const assessmentSessionStore = new JsonAssessmentSessionStore(dependencies.app.vault.adapter);
+    let assessmentEventSequence = 0;
+    const assessmentEventFactory = new AssessmentEventFactory({
+        createEventId: () => createAssessmentEventId(assessmentEventSequence++),
+    });
 
     let application: VaultCoachApplication | null = null;
     const indexCoordinator = new KnowledgeIndexCoordinator(() => application?.notifyIndexStateChanged());
@@ -120,6 +134,11 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         examEngine,
         examEvaluationService,
         examSessionStore,
+        assessmentSessionStore,
+        assessmentEventFactory,
+        getAssessmentSavedAt: () => Date.now(),
+        getAssessmentSessionPath,
+        getAssessmentSessionIdFromPath,
         getScopeOptions: () => {
             const stats = knowledgeBase.getStats();
             return [{
@@ -135,6 +154,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         ensureKnowledgeBaseReady: () => dependencies.ensureKnowledgeBaseReady(),
         getFullScopeLabel: () => dependencies.getFullScopeLabel(),
         getNoEligibleChunksMessage: () => dependencies.getNoEligibleChunksMessage(),
+        getExamEvaluationMetadata: () => createExamEvaluationMetadata(dependencies.getSettings()),
         getIndexState: () => dependencies.getIndexState(),
         rebuildIndex: (signal) => dependencies.rebuildIndex(signal),
         clearIndex: () => dependencies.clearIndex(),
@@ -152,6 +172,8 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             examEngine,
             examEvaluationService,
             examSessionStore,
+            assessmentSessionStore,
+            assessmentEventFactory,
             memoryService,
             persistentStore,
             indexCoordinator,
@@ -160,5 +182,26 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             await applicationInstance.dispose();
             indexCoordinator.dispose();
         },
+    };
+}
+
+function createAssessmentEventId(sequence: number): string {
+    const randomValues = new Uint32Array(2);
+    if (window.crypto?.getRandomValues) {
+        window.crypto.getRandomValues(randomValues);
+        return `assessment-event-${randomValues[0]?.toString(36) ?? "0"}-${randomValues[1]?.toString(36) ?? "0"}-${sequence.toString(36)}`;
+    }
+
+    return `assessment-event-${Date.now().toString(36)}-${sequence.toString(36)}`;
+}
+
+function createExamEvaluationMetadata(settings: VaultCoachSettings): ExamEvaluationMetadata {
+    return {
+        modelProvider: settings.modelProvider,
+        modelName: settings.modelProvider === "openai-compatible"
+            ? settings.cloudChatModel.trim()
+            : settings.chatModel.trim(),
+        promptVersion: EXAM_EVALUATION_PROMPT_VERSION,
+        evaluatedAt: Date.now(),
     };
 }

@@ -18,6 +18,9 @@ main.js
 # obsidian
 data.json
 
+# Vault-local exam facts, reports, and recovery files
+.vault-coach/
+
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
 
@@ -26,3 +29,6 @@ data.json
 .VSCodeCounter
 
 kb/
+runtime-state.json
+index-snapshot.json
+knowledge-index/
