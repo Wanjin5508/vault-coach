@@ -1,0 +1,21 @@
+[
+  {
+    "id": "pdf:papers/retrieval.pdf::page-1::0",
+    "documentId": "pdf:papers/retrieval.pdf",
+    "documentType": "pdf",
+    "filePath": "papers/retrieval.pdf",
+    "fileName": "retrieval.pdf",
+    "headingPath": ["Page 1"],
+    "primaryHeading": "Page 1",
+    "text": "A normalized PDF page-level chunk for the deterministic graph fixture.",
+    "searchableText": "retrieval Page 1 A normalized PDF page-level chunk for the deterministic graph fixture.",
+    "locator": {
+      "type": "pdf",
+      "filePath": "papers/retrieval.pdf",
+      "pageStart": 1,
+      "pageEnd": 1
+    },
+    "contentKind": "native-text",
+    "extractionQuality": 1
+  }
+]
