@@ -3,6 +3,7 @@ import {
     createGraphEdgeId,
     createSectionNodeId,
     createTagNodeId,
+    isGraphSourceLocationsSorted,
     isVaultCoachHiddenPath,
     normalizeGraphPath,
     normalizeGraphTagName,
@@ -55,6 +56,8 @@ describe("deterministic graph identifiers", () => {
             firstSource,
             { ...laterSource, chunkIds: ["chunk-a", "chunk-b"] },
         ]);
+        expect(isGraphSourceLocationsSorted([laterSource])).toBe(false);
+        expect(isGraphSourceLocationsSorted(sortAndDedupeGraphSources([laterSource, firstSource]))).toBe(true);
 
         const edges: KnowledgeGraphEdge[] = [
             createLinkEdge("edge:links_to:markdown:notes/z.md:markdown:notes/target.md", laterSource),

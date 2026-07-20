@@ -123,8 +123,12 @@ export function sortAndDedupeGraphSources(sources: readonly GraphSourceLocation[
 }
 
 export function isGraphSourceLocationsSorted(sources: readonly GraphSourceLocation[]): boolean {
-    return isSorted(sources, compareGraphSourceLocations)
-        && sources.length === sortAndDedupeGraphSources(sources).length;
+    const canonicalSources = sortAndDedupeGraphSources(sources);
+    return sources.length === canonicalSources.length
+        && sources.every((source: GraphSourceLocation, index: number) => {
+            const canonicalSource: GraphSourceLocation | undefined = canonicalSources[index];
+            return canonicalSource !== undefined && areGraphSourceLocationsEqual(source, canonicalSource);
+        });
 }
 
 export function isGraphNodesSorted(nodes: readonly KnowledgeGraphNode[]): boolean {
@@ -169,6 +173,19 @@ function createGraphSourceLocationKey(source: GraphSourceLocation): string {
         endLine: source.endLine ?? null,
         endColumn: source.endColumn ?? null,
     });
+}
+
+function areGraphSourceLocationsEqual(left: GraphSourceLocation, right: GraphSourceLocation): boolean {
+    return left.sourceFilePath === right.sourceFilePath
+        && left.sourceDocumentId === right.sourceDocumentId
+        && left.sourceKind === right.sourceKind
+        && left.targetFilePath === right.targetFilePath
+        && left.startLine === right.startLine
+        && left.startColumn === right.startColumn
+        && left.endLine === right.endLine
+        && left.endColumn === right.endColumn
+        && left.chunkIds.length === right.chunkIds.length
+        && left.chunkIds.every((chunkId: string, index: number) => chunkId === right.chunkIds[index]);
 }
 
 function cloneGraphNode(node: KnowledgeGraphNode): KnowledgeGraphNode {
