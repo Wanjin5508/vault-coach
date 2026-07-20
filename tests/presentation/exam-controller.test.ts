@@ -134,4 +134,73 @@ describe("ExamController", () => {
         expect(controller.getState().session?.savedPath).toBe("VaultCoach Exams/exam.md");
         expect(state.session).toBeNull();
     });
+
+    it("keeps the evaluated session available when automatic saving fails", async () => {
+        const evaluatedSession: ExamSession = {
+            ...createSession(),
+            userAnswers: ["用户答案"],
+            evaluation: {
+                score: 80,
+                maxScore: 100,
+                overallFeedback: "不错",
+                items: [{ questionId: "question-1", score: 80, maxScore: 100, feedback: "正确", improvement: "补充细节" }],
+            },
+            status: "submitted",
+        };
+        const saveError = new Error("disk unavailable");
+        const errorLogger = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const evaluateExamSession = vi.fn(async () => evaluatedSession);
+        const saveExamSession = vi.fn(async () => Promise.reject(saveError));
+        const api = {
+            settings: { enableExamSmartFiltering: true },
+            getExamScopeOptions: () => [],
+            createExamSession: vi.fn(async () => createSession()),
+            evaluateExamSession,
+            saveExamSession,
+        } as unknown as VaultCoachPluginApi;
+        const controller = new ExamController(api, (key) => key);
+        const events: ExamControllerEvent[] = [];
+        controller.subscribe((event) => {
+            events.push(event);
+        });
+
+        await controller.createExam(false);
+        await controller.submitAnswers(["用户答案"]);
+
+        expect(evaluateExamSession).toHaveBeenCalledOnce();
+        expect(saveExamSession).toHaveBeenCalledWith(evaluatedSession);
+        expect(controller.getState()).toMatchObject({ busy: false, phase: "review", session: evaluatedSession });
+        expect(controller.getState().session?.savedPath).toBeNull();
+        expect(events.some((event) => event.type === "notice" && event.key === "exam.notice.saveFailed")).toBe(true);
+        expect(errorLogger).toHaveBeenCalledWith("[VaultCoachExamController] 自动保存考试结果失败", saveError);
+    });
+
+    it("returns to answer-taking and does not save when evaluation fails", async () => {
+        const evaluationError = new Error("model unavailable");
+        const errorLogger = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const evaluateExamSession = vi.fn(async () => Promise.reject(evaluationError));
+        const saveExamSession = vi.fn(async (session: ExamSession) => session);
+        const api = {
+            settings: { enableExamSmartFiltering: true },
+            getExamScopeOptions: () => [],
+            createExamSession: vi.fn(async () => createSession()),
+            evaluateExamSession,
+            saveExamSession,
+        } as unknown as VaultCoachPluginApi;
+        const controller = new ExamController(api, (key) => key);
+        const events: ExamControllerEvent[] = [];
+        controller.subscribe((event) => {
+            events.push(event);
+        });
+
+        await controller.createExam(false);
+        await controller.submitAnswers(["用户答案"]);
+
+        expect(evaluateExamSession).toHaveBeenCalledOnce();
+        expect(saveExamSession).not.toHaveBeenCalled();
+        expect(controller.getState()).toMatchObject({ busy: false, phase: "taking" });
+        expect(controller.getState().session?.userAnswers).toEqual(["用户答案"]);
+        expect(events.some((event) => event.type === "notice" && event.key === "exam.notice.evaluateFailed")).toBe(true);
+        expect(errorLogger).toHaveBeenCalledWith("[VaultCoachExamController] 考试评分失败", evaluationError);
+    });
 });

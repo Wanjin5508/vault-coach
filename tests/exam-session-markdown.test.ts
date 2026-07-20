@@ -91,6 +91,20 @@ describe("exam session markdown compatibility", () => {
         expect(markdown).toContain("[[知识库/RAG/混合检索.md]]");
     });
 
+    it("preserves the current unevaluated-report contract", () => {
+        const session: ExamSession = { ...createSession(null), userAnswers: [] };
+        const markdown = formatExamSessionMarkdown(session, translate);
+
+        expect(markdown).toContain("vaultCoachExam: true");
+        expect(markdown).toContain("score: ");
+        expect(markdown).toContain("maxScore: ");
+        expect(markdown).not.toContain("## 总体反馈");
+        expect(markdown).not.toContain("\n#### 评分\n");
+        expect(markdown).toContain("未作答");
+        expect(markdown).toContain("#### 参考答案");
+        expect(markdown).toContain("#### 评分标准");
+    });
+
     it("reads current frontmatter history", () => {
         const stat: Stat = { ctime: 1704164645000, mtime: 1704165000000, size: 256, type: "file" };
         const item = parseExamHistoryItem(".vault-coach/exams/current.md", readFixture("current.md"), stat, translate);
@@ -132,5 +146,23 @@ describe("exam session markdown compatibility", () => {
         expect(item.createdAt).toBe(Date.parse("2024-02-03T04:05:06.000Z"));
         expect(item.score).toBe(64);
         expect(item.maxScore).toBe(100);
+    });
+
+    it("reads a legacy unscored record without inventing scores", () => {
+        const item = parseExamHistoryItem(
+            ".vault-coach/exams/legacy-unscored.md",
+            readFixture("legacy-unscored.md"),
+            null,
+            translate,
+        );
+
+        expect(item).toEqual({
+            path: ".vault-coach/exams/legacy-unscored.md",
+            title: "未评分的旧考试记录",
+            createdAt: Date.parse("2024-03-04T05:06:07.000Z"),
+            score: null,
+            maxScore: null,
+            modifiedAt: null,
+        });
     });
 });

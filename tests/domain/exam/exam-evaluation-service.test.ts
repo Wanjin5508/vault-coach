@@ -76,4 +76,26 @@ describe("ExamEvaluationService", () => {
         expect(evaluation.items.map((item) => item.score)).toEqual([0, 100]);
         expect(warn).toHaveBeenCalledOnce();
     });
+
+    it("keeps the existing 100-point contract when the model reports another maximum", async () => {
+        const service = new ExamEvaluationService(gateway(JSON.stringify({
+            score: 25,
+            max_score: 40,
+            overall_feedback: "按模型最大分数计算。",
+            items: [
+                { question_id: "q1", score: 25, max_score: 40, feedback: "反馈一", improvement: "建议一" },
+                { question_id: "q2", score: 40, max_score: 40, feedback: "反馈二", improvement: "建议二" },
+            ],
+        })));
+
+        await expect(service.evaluate(createSession(), ["回答一", "回答二"])).resolves.toEqual({
+            score: 25,
+            maxScore: 100,
+            overallFeedback: "按模型最大分数计算。",
+            items: [
+                { questionId: "q1", score: 25, maxScore: 100, feedback: "反馈一", improvement: "建议一" },
+                { questionId: "q2", score: 40, maxScore: 100, feedback: "反馈二", improvement: "建议二" },
+            ],
+        });
+    });
 });
