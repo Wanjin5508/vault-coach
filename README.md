@@ -80,6 +80,19 @@ It supports:
 
 Use it for interview preparation, course review, paper reading, project onboarding, and self-checking technical notes.
 
+#### Structured exam records
+
+After a scored exam is saved, Vault Coach stores the durable exam facts in the current vault at:
+
+```text
+.vault-coach/assessments/sessions/<session-id>.json
+.vault-coach/assessments/index-v1.json
+```
+
+The session JSON is the source of truth. It contains the exam, answers, grading evidence, source references, concept bindings, and evaluator metadata. The matching Markdown file in `.vault-coach/exams/` is a readable projection: it can be deleted and rebuilt from the JSON without changing the evidence. History keeps structured records visible even when their Markdown report is missing.
+
+These files stay inside your vault, may contain note excerpts, answers, and model feedback, and are not telemetry or a cloud sync service. Treat them as private vault data; do not commit them to a plugin repository. Exported Markdown reports remain ordinary vault files under the folder you choose.
+
 ![alt text](assets/screenshots/exam-mode-scope.png)
 
 Users can also manually manage the scope of test questions:

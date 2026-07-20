@@ -80,6 +80,7 @@ export type {
 
 export type {
     AssessmentConceptBinding,
+    AssessmentExamHistoryItem,
     AssessmentEvent,
     AssessmentEventCreationResult,
     AssessmentSessionIndexEntry,

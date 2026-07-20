@@ -80,6 +80,19 @@ Vault Coach 可以索引 vault 中带原生文本层的 PDF。插件会提取 PD
 
 适合用于面试准备、课程复习、论文阅读、项目交接和技术笔记自测。
 
+#### 结构化考试记录
+
+评分后的考试会将可追溯事实保存到当前 vault 的以下位置：
+
+```text
+.vault-coach/assessments/sessions/<session-id>.json
+.vault-coach/assessments/index-v1.json
+```
+
+session JSON 是唯一事实源，包含考试、用户答案、评分证据、来源引用、concept binding 和评分模型元数据。`.vault-coach/exams/` 中对应的 Markdown 是可读投影：删除后可由 JSON 重建，且不会改动证据。即使 Markdown 报告缺失，历史列表仍会显示结构化记录。
+
+这些文件只保存在你的 vault 中，可能包含笔记摘录、答案和模型反馈；它们不是遥测或云同步服务。请把它们当作私有 vault 数据，不要提交到插件仓库。导出的 Markdown 报告仍是你选择目录中的普通 vault 文件。
+
 ![alt text](assets/screenshots/exam-mode-scope.png.png)
 
 用户同样可以手动管理测试题目的范围：
