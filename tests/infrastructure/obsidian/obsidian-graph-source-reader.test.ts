@@ -158,6 +158,39 @@ describe("ObsidianGraphSourceReader", () => {
         ]));
         expect(result.documents.some((document) => document.filePath.startsWith(".vault-coach/"))).toBe(false);
     });
+
+    it("ignores malformed legacy heading components instead of aborting a graph rebuild", () => {
+        const file = createFile("notes/legacy.md", 1704164645005);
+        const app = {
+            vault: {
+                getAbstractFileByPath: (path: string): TFile | null => path === file.path ? file : null,
+            },
+            metadataCache: {
+                getFileCache: (): null => null,
+                getFirstLinkpathDest: (): null => null,
+                resolvedLinks: {},
+            },
+        } as unknown as App;
+        const legacyChunk = createMarkdownChunk(
+            "legacy-heading",
+            file.path,
+            ["Legacy", undefined] as unknown as string[],
+        );
+        const reader = new ObsidianGraphSourceReader(
+            app,
+            createDocumentIndex([createRecord(file.path, "markdown", "legacy-hash")], [legacyChunk]),
+        );
+
+        const result = reader.readAll();
+
+        expect(result.diagnostics).toEqual([]);
+        expect(result.documents[0]?.sections).toEqual([{
+            headingPath: ["Legacy"],
+            occurrence: 0,
+            chunkIds: ["legacy-heading"],
+            locator: { type: "markdown", filePath: "notes/legacy.md", heading: "Legacy" },
+        }]);
+    });
 });
 
 function getDocument(

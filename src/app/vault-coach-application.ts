@@ -1,5 +1,5 @@
 import type { ChatService } from "./chat/chat-service";
-import type { ChatApplicationApi, ExamApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, ProgressApplicationApi, VaultCoachApplicationApi } from "./application-api";
+import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, ProgressApplicationApi, VaultCoachApplicationApi } from "./application-api";
 import type { ApplicationEvent, ApplicationEventListener } from "./application-events";
 import type { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
 import { getQuestionIdsNeedingAssessmentEvents } from "../domain/assessment/assessment-event-fingerprint";
@@ -15,6 +15,7 @@ import type { ExamEngine } from "../exam/exam-engine";
 import type { ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
 import type { ExamSessionStore, MarkdownExamHistoryRecord } from "../exam/exam-session-store";
 import type { ExamEvaluationMetadata, ExamGenerationOptions, ExamHistoryItem, ExamScopeSelection, ExamSession } from "../domain/exam/exam-types";
+import type { KnowledgeGraphService } from "./graph/knowledge-graph-service";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
@@ -37,6 +38,7 @@ export interface VaultCoachApplicationDependencies {
     rebuildIndex(signal?: AbortSignal): Promise<void>;
     clearIndex(): Promise<void>;
     abortIndex(): void;
+    knowledgeGraphService: KnowledgeGraphService;
 }
 
 /** Application facade with grouped use-case APIs and no Obsidian UI dependency. */
@@ -44,6 +46,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
     readonly chat: ChatApplicationApi;
     readonly exam: ExamApplicationApi;
     readonly index: IndexApplicationApi;
+    readonly graph: GraphApplicationApi;
     readonly progress: ProgressApplicationApi = { isAvailable: () => false };
     private readonly listeners: Set<ApplicationEventListener> = new Set();
 
@@ -80,6 +83,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
             },
             getState: () => dependencies.getIndexState(),
         };
+        this.graph = this.createGraphApi();
     }
 
     subscribe(listener: ApplicationEventListener): () => void {
@@ -149,6 +153,22 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 await this.deleteExamHistory(path);
                 this.emit({ type: "exam-history-changed" });
             },
+        };
+    }
+
+    private createGraphApi(): GraphApplicationApi {
+        const graphService = this.dependencies.knowledgeGraphService;
+        return {
+            rebuild: async (signal) => {
+                const snapshot = await graphService.rebuildAll(signal);
+                this.emit({ type: "graph-state-changed" });
+                return snapshot;
+            },
+            getSnapshot: async () => graphService.getSnapshot(),
+            getNode: async (nodeId) => graphService.getNode(nodeId),
+            findEdgesForNode: async (nodeId) => graphService.findEdgesForNode(nodeId),
+            getEdgeSources: async (edgeId) => graphService.getEdgeSources(edgeId),
+            checkIntegrity: async () => graphService.checkIntegrity(),
         };
     }
 

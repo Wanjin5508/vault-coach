@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { VaultCoachApplication, type VaultCoachApplicationDependencies } from "../../src/app/vault-coach-application";
 import { AssessmentEventFactory } from "../../src/domain/assessment/assessment-event-factory";
+import { DeterministicGraphBuilder } from "../../src/domain/graph/deterministic-graph-builder";
+import { KnowledgeGraphService, type GraphSourceReader } from "../../src/app/graph/knowledge-graph-service";
+import type { GraphStore } from "../../src/domain/graph/graph-store";
+import type { GraphSnapshotV1, GraphSourceDocument } from "../../src/domain/graph/graph-types";
 import type { AssessmentExamHistoryItem, AssessmentSessionDocumentV1 } from "../../src/domain/assessment/assessment-types";
 import type { ExamEvaluation, ExamSession } from "../../src/domain/exam/exam-types";
 import type { MarkdownExamHistoryRecord } from "../../src/exam/exam-session-store";
@@ -26,6 +30,37 @@ describe("VaultCoachApplication", () => {
         expect(appendUserMessage).toHaveBeenCalledWith("问题");
         expect(events).toEqual(["conversation-changed", "conversation-changed"]);
         expect(application.progress.isAvailable()).toBe(false);
+    });
+
+    it("exposes graph rebuild and read APIs without leaking mutable snapshot state", async () => {
+        const store = new ApplicationGraphStore();
+        const graphService = new KnowledgeGraphService(createApplicationGraphReader(), new DeterministicGraphBuilder(), store);
+        const application = new VaultCoachApplication({
+            chatService: {
+                getMessages: () => [],
+                appendUserMessage: async () => undefined,
+                streamAssistantTurn: async () => ({ text: "", sources: [], retrievalModeUsed: "keyword", rewriteResult: { originalQuery: "", rewrittenQuery: "", useRewrite: false } }),
+                resetConversation: () => undefined,
+            },
+            knowledgeGraphService: graphService,
+        } as unknown as VaultCoachApplicationDependencies);
+        const events: string[] = [];
+        application.subscribe((event) => events.push(event.type));
+
+        const rebuilt = await application.graph.rebuild();
+        rebuilt.nodes.pop();
+        const snapshot = await application.graph.getSnapshot();
+        const edge = (await application.graph.findEdgesForNode("markdown:notes/overview.md"))
+            .find((candidate) => candidate.type === "links_to");
+        if (!snapshot || !edge) throw new Error("Expected graph API facts.");
+        edge.sources[0]?.chunkIds.push("mutated");
+
+        expect(snapshot.nodes).toHaveLength(3);
+        expect(await application.graph.getNode("markdown:notes/details.md")).toMatchObject({ type: "document" });
+        expect((await application.graph.findEdgesForNode("markdown:notes/overview.md"))
+            .find((candidate) => candidate.type === "links_to")?.sources[0]?.chunkIds).toEqual(["link-chunk"]);
+        expect(await application.graph.checkIntegrity()).toEqual({ valid: true, issues: [] });
+        expect(events).toEqual(["graph-state-changed"]);
     });
 
     it("persists assessment facts before the Markdown projection and then notifies history", async () => {
@@ -313,5 +348,50 @@ function createEvaluation(overrides: { score?: number; evaluatedAt?: number } = 
                 evaluatedAt: overrides.evaluatedAt ?? 100,
             },
         }],
+    };
+}
+
+class ApplicationGraphStore implements GraphStore {
+    private snapshot: GraphSnapshotV1 | null = null;
+
+    async load(): Promise<GraphSnapshotV1 | null> {
+        return this.snapshot;
+    }
+
+    async save(snapshot: GraphSnapshotV1): Promise<void> {
+        this.snapshot = snapshot;
+    }
+
+    async clear(): Promise<void> {
+        this.snapshot = null;
+    }
+}
+
+function createApplicationGraphReader(): GraphSourceReader {
+    const documents: GraphSourceDocument[] = [{
+        documentId: "markdown:notes/details.md",
+        filePath: "notes/details.md",
+        documentType: "markdown",
+        title: "details",
+        contentHash: "details-hash",
+        modifiedAt: 1,
+        sections: [],
+        links: [],
+        embeds: [],
+        tags: [],
+    }, {
+        documentId: "markdown:notes/overview.md",
+        filePath: "notes/overview.md",
+        documentType: "markdown",
+        title: "overview",
+        contentHash: "overview-hash",
+        modifiedAt: 2,
+        sections: [],
+        links: [{ targetFilePath: "notes/details.md", chunkIds: ["link-chunk"] }],
+        embeds: [],
+        tags: [{ rawName: "#tag", chunkIds: [] }],
+    }];
+    return {
+        readAll: () => ({ documents, diagnostics: [] }),
     };
 }

@@ -18,9 +18,10 @@ export function stableGraphHash(value: string): string {
     return `${value.length}:${(hash >>> 0).toString(16)}`;
 }
 
-export function normalizeGraphPath(value: string): string {
+export function normalizeGraphPath(value: unknown): string {
+    const rawPath = typeof value === "string" ? value : "";
     const segments: string[] = [];
-    for (const segment of value.normalize("NFC").trim().replace(/\\/g, "/").split("/")) {
+    for (const segment of rawPath.normalize("NFC").trim().replace(/\\/g, "/").split("/")) {
         const normalizedSegment: string = segment.trim();
         if (normalizedSegment.length === 0 || normalizedSegment === ".") continue;
         if (normalizedSegment === "..") {
@@ -33,13 +34,15 @@ export function normalizeGraphPath(value: string): string {
     return segments.join("/");
 }
 
-export function normalizeHeadingPath(headingPath: readonly string[]): string[] {
+export function normalizeHeadingPath(headingPath: readonly unknown[] | null | undefined): string[] {
+    if (!Array.isArray(headingPath)) return [];
     return headingPath
+        .filter((heading: unknown): heading is string => typeof heading === "string")
         .map((heading: string) => normalizeGraphText(heading))
         .filter((heading: string) => heading.length > 0);
 }
 
-export function normalizeGraphTagName(value: string): string {
+export function normalizeGraphTagName(value: unknown): string {
     return normalizeGraphText(value)
         .replace(/^#+\s*/, "")
         .replace(/\s*\/\s*/g, "/")
@@ -153,8 +156,8 @@ export function isGraphEdgesSorted(edges: readonly KnowledgeGraphEdge[]): boolea
     return isSorted(edges, compareGraphEdgeIds);
 }
 
-function normalizeGraphText(value: string): string {
-    return value.normalize("NFC").trim().replace(/\s+/g, " ");
+function normalizeGraphText(value: unknown): string {
+    return typeof value === "string" ? value.normalize("NFC").trim().replace(/\s+/g, " ") : "";
 }
 
 function normalizeGraphSourceLocation(source: GraphSourceLocation): GraphSourceLocation {

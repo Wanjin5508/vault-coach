@@ -1,5 +1,6 @@
 import type { App } from "obsidian";
 import { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
+import { DeterministicGraphBuilder } from "../domain/graph/deterministic-graph-builder";
 import { ExamEngine } from "../exam/exam-engine";
 import { ExamSessionStore } from "../exam/exam-session-store";
 import { EXAM_EVALUATION_PROMPT_VERSION, ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
@@ -11,12 +12,15 @@ import {
 import { VaultKnowledgeBase } from "../knowledge-base";
 import { LocalModelClient } from "../model-client";
 import { ObsidianDocumentFileMetadataReader } from "../infrastructure/obsidian/obsidian-document-file-metadata-reader";
+import { ObsidianGraphSourceReader } from "../infrastructure/obsidian/obsidian-graph-source-reader";
+import { JsonGraphStore } from "../infrastructure/storage/json-graph-store";
 import { LongTermMemoryService } from "../memory/memory-service";
 import { VaultCoachPersistentStore } from "../persistent-store";
 import { AdvancedRagEngine } from "../rag-engine";
 import { EmbeddedExactVectorStore } from "../vector-store";
 import { ChatService } from "./chat/chat-service";
 import { KnowledgeIndexCoordinator } from "./index/knowledge-index-coordinator";
+import { KnowledgeGraphService } from "./graph/knowledge-graph-service";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
@@ -61,6 +65,7 @@ export interface ApplicationContainerServices {
     memoryService: LongTermMemoryService;
     persistentStore: VaultCoachPersistentStore;
     indexCoordinator: KnowledgeIndexCoordinator;
+    knowledgeGraphService: KnowledgeGraphService;
 }
 
 /**
@@ -111,6 +116,11 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         (key, replacements) => dependencies.translate(key, replacements),
     );
     const assessmentSessionStore = new JsonAssessmentSessionStore(dependencies.app.vault.adapter);
+    const knowledgeGraphService = new KnowledgeGraphService(
+        new ObsidianGraphSourceReader(dependencies.app, knowledgeBase),
+        new DeterministicGraphBuilder(),
+        new JsonGraphStore(dependencies.app.vault.adapter),
+    );
     let assessmentEventSequence = 0;
     const assessmentEventFactory = new AssessmentEventFactory({
         createEventId: () => createAssessmentEventId(assessmentEventSequence++),
@@ -159,6 +169,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         rebuildIndex: (signal) => dependencies.rebuildIndex(signal),
         clearIndex: () => dependencies.clearIndex(),
         abortIndex: () => dependencies.abortIndex(),
+        knowledgeGraphService,
     });
     application = applicationInstance;
 
@@ -177,6 +188,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             memoryService,
             persistentStore,
             indexCoordinator,
+            knowledgeGraphService,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();

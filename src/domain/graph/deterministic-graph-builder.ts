@@ -31,6 +31,7 @@ import type { DocumentLocator } from "../documents/document-types";
 
 const CONTAINS_CONFIDENCE = 0.9;
 const LINK_CONFIDENCE = 0.95;
+const EMBED_CONFIDENCE = 0.9;
 const TAG_CONFIDENCE = 0.8;
 
 interface NormalizedGraphSourceDocument {
@@ -235,7 +236,7 @@ export class DeterministicGraphBuilder {
                 origin,
                 document.document.id,
                 target.document.id,
-                LINK_CONFIDENCE,
+                type === "embeds" ? EMBED_CONFIDENCE : LINK_CONFIDENCE,
                 createSourceLocation(document.document, origin, reference, target.document.filePath),
             );
         }

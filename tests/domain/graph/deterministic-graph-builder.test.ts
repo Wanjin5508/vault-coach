@@ -68,7 +68,7 @@ describe("DeterministicGraphBuilder", () => {
             ],
         });
         expect(getEdge(snapshot, "embeds", overviewId, detailsId)).toMatchObject({
-            confidence: 0.95,
+            confidence: 0.9,
             origin: "obsidian-embed",
         });
         expect(getEdge(snapshot, "tagged_with", overviewId, "tag:rag")).toMatchObject({

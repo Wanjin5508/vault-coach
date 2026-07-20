@@ -76,6 +76,10 @@ export class VaultCoachRuntime {
 
         await this.restorePersistentState();
         await this.restoreKnowledgeBaseSnapshot();
+        await this.services.knowledgeGraphService.load();
+        if (this.services.knowledgeBase.isReady() && !this.services.knowledgeGraphService.getState().hasSnapshot) {
+            this.services.knowledgeGraphService.markDirty();
+        }
         if (this.services.chatService.getMessages().length === 0) {
             this.applicationContainer.application.chat.resetConversation();
         }
@@ -192,6 +196,12 @@ export class VaultCoachRuntime {
                 console.error("[VaultCoachRuntime] 向量索引建立失败，将回退到关键词检索。", error);
                 vectorBuildWarning = this.getVectorIndexFailureNotice(error);
                 this.vectorIndexDirty = true;
+            }
+            try {
+                await this.services.knowledgeGraphService.rebuildAll(abortSignal);
+            } catch (error: unknown) {
+                if (isAbortError(error)) throw error;
+                console.error("[VaultCoachRuntime] 图谱构建失败，文本索引将保持可用。", error);
             }
             this.knowledgeBaseDirty = false;
             await this.persistKnowledgeBaseSnapshot();
