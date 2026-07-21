@@ -93,6 +93,18 @@ session JSON 是唯一事实源，包含考试、用户答案、评分证据、�
 
 这些文件只保存在你的 vault 中，可能包含笔记摘录、答案和模型反馈；它们不是遥测或云同步服务。请把它们当作私有 vault 数据，不要提交到插件仓库。导出的 Markdown 报告仍是你选择目录中的普通 vault 文件。
 
+### 本地结构图谱快照
+
+成功完成知识索引重建或文件级同步后，Vault Coach 还会在当前 vault 中维护以下版本化结构快照：
+
+```text
+.vault-coach/graph/graph-snapshot-v1.json
+```
+
+它只记录可确定读取的 Vault 结构：已索引文档的路径和标题、标题 Section、标签、已解析的本地链接/Embed，以及用于解释关系的来源位置。该快照不会创建 Concept、掌握度、复习推荐或图谱 UI；构建和更新图谱不会调用聊天模型、Embedding 模型或网络服务。
+
+快照只保留在当前 vault 内，插件仓库会忽略它，并且可以根据当前知识范围重新生成。它可能包含私有文件路径、标题、标签名和链接元数据，请将其作为私有 vault 数据处理，不要提交到公开仓库。
+
 ![alt text](assets/screenshots/exam-mode-scope.png.png)
 
 用户同样可以手动管理测试题目的范围：
@@ -215,6 +227,8 @@ Vault Coach 默认本地优先。
 启用远程 embedding 时，构建向量索引期间，对应服务可能收到被索引的 Markdown 和 PDF 文本片段。
 
 Vault Coach 不包含隐藏遥测。
+
+确定性图谱快照同样只在本地生成。创建或更新 `.vault-coach/graph/graph-snapshot-v1.json` 不会把图谱事实发送给 Ollama、OpenAI-compatible 服务或其他任何服务。
 
 ## 当前限制
 
