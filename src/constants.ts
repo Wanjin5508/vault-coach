@@ -8,6 +8,7 @@
 
 // 自定义视图的唯一类型 ID；Obsidian 通过它创建和恢复右侧边栏视图。
 export const VIEW_TYPE_VAULT_COACH = "value-coach-view";
+export const VIEW_TYPE_CONCEPT_REVIEW = "vault-coach-concept-review";
 
 
 // 显示给用户看的视图名称，通常出现在标签页标题和视图列表中。
@@ -87,3 +88,6 @@ export const ASSESSMENT_INDEX_PATH = `${ASSESSMENTS_DIR_PATH}/index-v1.json`;
 // 可由当前知识范围重建的版本化结构图谱快照；不写入插件运行时状态或 Assessment 事实。
 export const GRAPH_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/graph`;
 export const GRAPH_SNAPSHOT_PATH = `${GRAPH_DIR_PATH}/graph-snapshot-v1.json`;
+// Semantic graph facts stay outside the deterministic M2 structure snapshot.
+export const SEMANTIC_GRAPH_DIR_PATH = `${GRAPH_DIR_PATH}/semantic`;
+export const SEMANTIC_GRAPH_MANIFEST_PATH = `${SEMANTIC_GRAPH_DIR_PATH}/semantic-manifest-v1.json`;

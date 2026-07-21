@@ -42,6 +42,16 @@ describe("architecture import boundaries", () => {
         expect(runtimeStorageSources).not.toMatch(/\b(?:GraphSnapshot|GraphStore|graph-snapshot|layout-state)\b/i);
     });
 
+    it("keeps semantic graph domain pure and presentation away from semantic persistence", () => {
+        const semanticFiles = getTypeScriptFilesIfPresent(join(sourceRoot, "domain", "semantic-graph"));
+        const semanticViolations = semanticFiles.filter((path) => /from\s+["'][^"']*(?:obsidian|model-client|rag-engine|presentation|json-semantic-graph-store)[^"']*["']/.test(sourceOf(path)));
+        const presentationFiles = getTypeScriptFiles(join(sourceRoot, "presentation"));
+        const presentationViolations = presentationFiles.filter((path) => /from\s+["'][^"']*(?:semantic-graph-service|semantic-graph-store|json-semantic-graph-store|concept-similarity-index)[^"']*["']/.test(sourceOf(path)));
+
+        expect(semanticViolations.map((path) => relative(sourceRoot, path))).toEqual([]);
+        expect(presentationViolations.map((path) => relative(sourceRoot, path))).toEqual([]);
+    });
+
     it("keeps presentation independent from concrete business and graph persistence services", () => {
         const presentationFiles = getTypeScriptFiles(join(sourceRoot, "presentation"));
         const forbiddenServices = /from\s+["'][^"']*(?:rag-engine|knowledge-base|vector-store|exam-engine|exam-session-store|memory-service|model-client|knowledge-graph-service|graph-store|json-graph-store|deterministic-graph-builder)[^"']*["']/;

@@ -1,5 +1,5 @@
 import { Notice, Plugin, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
-import { VIEW_TYPE_VAULT_COACH } from "./constants";
+import { VIEW_TYPE_CONCEPT_REVIEW, VIEW_TYPE_VAULT_COACH } from "./constants";
 import { VaultCoachRuntime } from "./app/vault-coach-runtime";
 import type { VaultCoachSettings } from "./app/config/settings-types";
 import type { KnowledgeIndexBusyState } from "./app/index/index-types";
@@ -10,6 +10,7 @@ import { registerVaultCoachCommands, registerVaultCoachRibbon } from "./plugin/c
 import { LegacyPluginApiAdapter, type LegacyPluginApiHost } from "./presentation/legacy-plugin-api-adapter";
 import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
 import { VaultCoachView } from "./presentation/vault-coach-view";
+import { ConceptReviewView } from "./presentation/views/concept-review-view";
 
 /** Obsidian composition root: lifecycle, UI registration, and thin host adapters only. */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
@@ -32,7 +33,9 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         this.legacyApi = new LegacyPluginApiAdapter(this.runtime.application, this);
 
         this.registerView(VIEW_TYPE_VAULT_COACH, (leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this.runtime.application, this.legacyApi));
+        this.registerView(VIEW_TYPE_CONCEPT_REVIEW, (leaf: WorkspaceLeaf) => new ConceptReviewView(leaf, this.runtime.application));
         registerVaultCoachCommands(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
+        this.registerSemanticGraphCommands();
         registerVaultCoachRibbon(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
         this.addSettingTab(new VaultCoachSettingTab(this.app, this, this.legacyApi));
         this.registerVaultEvents();
@@ -70,9 +73,23 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         workspace.setActiveLeaf(leaf, { focus: true });
     }
 
+    /** Opens Concept review in a normal workspace tab, never in the Ask/Exam sidebar. */
+    async activateConceptReviewView(): Promise<void> {
+        const { workspace } = this.app;
+        let leaf = workspace.getLeavesOfType(VIEW_TYPE_CONCEPT_REVIEW)[0] ?? null;
+        if (!leaf) {
+            leaf = workspace.getLeaf(true);
+            await leaf.setViewState({ type: VIEW_TYPE_CONCEPT_REVIEW, active: true });
+        }
+        workspace.setActiveLeaf(leaf, { focus: true });
+    }
+
     refreshAllViews(): void {
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH)) {
             if (leaf.view instanceof VaultCoachView) leaf.view.refresh();
+        }
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_CONCEPT_REVIEW)) {
+            if (leaf.view instanceof ConceptReviewView) void leaf.view.refresh();
         }
     }
 
@@ -159,6 +176,27 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         this.registerEvent(this.app.vault.on("rename", (file: TAbstractFile, oldPath: string) => {
             this.runtime.handleVaultPathRenamed(oldPath, file.path);
         }));
+    }
+
+    private registerSemanticGraphCommands(): void {
+        this.addCommand({
+            id: "open-concept-review",
+            name: "Open concept review",
+            callback: async () => this.activateConceptReviewView(),
+        });
+        this.addCommand({
+            id: "rebuild-semantic-concept-graph",
+            name: "Rebuild semantic concept graph",
+            callback: async () => {
+                try {
+                    await this.runtime.application.semanticGraph.rebuild();
+                    new Notice("Semantic concept graph updated.");
+                    this.refreshAllViews();
+                } catch (error: unknown) {
+                    new Notice(error instanceof Error ? error.message : String(error));
+                }
+            },
+        });
     }
 
     private refreshBuiltInDefaultGreeting(): void {

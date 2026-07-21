@@ -14,6 +14,13 @@ import type {
     KnowledgeGraphEdge,
     KnowledgeGraphNode,
 } from "../domain/graph/graph-types";
+import type {
+    ConceptEvidenceRef,
+    ConceptReviewProjection,
+    ConceptReviewQuery,
+    SemanticGraphStateView,
+    SemanticRelationType,
+} from "../domain/semantic-graph/semantic-graph-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -64,6 +71,25 @@ export interface GraphApplicationApi {
     checkIntegrity(): Promise<GraphIntegrityReport>;
 }
 
+/** Separate facade: M3 decisions never change M2 structural graph facts. */
+export interface SemanticGraphApplicationApi {
+    rebuild(signal?: AbortSignal): Promise<void>;
+    clear(): Promise<void>;
+    abort(): void;
+    getState(): SemanticGraphStateView;
+    getReviewProjection(query?: ConceptReviewQuery): Promise<ConceptReviewProjection>;
+    confirmCandidate(fingerprint: string): Promise<void>;
+    rejectCandidate(fingerprint: string, reason?: string): Promise<void>;
+    undoCandidateDecision(decisionId: string): Promise<void>;
+    mergeConcepts(canonicalConceptId: string, mergedConceptIds: readonly string[]): Promise<void>;
+    undoMerge(decisionId: string): Promise<void>;
+    addAlias(conceptId: string, alias: string): Promise<void>;
+    removeAlias(conceptId: string, alias: string): Promise<void>;
+    createManualRelation(type: SemanticRelationType, sourceConceptId: string, targetConceptId: string, evidence?: readonly ConceptEvidenceRef[], note?: string): Promise<void>;
+    removeManualRelation(relationId: string): Promise<void>;
+    undoManualRelationRemoval(decisionId: string): Promise<void>;
+}
+
 export interface ProgressApplicationApi { isAvailable(): false; }
 
 export interface VaultCoachApplicationApi {
@@ -71,5 +97,6 @@ export interface VaultCoachApplicationApi {
     exam: ExamApplicationApi;
     index: IndexApplicationApi;
     graph: GraphApplicationApi;
+    semanticGraph: SemanticGraphApplicationApi;
     progress: ProgressApplicationApi;
 }

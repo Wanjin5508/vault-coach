@@ -79,6 +79,7 @@ export class VaultCoachRuntime {
         await this.restorePersistentState();
         await this.restoreKnowledgeBaseSnapshot();
         await this.services.knowledgeGraphService.load();
+        await this.services.semanticGraphService.load();
         if (this.services.knowledgeBase.isReady() && !this.services.knowledgeGraphService.getState().hasSnapshot) {
             this.services.knowledgeGraphService.markDirty();
         }
@@ -254,6 +255,11 @@ export class VaultCoachRuntime {
             this.services.knowledgeGraphService.markDirty();
             console.error("[VaultCoachRuntime] 清除图谱快照失败，文本索引已清除。", error);
         }
+        try {
+            await this.services.semanticGraphService.clear();
+        } catch (error: unknown) {
+            console.error("[VaultCoachRuntime] 清除语义图谱失败，文本索引已清除。", error);
+        }
         this.services.ragEngine.hydrateVectorStats({ ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null });
         this.knowledgeBaseDirty = false;
         this.vectorIndexDirty = false;
@@ -419,6 +425,12 @@ export class VaultCoachRuntime {
                 console.error("[VaultCoachRuntime] 自动图谱增量同步失败，文本索引将保持可用。", error);
                 this.services.knowledgeGraphService.markDirty();
                 for (const path of syncResult.affectedFiles) this.pendingChangedKnowledgePaths.add(path);
+            }
+            try {
+                await this.services.semanticGraphService.syncChangedFiles(syncResult, abortSignal);
+            } catch (error: unknown) {
+                if (isAbortError(error)) throw error;
+                console.error("[VaultCoachRuntime] 自动语义图谱增量同步失败，文本索引将保持可用。", error);
             }
             this.lastAutoIndexAt = Date.now();
             this.knowledgeBaseDirty = false;

@@ -105,6 +105,16 @@ session JSON 是唯一事实源，包含考试、用户答案、评分证据、�
 
 快照只保留在当前 vault 内，插件仓库会忽略它，并且可以根据当前知识范围重新生成。它可能包含私有文件路径、标题、标签名和链接元数据，请将其作为私有 vault 数据处理，不要提交到公开仓库。
 
+### 可选语义概念图谱
+
+**语义概念图谱** 是建立在本地结构快照之上的显式选择功能，默认关闭；它不会在插件启动或普通“重建索引”时自动运行。启用后，请在命令面板执行 **Rebuild semantic concept graph**，或在普通工作区标签页打开 **Concept review**。
+
+- 插件只会把已索引的 Section 摘录发送给已配置的聊天模型，用于产生带证据的 Concept 候选和受限关系候选；需要相似候选时，只会把简短的 Concept 名称、Alias 和描述发送给 embedding 模型。
+- Ollama 请求只发送到你配置的本地地址。只有当你显式选择 OpenAI-compatible 服务并主动运行该功能时，才会向该服务发送相同范围的有限内容。
+- 语义数据保存在 vault 本地且被本仓库忽略：`.vault-coach/graph/semantic/`。其中包含候选、Chunk 证据、embedding 和你的审核决策；它与确定性的 `graph-snapshot-v1.json` 完全分离。
+- 相似 Concept 候选使用独立且有 Top-K 上限的近似近邻查询。插件不会执行无上限的全 Concept 两两比较，也不会只因 embedding 相似就自动合并概念。
+- **Concept review** 中，虚线是未确认候选，实线是已确认关系。你可以确认、拒绝、合并、撤销合并、编辑 Alias 或新增附带用户说明的手工关系。决策作为追加式本地事实保存，并优先于之后的模型重跑结果。
+
 ![alt text](assets/screenshots/exam-mode-scope.png.png)
 
 用户同样可以手动管理测试题目的范围：

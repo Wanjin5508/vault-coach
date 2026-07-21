@@ -14,6 +14,7 @@ import { LocalModelClient } from "../model-client";
 import { ObsidianDocumentFileMetadataReader } from "../infrastructure/obsidian/obsidian-document-file-metadata-reader";
 import { ObsidianGraphSourceReader } from "../infrastructure/obsidian/obsidian-graph-source-reader";
 import { JsonGraphStore } from "../infrastructure/storage/json-graph-store";
+import { JsonSemanticGraphStore } from "../infrastructure/storage/json-semantic-graph-store";
 import { LongTermMemoryService } from "../memory/memory-service";
 import { VaultCoachPersistentStore } from "../persistent-store";
 import { AdvancedRagEngine } from "../rag-engine";
@@ -21,6 +22,8 @@ import { EmbeddedExactVectorStore } from "../vector-store";
 import { ChatService } from "./chat/chat-service";
 import { KnowledgeIndexCoordinator } from "./index/knowledge-index-coordinator";
 import { KnowledgeGraphService } from "./graph/knowledge-graph-service";
+import { ConceptExtractionService } from "./semantic-graph/concept-extraction-service";
+import { SemanticGraphService } from "./semantic-graph/semantic-graph-service";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
@@ -66,6 +69,7 @@ export interface ApplicationContainerServices {
     persistentStore: VaultCoachPersistentStore;
     indexCoordinator: KnowledgeIndexCoordinator;
     knowledgeGraphService: KnowledgeGraphService;
+    semanticGraphService: SemanticGraphService;
 }
 
 /**
@@ -121,6 +125,18 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         new DeterministicGraphBuilder(),
         new JsonGraphStore(dependencies.app.vault.adapter),
     );
+    const semanticModelClient = new LocalModelClient(
+        () => dependencies.getSettings(),
+        () => dependencies.getCloudApiKey(),
+    );
+    const semanticGraphService = new SemanticGraphService({
+        graphService: knowledgeGraphService,
+        documentIndex: knowledgeBase,
+        store: new JsonSemanticGraphStore(dependencies.app.vault.adapter),
+        extractionService: new ConceptExtractionService(semanticModelClient),
+        embeddingGateway: semanticModelClient,
+        getSettings: () => dependencies.getSettings(),
+    });
     let assessmentEventSequence = 0;
     const assessmentEventFactory = new AssessmentEventFactory({
         createEventId: () => createAssessmentEventId(assessmentEventSequence++),
@@ -170,6 +186,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         clearIndex: () => dependencies.clearIndex(),
         abortIndex: () => dependencies.abortIndex(),
         knowledgeGraphService,
+        semanticGraphService,
     });
     application = applicationInstance;
 
@@ -189,6 +206,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             persistentStore,
             indexCoordinator,
             knowledgeGraphService,
+            semanticGraphService,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();

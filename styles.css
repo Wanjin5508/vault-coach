@@ -358,6 +358,193 @@
     margin-bottom: 0;
 }
 
+/* M3 Concept review lives in its own workspace tab; it never changes the sidebar shell. */
+.vault-coach-concept-review {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    padding: var(--size-4-4);
+    gap: var(--size-4-3);
+}
+
+.vault-coach-concept-review-header h2 {
+    margin: 0;
+}
+
+.vault-coach-concept-review-summary,
+.vault-coach-concept-review-muted,
+.vault-coach-concept-review-legend {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-concept-review-notice,
+.vault-coach-concept-review-warning,
+.vault-coach-concept-review-error,
+.vault-coach-concept-review-empty {
+    padding: var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+}
+
+.vault-coach-concept-review-warning,
+.vault-coach-concept-review-error {
+    color: var(--text-error);
+}
+
+.vault-coach-concept-review-toolbar,
+.vault-coach-concept-review-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--size-4-2);
+}
+
+.vault-coach-concept-review-toolbar input[type="search"] {
+    flex: 1 1 15rem;
+}
+
+.vault-coach-concept-review-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-2-2);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-concept-review-body {
+    display: grid;
+    grid-template-columns: minmax(20rem, 2fr) minmax(16rem, 1fr);
+    gap: var(--size-4-3);
+    min-height: 26rem;
+}
+
+.vault-coach-concept-review-graph,
+.vault-coach-concept-review-inspector {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+    padding: var(--size-4-3);
+    overflow: hidden;
+}
+
+.vault-coach-concept-review-graph {
+    min-height: 32rem;
+    background:
+        radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text-muted) 18%, transparent) 1px, transparent 0) 0 0 / 20px 20px,
+        var(--background-primary-alt);
+}
+
+.vault-coach-concept-force-graph {
+    width: 100%;
+    height: auto;
+    min-height: 30rem;
+    display: block;
+    touch-action: none;
+    cursor: grab;
+}
+
+.vault-coach-concept-force-graph:active {
+    cursor: grabbing;
+}
+
+.vault-coach-concept-graph-background {
+    fill: transparent;
+}
+
+.vault-coach-concept-edge {
+    vector-effect: non-scaling-stroke;
+    stroke-linecap: round;
+    pointer-events: stroke;
+}
+
+.vault-coach-concept-edge.is-pending {
+    stroke: var(--text-accent);
+    stroke-width: 2.5;
+    stroke-dasharray: 9 7;
+    opacity: 0.92;
+    cursor: pointer;
+}
+
+.vault-coach-concept-edge.is-confirmed {
+    stroke: var(--text-muted);
+    stroke-width: 2.2;
+    opacity: 0.75;
+}
+
+.vault-coach-concept-arrow.is-pending {
+    fill: var(--text-accent);
+}
+
+.vault-coach-concept-arrow.is-confirmed {
+    fill: var(--text-muted);
+}
+
+.vault-coach-concept-node {
+    cursor: pointer;
+}
+
+.vault-coach-concept-node circle {
+    fill: var(--background-primary);
+    stroke: var(--interactive-accent);
+    stroke-width: 2.5;
+    vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 2px 3px rgb(0 0 0 / 20%));
+}
+
+.vault-coach-concept-node.is-selected circle {
+    fill: var(--interactive-accent);
+}
+
+.vault-coach-concept-node text {
+    fill: var(--text-normal);
+    font-size: 16px;
+    font-weight: 500;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: var(--background-primary-alt);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+}
+
+.vault-coach-concept-node.is-selected text {
+    fill: var(--text-on-accent);
+}
+
+.vault-coach-concept-review-inspector input,
+.vault-coach-concept-review-inspector textarea,
+.vault-coach-concept-review-inspector select {
+    width: 100%;
+    margin: var(--size-2-2) 0;
+}
+
+.vault-coach-concept-review-alias,
+.vault-coach-concept-review-evidence {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-1);
+}
+
+.vault-coach-concept-review-history {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-2);
+}
+
+.vault-coach-concept-review-history-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--size-4-2);
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+@media (max-width: 720px) {
+    .vault-coach-concept-review-body {
+        grid-template-columns: 1fr;
+    }
+}
+
 .vault-coach-input-area {
     display: flex;
     flex-direction: column;

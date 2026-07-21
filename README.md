@@ -105,6 +105,16 @@ It records deterministic Vault structure only: indexed document paths and titles
 
 The snapshot remains inside the current vault, is ignored by this plugin repository, and can be regenerated from the current knowledge scope. It may contain private file paths, headings, tag names, and link metadata, so treat it as private vault data and do not commit it to a public repository.
 
+### Optional semantic concept graph
+
+The **Semantic concept graph** is an opt-in layer above the local structural snapshot. It is disabled by default and does not run during plugin startup or an ordinary index rebuild. After enabling it in settings, run **Rebuild semantic concept graph** from the command palette or open **Concept review** in a normal workspace tab.
+
+- It sends only indexed Section excerpts to your configured chat model to extract evidence-backed Concept candidates and restricted relationship candidates. When similarity is enabled, it sends only short Concept names, aliases, and descriptions to the configured embedding model.
+- Ollama requests stay at the local address you configured. OpenAI-compatible endpoints receive the same limited content only after you explicitly select that provider and run the feature.
+- Semantic data is private, vault-local, and ignored by this repository under `.vault-coach/graph/semantic/`. It includes candidates, Chunk evidence, embeddings, and your review decisions; it is separate from the deterministic `graph-snapshot-v1.json`.
+- Similar Concept candidates use a separate, bounded approximate nearest-neighbour lookup (Top-K). The plugin never performs an unrestricted all-Concept-pairs comparison and never auto-merges Concepts from embedding similarity alone.
+- In **Concept review**, dashed edges are unconfirmed candidates and solid edges are confirmed relations. You can confirm, reject, merge, undo a merge, edit aliases, or add a manually explained relationship. These decisions are append-only local facts and take precedence over later model reruns.
+
 ![alt text](assets/screenshots/exam-mode-scope.png)
 
 Users can also manually manage the scope of test questions:
