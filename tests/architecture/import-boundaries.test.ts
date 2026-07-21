@@ -29,9 +29,9 @@ describe("architecture import boundaries", () => {
         expect(violations.map((path) => relative(sourceRoot, path))).toEqual([]);
     });
 
-    it("reserves graph domain and persistence boundaries before graph implementation", () => {
+    it("keeps graph domain pure and excludes graph facts from runtime persistence", () => {
         const graphFiles = getTypeScriptFilesIfPresent(join(sourceRoot, "domain", "graph"));
-        const forbiddenGraphImports = /from\s+["'][^"']*(?:obsidian|model-client|rag-engine|exam(?:-|\b)|presentation|graphology|sigma)[^"']*["']/;
+        const forbiddenGraphImports = /from\s+["'][^"']*(?:obsidian|model-client|rag-engine|exam(?:-|\b)|presentation|graphology|sigma|vault-coach-runtime|application-container)[^"']*["']/;
         const graphViolations = graphFiles.filter((path) => forbiddenGraphImports.test(sourceOf(path)));
         const runtimeStorageSources = [
             sourceOf(join(sourceRoot, "persistent-store.ts")),
@@ -42,9 +42,9 @@ describe("architecture import boundaries", () => {
         expect(runtimeStorageSources).not.toMatch(/\b(?:GraphSnapshot|GraphStore|graph-snapshot|layout-state)\b/i);
     });
 
-    it("keeps presentation independent from concrete business services", () => {
+    it("keeps presentation independent from concrete business and graph persistence services", () => {
         const presentationFiles = getTypeScriptFiles(join(sourceRoot, "presentation"));
-        const forbiddenServices = /from\s+["'][^"']*(?:rag-engine|knowledge-base|vector-store|exam-engine|exam-session-store|memory-service|model-client)[^"']*["']/;
+        const forbiddenServices = /from\s+["'][^"']*(?:rag-engine|knowledge-base|vector-store|exam-engine|exam-session-store|memory-service|model-client|knowledge-graph-service|graph-store|json-graph-store|deterministic-graph-builder)[^"']*["']/;
         const violations = presentationFiles.filter((path) => forbiddenServices.test(sourceOf(path)));
 
         expect(violations.map((path) => relative(sourceRoot, path))).toEqual([]);

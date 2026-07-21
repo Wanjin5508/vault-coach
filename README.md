@@ -93,6 +93,18 @@ The session JSON is the source of truth. It contains the exam, answers, grading 
 
 These files stay inside your vault, may contain note excerpts, answers, and model feedback, and are not telemetry or a cloud sync service. Treat them as private vault data; do not commit them to a plugin repository. Exported Markdown reports remain ordinary vault files under the folder you choose.
 
+### Local structural graph snapshot
+
+After a successful knowledge-index rebuild or file-level sync, Vault Coach also maintains this local, versioned structure snapshot:
+
+```text
+.vault-coach/graph/graph-snapshot-v1.json
+```
+
+It records deterministic Vault structure only: indexed document paths and titles, heading sections, tags, resolved local links/embeds, and source locations needed to explain those relationships. It does not create concepts, mastery scores, recommendations, or a graph UI, and graph construction never calls a chat model, embedding model, or network service.
+
+The snapshot remains inside the current vault, is ignored by this plugin repository, and can be regenerated from the current knowledge scope. It may contain private file paths, headings, tag names, and link metadata, so treat it as private vault data and do not commit it to a public repository.
+
 ![alt text](assets/screenshots/exam-mode-scope.png)
 
 Users can also manually manage the scope of test questions:
@@ -215,6 +227,8 @@ When remote chat is enabled, the configured service may receive:
 When remote embeddings are enabled, the configured service may receive indexed Markdown and PDF text chunks during vector index building.
 
 Vault Coach does not include hidden telemetry.
+
+The deterministic graph snapshot is also local-only. Creating or updating `.vault-coach/graph/graph-snapshot-v1.json` does not send graph facts to Ollama, OpenAI-compatible providers, or any other service.
 
 ## Current Limits
 

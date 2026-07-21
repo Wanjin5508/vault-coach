@@ -9,6 +9,7 @@ import type { KnowledgeIndexBusyPhase, KnowledgeIndexBusyState } from "./index/i
 import type { RetrievalMode, VectorIndexStats } from "../domain/retrieval/retrieval-types";
 import type { VaultCoachSettings } from "./config/settings-types";
 import type { ExamScopeSelection } from "../domain/exam/exam-types";
+import type { GraphRename } from "../domain/graph/graph-types";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
@@ -37,6 +38,7 @@ export class VaultCoachRuntime {
     private applicationContainer!: ApplicationContainer;
     private unsubscribeApplicationEvents: (() => void) | null = null;
     private readonly pendingChangedKnowledgePaths = new Set<string>();
+    private readonly pendingGraphRenames = new Map<string, string>();
     private autoIndexDebounceTimer: number | null = null;
     private autoIndexMaxWaitTimer: number | null = null;
     private isSyncingKnowledgeBase = false;
@@ -76,6 +78,10 @@ export class VaultCoachRuntime {
 
         await this.restorePersistentState();
         await this.restoreKnowledgeBaseSnapshot();
+        await this.services.knowledgeGraphService.load();
+        if (this.services.knowledgeBase.isReady() && !this.services.knowledgeGraphService.getState().hasSnapshot) {
+            this.services.knowledgeGraphService.markDirty();
+        }
         if (this.services.chatService.getMessages().length === 0) {
             this.applicationContainer.application.chat.resetConversation();
         }
@@ -103,6 +109,7 @@ export class VaultCoachRuntime {
     markKnowledgeBaseDirty(): void {
         this.knowledgeBaseDirty = true;
         this.vectorIndexDirty = true;
+        this.services.knowledgeGraphService.markDirty();
     }
 
     markVectorIndexDirty(): void {
@@ -193,6 +200,12 @@ export class VaultCoachRuntime {
                 vectorBuildWarning = this.getVectorIndexFailureNotice(error);
                 this.vectorIndexDirty = true;
             }
+            try {
+                await this.services.knowledgeGraphService.rebuildAll(abortSignal);
+            } catch (error: unknown) {
+                if (isAbortError(error)) throw error;
+                console.error("[VaultCoachRuntime] 图谱构建失败，文本索引将保持可用。", error);
+            }
             this.knowledgeBaseDirty = false;
             await this.persistKnowledgeBaseSnapshot();
             if (showNotice) {
@@ -231,9 +244,16 @@ export class VaultCoachRuntime {
         }
         this.clearAutoIndexTimers();
         this.pendingChangedKnowledgePaths.clear();
+        this.pendingGraphRenames.clear();
         this.services.knowledgeBase.clearIndexData();
         await this.services.vectorStore.clear();
         await this.services.persistentStore.removeKnowledgeBaseSnapshot();
+        try {
+            await this.services.knowledgeGraphService.clear();
+        } catch (error: unknown) {
+            this.services.knowledgeGraphService.markDirty();
+            console.error("[VaultCoachRuntime] 清除图谱快照失败，文本索引已清除。", error);
+        }
         this.services.ragEngine.hydrateVectorStats({ ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null });
         this.knowledgeBaseDirty = false;
         this.vectorIndexDirty = false;
@@ -266,10 +286,18 @@ export class VaultCoachRuntime {
         this.pendingChangedKnowledgePaths.add(path);
         this.knowledgeBaseDirty = true;
         this.vectorIndexDirty = true;
+        this.services.knowledgeGraphService.markDirty();
         this.scheduleAutoIndexSync();
     }
 
     handleVaultPathRenamed(oldPath: string, newPath: string): void {
+        if (
+            (this.isKnowledgePath(oldPath) || this.isKnowledgePath(newPath))
+            && !this.isVaultCoachHiddenPath(oldPath)
+            && !this.isVaultCoachHiddenPath(newPath)
+        ) {
+            this.queueGraphRename(oldPath, newPath);
+        }
         this.handleVaultPathChanged(oldPath);
         this.handleVaultPathChanged(newPath);
     }
@@ -352,7 +380,8 @@ export class VaultCoachRuntime {
     private async flushPendingKnowledgeBaseSync(showNotice: boolean): Promise<void> {
         if (this.isSyncingKnowledgeBase) return;
         const filePaths = Array.from(this.pendingChangedKnowledgePaths);
-        if (filePaths.length === 0) return;
+        const graphRenames = this.getPendingGraphRenames();
+        if (filePaths.length === 0 && graphRenames.length === 0) return;
         this.isSyncingKnowledgeBase = true;
         const operation = this.startKnowledgeIndexOperation("syncing");
         if (!operation) {
@@ -369,15 +398,35 @@ export class VaultCoachRuntime {
                 return;
             }
             const syncResult: KnowledgeBaseSyncResult = await this.services.knowledgeBase.syncChangedFiles(filePaths, abortSignal);
-            await this.services.ragEngine.syncVectorIndex(syncResult, abortSignal);
-            this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
+            try {
+                await this.services.ragEngine.syncVectorIndex(syncResult, abortSignal);
+                this.vectorIndexDirty = false;
+                this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
+            } catch (error: unknown) {
+                if (isAbortError(error)) throw error;
+                console.error("[VaultCoachRuntime] 自动向量增量同步失败，将回退到关键词检索。", error);
+                this.vectorIndexDirty = this.settings.enableVectorRetrieval;
+            }
+            try {
+                await this.services.knowledgeGraphService.syncChangedFiles(
+                    syncResult,
+                    graphRenames,
+                    abortSignal,
+                );
+                this.removeProcessedGraphRenames(graphRenames);
+            } catch (error: unknown) {
+                if (isAbortError(error)) throw error;
+                console.error("[VaultCoachRuntime] 自动图谱增量同步失败，文本索引将保持可用。", error);
+                this.services.knowledgeGraphService.markDirty();
+                for (const path of syncResult.affectedFiles) this.pendingChangedKnowledgePaths.add(path);
+            }
             this.lastAutoIndexAt = Date.now();
             this.knowledgeBaseDirty = false;
-            this.vectorIndexDirty = false;
             await this.persistKnowledgeBaseSnapshot();
             await this.persistRuntimeState();
             if (showNotice) this.notice("notice.index.incrementalComplete", { count: syncResult.affectedFiles.length });
         } catch (error: unknown) {
+            for (const path of filePaths) this.pendingChangedKnowledgePaths.add(path);
             if (isAbortError(error)) {
                 console.warn("[VaultCoachRuntime] 自动增量同步已停止。", error);
                 this.knowledgeBaseDirty = true;
@@ -387,7 +436,7 @@ export class VaultCoachRuntime {
             }
             console.error("[VaultCoachRuntime] 自动增量同步失败", error);
             this.knowledgeBaseDirty = true;
-            this.vectorIndexDirty = true;
+            this.vectorIndexDirty = this.settings.enableVectorRetrieval;
         } finally {
             this.isSyncingKnowledgeBase = false;
             this.finishKnowledgeIndexOperation(operation);
@@ -527,6 +576,35 @@ export class VaultCoachRuntime {
         if (this.autoIndexMaxWaitTimer !== null) {
             window.clearTimeout(this.autoIndexMaxWaitTimer);
             this.autoIndexMaxWaitTimer = null;
+        }
+    }
+
+    private queueGraphRename(oldPath: string, newPath: string): void {
+        const normalizedOldPath = normalizePath(oldPath);
+        const normalizedNewPath = normalizePath(newPath);
+        if (normalizedOldPath.length === 0 || normalizedNewPath.length === 0 || normalizedOldPath === normalizedNewPath) return;
+
+        let originalPath = normalizedOldPath;
+        for (const [pendingOldPath, pendingNewPath] of this.pendingGraphRenames) {
+            if (pendingNewPath !== normalizedOldPath) continue;
+            originalPath = pendingOldPath;
+            this.pendingGraphRenames.delete(pendingOldPath);
+            break;
+        }
+        this.pendingGraphRenames.set(originalPath, normalizedNewPath);
+    }
+
+    private getPendingGraphRenames(): GraphRename[] {
+        return Array.from(this.pendingGraphRenames.entries())
+            .map(([oldPath, newPath]) => ({ oldPath, newPath }))
+            .sort((left, right) => left.oldPath.localeCompare(right.oldPath));
+    }
+
+    private removeProcessedGraphRenames(renames: readonly GraphRename[]): void {
+        for (const rename of renames) {
+            if (this.pendingGraphRenames.get(rename.oldPath) === rename.newPath) {
+                this.pendingGraphRenames.delete(rename.oldPath);
+            }
         }
     }
 

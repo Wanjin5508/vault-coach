@@ -31,6 +31,7 @@ import type { DocumentLocator } from "../documents/document-types";
 
 const CONTAINS_CONFIDENCE = 0.9;
 const LINK_CONFIDENCE = 0.95;
+const EMBED_CONFIDENCE = 0.9;
 const TAG_CONFIDENCE = 0.8;
 
 interface NormalizedGraphSourceDocument {
@@ -39,6 +40,12 @@ interface NormalizedGraphSourceDocument {
     links: GraphSourceReference[];
     embeds: GraphSourceReference[];
     tags: GraphSourceTag[];
+}
+
+/** Nodes and edges contributed by one or more source files during an incremental update. */
+export interface GraphBuildFragment {
+    nodes: KnowledgeGraphNode[];
+    edges: KnowledgeGraphEdge[];
 }
 
 interface SourcePosition {
@@ -67,29 +74,9 @@ export class DeterministicGraphBuilder {
     private readonly integrityService = new GraphIntegrityService();
 
     build(sources: readonly GraphSourceDocument[]): GraphSnapshotV1 {
-        const documents = this.normalizeDocuments(sources);
-        const documentsByPath = new Map<string, NormalizedGraphSourceDocument>(
-            documents.map((document) => [document.document.filePath, document]),
-        );
-        const nodes: KnowledgeGraphNode[] = [];
-        for (const document of documents) {
-            nodes.push(document.document, ...document.sections);
-        }
-        const tagNodesById = new Map<string, TagGraphNode>();
-        const edgesById = new Map<string, KnowledgeGraphEdge>();
-
-        for (const document of documents) {
-            this.addContainsEdges(document, edgesById);
-            this.addReferenceEdges(document, document.links, "links_to", "obsidian-link", edgesById, documentsByPath);
-            this.addReferenceEdges(document, document.embeds, "embeds", "obsidian-embed", edgesById, documentsByPath);
-            this.addTagEdges(document, tagNodesById, edgesById);
-        }
-
-        const snapshotNodes = sortGraphNodes([
-            ...nodes,
-            ...tagNodesById.values(),
-        ]);
-        const snapshotEdges = sortGraphEdges(Array.from(edgesById.values()));
+        const fragment = this.buildFragment(sources);
+        const snapshotNodes = sortGraphNodes(fragment.nodes);
+        const snapshotEdges = sortGraphEdges(fragment.edges);
         const snapshot: GraphSnapshotV1 = {
             schemaVersion: GRAPH_SNAPSHOT_SCHEMA_VERSION,
             nodes: snapshotNodes,
@@ -107,6 +94,48 @@ export class DeterministicGraphBuilder {
         }
 
         return snapshot;
+    }
+
+    /**
+     * Builds only the graph facts emitted by `sources`.
+     *
+     * `knownDocuments` allows changed files to keep links to unchanged documents
+     * without rereading those files. Callers must merge and integrity-check the
+     * returned fragment with their existing snapshot before persisting it.
+     */
+    buildFragment(
+        sources: readonly GraphSourceDocument[],
+        knownDocuments: readonly DocumentGraphNode[] = [],
+    ): GraphBuildFragment {
+        const documents = this.normalizeDocuments(sources);
+        const documentsByPath = new Map<string, DocumentGraphNode>();
+        for (const knownDocument of knownDocuments) {
+            documentsByPath.set(normalizeGraphPath(knownDocument.filePath), knownDocument);
+        }
+        for (const document of documents) {
+            documentsByPath.set(document.document.filePath, document.document);
+        }
+        const nodes: KnowledgeGraphNode[] = [];
+        for (const document of documents) {
+            nodes.push(document.document, ...document.sections);
+        }
+        const tagNodesById = new Map<string, TagGraphNode>();
+        const edgesById = new Map<string, KnowledgeGraphEdge>();
+
+        for (const document of documents) {
+            this.addContainsEdges(document, edgesById);
+            this.addReferenceEdges(document, document.links, "links_to", "obsidian-link", edgesById, documentsByPath);
+            this.addReferenceEdges(document, document.embeds, "embeds", "obsidian-embed", edgesById, documentsByPath);
+            this.addTagEdges(document, tagNodesById, edgesById);
+        }
+
+        return {
+            nodes: sortGraphNodes([
+                ...nodes,
+                ...tagNodesById.values(),
+            ]),
+            edges: sortGraphEdges(Array.from(edgesById.values())),
+        };
     }
 
     private normalizeDocuments(sources: readonly GraphSourceDocument[]): NormalizedGraphSourceDocument[] {
@@ -224,7 +253,7 @@ export class DeterministicGraphBuilder {
         type: "links_to" | "embeds",
         origin: "obsidian-link" | "obsidian-embed",
         edgesById: Map<string, KnowledgeGraphEdge>,
-        documentsByPath: ReadonlyMap<string, NormalizedGraphSourceDocument>,
+        documentsByPath: ReadonlyMap<string, DocumentGraphNode>,
     ): void {
         for (const reference of references) {
             const target = documentsByPath.get(reference.targetFilePath);
@@ -234,9 +263,9 @@ export class DeterministicGraphBuilder {
                 type,
                 origin,
                 document.document.id,
-                target.document.id,
-                LINK_CONFIDENCE,
-                createSourceLocation(document.document, origin, reference, target.document.filePath),
+                target.id,
+                type === "embeds" ? EMBED_CONFIDENCE : LINK_CONFIDENCE,
+                createSourceLocation(document.document, origin, reference, target.filePath),
             );
         }
     }

@@ -84,5 +84,6 @@ export const EXAM_CONTENT_PROFILE_CACHE_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/$
 export const ASSESSMENTS_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/assessments`;
 export const ASSESSMENT_SESSIONS_DIR_PATH = `${ASSESSMENTS_DIR_PATH}/sessions`;
 export const ASSESSMENT_INDEX_PATH = `${ASSESSMENTS_DIR_PATH}/index-v1.json`;
+// 可由当前知识范围重建的版本化结构图谱快照；不写入插件运行时状态或 Assessment 事实。
 export const GRAPH_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/graph`;
 export const GRAPH_SNAPSHOT_PATH = `${GRAPH_DIR_PATH}/graph-snapshot-v1.json`;

@@ -7,6 +7,7 @@ import {
     isVaultCoachHiddenPath,
     normalizeGraphPath,
     normalizeGraphTagName,
+    normalizeHeadingPath,
     sortAndDedupeGraphSources,
     sortGraphEdges,
     stableGraphHash,
@@ -19,6 +20,9 @@ describe("deterministic graph identifiers", () => {
         expect(normalizeGraphPath("notes/./retrieval/../rag.md")).toBe("notes/rag.md");
         expect(normalizeGraphTagName(" ## Retrieval / Hybrid / ")).toBe("retrieval/hybrid");
         expect(normalizeGraphTagName("cafe\u0301")).toBe("café");
+        expect(normalizeHeadingPath([" Retrieval ", undefined, 42, "Fusion"])).toEqual(["Retrieval", "Fusion"]);
+        expect(normalizeHeadingPath(undefined)).toEqual([]);
+        expect(normalizeGraphPath(undefined)).toBe("");
         expect(isVaultCoachHiddenPath(".vault-coach/graph/graph-snapshot-v1.json")).toBe(true);
         expect(isVaultCoachHiddenPath("notes/.vault-coach-overview.md")).toBe(false);
     });

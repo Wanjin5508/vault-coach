@@ -7,6 +7,13 @@ import type {
 import type { KnowledgeBaseStats } from "../domain/documents/document-types";
 import type { KnowledgeIndexBusyState } from "./index/index-types";
 import type { VectorIndexStats } from "../domain/retrieval/retrieval-types";
+import type {
+    GraphIntegrityReport,
+    GraphSnapshotV1,
+    GraphSourceLocation,
+    KnowledgeGraphEdge,
+    KnowledgeGraphNode,
+} from "../domain/graph/graph-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -45,11 +52,24 @@ export interface IndexApplicationApi {
     getState(): KnowledgeIndexViewState;
 }
 
+/** The only graph entry point available to future presentation code. */
+export interface GraphApplicationApi {
+    rebuild(signal?: AbortSignal): Promise<GraphSnapshotV1>;
+    getSnapshot(): Promise<GraphSnapshotV1 | null>;
+    getNode(nodeId: string): Promise<KnowledgeGraphNode | null>;
+    findNodesByDocumentPath(filePath: string): Promise<KnowledgeGraphNode[]>;
+    findEdgesForNode(nodeId: string): Promise<KnowledgeGraphEdge[]>;
+    findEdgesBySourceFile(filePath: string): Promise<KnowledgeGraphEdge[]>;
+    getEdgeSources(edgeId: string): Promise<GraphSourceLocation[]>;
+    checkIntegrity(): Promise<GraphIntegrityReport>;
+}
+
 export interface ProgressApplicationApi { isAvailable(): false; }
 
 export interface VaultCoachApplicationApi {
     chat: ChatApplicationApi;
     exam: ExamApplicationApi;
     index: IndexApplicationApi;
+    graph: GraphApplicationApi;
     progress: ProgressApplicationApi;
 }
