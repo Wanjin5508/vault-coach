@@ -6,6 +6,13 @@ import {
     sortGraphNodes,
 } from "../../domain/graph/graph-id";
 import { GraphIntegrityService } from "../../domain/graph/graph-integrity-service";
+import {
+    cloneGraphSnapshot,
+    cloneGraphSourceLocation,
+    cloneKnowledgeGraphEdge,
+    cloneKnowledgeGraphNode,
+    GraphQueryService,
+} from "../../domain/graph/graph-query-service";
 import type { GraphStore } from "../../domain/graph/graph-store";
 import type { KnowledgeBaseSyncResult } from "../../domain/documents/document-types";
 import type {
@@ -55,6 +62,7 @@ export interface KnowledgeGraphState {
     hasSnapshot: boolean;
     lastError: string | null;
     diagnostics: GraphSourceDiagnostic[];
+    integrity: GraphIntegrityReport;
 }
 
 /**
@@ -65,10 +73,12 @@ export interface KnowledgeGraphState {
  */
 export class KnowledgeGraphService {
     private readonly integrityService = new GraphIntegrityService();
+    private readonly queryService = new GraphQueryService();
     private snapshot: GraphSnapshotV1 | null = null;
     private dirty = false;
     private lastError: string | null = null;
     private diagnostics: GraphSourceDiagnostic[] = [];
+    private latestIntegrityReport: GraphIntegrityReport = { valid: true, issues: [] };
 
     constructor(
         private readonly sourceReader: GraphSourceReader,
@@ -79,7 +89,12 @@ export class KnowledgeGraphService {
     async load(): Promise<void> {
         try {
             const snapshot = await this.store.load();
-            this.snapshot = snapshot ? cloneSnapshot(snapshot) : null;
+            const report = snapshot ? this.integrityService.check(snapshot) : { valid: true, issues: [] };
+            this.latestIntegrityReport = cloneIntegrityReport(report);
+            if (!report.valid) {
+                throw new Error(`图谱完整性校验失败：${report.issues.map((issue) => issue.code).join(", ")}`);
+            }
+            this.snapshot = snapshot ? cloneGraphSnapshot(snapshot) : null;
             this.dirty = false;
             this.lastError = null;
             this.diagnostics = [];
@@ -96,19 +111,16 @@ export class KnowledgeGraphService {
             const sourceResult = this.sourceReader.readAll();
             signal?.throwIfAborted();
             const snapshot = this.builder.build(sourceResult.documents);
-            const report = this.integrityService.check(snapshot);
-            if (!report.valid) {
-                throw new Error(`图谱完整性校验失败：${report.issues.map((issue) => issue.code).join(", ")}`);
-            }
+            this.assertIntegrity(snapshot);
             signal?.throwIfAborted();
             await this.store.save(snapshot);
             signal?.throwIfAborted();
 
-            this.snapshot = cloneSnapshot(snapshot);
+            this.snapshot = cloneGraphSnapshot(snapshot);
             this.diagnostics = cloneDiagnostics(sourceResult.diagnostics);
             this.dirty = this.diagnostics.length > 0;
             this.lastError = null;
-            return cloneSnapshot(snapshot);
+            return cloneGraphSnapshot(snapshot);
         } catch (error: unknown) {
             this.dirty = true;
             this.lastError = describeError(error);
@@ -133,7 +145,7 @@ export class KnowledgeGraphService {
         const normalizedAffectedPaths = normalizePaths(syncResult.affectedFiles);
         const normalizedRenames = normalizeRenames(renames);
         if (normalizedAffectedPaths.length === 0 && normalizedRenames.length === 0) {
-            return cloneSnapshot(this.snapshot);
+            return cloneGraphSnapshot(this.snapshot);
         }
 
         try {
@@ -189,19 +201,16 @@ export class KnowledgeGraphService {
                 pruneOrphanedTagNodes(mergedNodes, mergedEdges),
                 mergedEdges,
             );
-            const report = this.integrityService.check(snapshot);
-            if (!report.valid) {
-                throw new Error(`图谱完整性校验失败：${report.issues.map((issue) => issue.code).join(", ")}`);
-            }
+            this.assertIntegrity(snapshot);
 
             signal?.throwIfAborted();
             await this.store.save(snapshot);
             signal?.throwIfAborted();
-            this.snapshot = cloneSnapshot(snapshot);
+            this.snapshot = cloneGraphSnapshot(snapshot);
             this.diagnostics = cloneDiagnostics(sourceResult.diagnostics);
             this.dirty = this.diagnostics.length > 0;
             this.lastError = null;
-            return cloneSnapshot(snapshot);
+            return cloneGraphSnapshot(snapshot);
         } catch (error: unknown) {
             this.dirty = true;
             this.lastError = describeError(error);
@@ -215,6 +224,7 @@ export class KnowledgeGraphService {
         this.dirty = false;
         this.lastError = null;
         this.diagnostics = [];
+        this.latestIntegrityReport = { valid: true, issues: [] };
     }
 
     markDirty(): void {
@@ -227,47 +237,46 @@ export class KnowledgeGraphService {
             hasSnapshot: this.snapshot !== null,
             lastError: this.lastError,
             diagnostics: cloneDiagnostics(this.diagnostics),
+            integrity: cloneIntegrityReport(this.latestIntegrityReport),
         };
     }
 
     getSnapshot(): GraphSnapshotV1 | null {
-        return this.snapshot ? cloneSnapshot(this.snapshot) : null;
+        return this.snapshot ? cloneGraphSnapshot(this.snapshot) : null;
     }
 
     getNode(nodeId: string): KnowledgeGraphNode | null {
-        const node = this.snapshot?.nodes.find((candidate) => candidate.id === nodeId);
-        return node ? cloneNode(node) : null;
+        return this.snapshot ? this.queryService.getNode(this.snapshot, nodeId) : null;
     }
 
     findNodesByDocumentPath(filePath: string): KnowledgeGraphNode[] {
-        const normalizedPath = normalizeGraphPath(filePath);
-        return (this.snapshot?.nodes ?? [])
-            .filter((node) => node.type !== "tag" && node.filePath === normalizedPath)
-            .map(cloneNode);
+        return this.snapshot ? this.queryService.findNodesByDocumentPath(this.snapshot, filePath) : [];
     }
 
     findEdgesForNode(nodeId: string): KnowledgeGraphEdge[] {
-        return (this.snapshot?.edges ?? [])
-            .filter((edge) => edge.sourceNodeId === nodeId || edge.targetNodeId === nodeId)
-            .map(cloneEdge);
+        return this.snapshot ? this.queryService.findEdgesForNode(this.snapshot, nodeId) : [];
     }
 
     findEdgesBySourceFile(filePath: string): KnowledgeGraphEdge[] {
-        const normalizedPath = normalizeGraphPath(filePath);
-        return (this.snapshot?.edges ?? [])
-            .filter((edge) => edge.sources.some((source) => source.sourceFilePath === normalizedPath))
-            .map(cloneEdge);
+        return this.snapshot ? this.queryService.findEdgesBySourceFile(this.snapshot, filePath) : [];
     }
 
     getEdgeSources(edgeId: string): GraphSourceLocation[] {
-        const edge = this.snapshot?.edges.find((candidate) => candidate.id === edgeId);
-        return edge ? edge.sources.map(cloneSourceLocation) : [];
+        return this.snapshot ? this.queryService.getEdgeSources(this.snapshot, edgeId) : [];
     }
 
     checkIntegrity(): GraphIntegrityReport {
         return this.snapshot
             ? cloneIntegrityReport(this.integrityService.check(this.snapshot))
             : { valid: true, issues: [] };
+    }
+
+    private assertIntegrity(snapshot: GraphSnapshotV1): void {
+        const report = this.integrityService.check(snapshot);
+        this.latestIntegrityReport = cloneIntegrityReport(report);
+        if (!report.valid) {
+            throw new Error(`图谱完整性校验失败：${report.issues.map((issue) => issue.code).join(", ")}`);
+        }
     }
 }
 
@@ -318,8 +327,8 @@ function mergeNodes(
     fragmentNodes: readonly KnowledgeGraphNode[],
 ): KnowledgeGraphNode[] {
     const nodesById = new Map<string, KnowledgeGraphNode>();
-    for (const node of retainedNodes) nodesById.set(node.id, cloneNode(node));
-    for (const node of fragmentNodes) nodesById.set(node.id, cloneNode(node));
+    for (const node of retainedNodes) nodesById.set(node.id, cloneKnowledgeGraphNode(node));
+    for (const node of fragmentNodes) nodesById.set(node.id, cloneKnowledgeGraphNode(node));
     return sortGraphNodes(Array.from(nodesById.values()));
 }
 
@@ -331,10 +340,10 @@ function mergeEdges(
     for (const edge of [...retainedEdges, ...fragmentEdges]) {
         const existing = edgesById.get(edge.id);
         if (existing) {
-            existing.sources.push(...edge.sources.map(cloneSourceLocation));
+            existing.sources.push(...edge.sources.map(cloneGraphSourceLocation));
             continue;
         }
-        edgesById.set(edge.id, cloneEdge(edge));
+        edgesById.set(edge.id, cloneKnowledgeGraphEdge(edge));
     }
     return sortGraphEdges(Array.from(edgesById.values()));
 }
@@ -344,14 +353,14 @@ function migrateEdgeTarget(
     migrations: ReadonlyMap<string, RenameMigration>,
 ): KnowledgeGraphEdge | null {
     const migration = migrations.get(edge.targetNodeId);
-    if (!migration) return cloneEdge(edge);
+    if (!migration) return cloneKnowledgeGraphEdge(edge);
     if (edge.type !== "links_to" && edge.type !== "embeds") return null;
     return {
-        ...cloneEdge(edge),
+        ...cloneKnowledgeGraphEdge(edge),
         id: createGraphEdgeId(edge.type, edge.sourceNodeId, migration.newDocumentId),
         targetNodeId: migration.newDocumentId,
         sources: edge.sources.map((source) => ({
-            ...cloneSourceLocation(source),
+            ...cloneGraphSourceLocation(source),
             ...(source.targetFilePath === migration.oldPath ? { targetFilePath: migration.newPath } : {}),
         })),
     };
@@ -388,39 +397,6 @@ function createSnapshot(nodes: readonly KnowledgeGraphNode[], edges: readonly Kn
 function compareStrings(left: string, right: string): number {
     if (left === right) return 0;
     return left < right ? -1 : 1;
-}
-
-function cloneSnapshot(snapshot: GraphSnapshotV1): GraphSnapshotV1 {
-    return {
-        schemaVersion: snapshot.schemaVersion,
-        nodes: snapshot.nodes.map(cloneNode),
-        edges: snapshot.edges.map(cloneEdge),
-        stats: { ...snapshot.stats },
-    };
-}
-
-function cloneNode(node: KnowledgeGraphNode): KnowledgeGraphNode {
-    if (node.type === "document" || node.type === "tag") return { ...node };
-    return {
-        ...node,
-        headingPath: [...node.headingPath],
-        chunkIds: [...node.chunkIds],
-        locator: { ...node.locator },
-    };
-}
-
-function cloneEdge(edge: KnowledgeGraphEdge): KnowledgeGraphEdge {
-    return {
-        ...edge,
-        sources: edge.sources.map(cloneSourceLocation),
-    };
-}
-
-function cloneSourceLocation(source: GraphSourceLocation): GraphSourceLocation {
-    return {
-        ...source,
-        chunkIds: [...source.chunkIds],
-    };
 }
 
 function cloneDiagnostics(diagnostics: readonly GraphSourceDiagnostic[]): GraphSourceDiagnostic[] {

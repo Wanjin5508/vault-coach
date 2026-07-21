@@ -32,6 +32,7 @@ describe("KnowledgeGraphService", () => {
             hasSnapshot: true,
             lastError: null,
             diagnostics: [],
+            integrity: { valid: true, issues: [] },
         });
         expect(service.checkIntegrity()).toEqual({ valid: true, issues: [] });
     });
@@ -66,7 +67,33 @@ describe("KnowledgeGraphService", () => {
             hasSnapshot: false,
             lastError: "图谱快照 JSON 无法解析",
             diagnostics: [],
+            integrity: { valid: true, issues: [] },
         });
+    });
+
+    it("retains cloned source diagnostics and the latest integrity report after a successful build", async () => {
+        const sourceReader = createSourceReader();
+        sourceReader.readAll.mockReturnValueOnce({
+            documents: createSources(),
+            diagnostics: [{
+                code: "unresolved-link-target",
+                filePath: "notes/overview.md",
+                message: "The target is outside the current graph scope.",
+                link: "outside",
+            }],
+        });
+        const service = new KnowledgeGraphService(sourceReader, new DeterministicGraphBuilder(), new InMemoryGraphStore());
+
+        await service.rebuildAll();
+        const state = service.getState();
+        state.diagnostics[0]!.message = "mutated";
+        state.integrity.issues.push({ code: "invalid-source", message: "mutated" });
+
+        expect(service.getState()).toEqual(expect.objectContaining({
+            dirty: true,
+            diagnostics: [expect.objectContaining({ message: "The target is outside the current graph scope." })],
+            integrity: { valid: true, issues: [] },
+        }));
     });
 
     it("replaces changed file facts without performing another full Vault graph read", async () => {

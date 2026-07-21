@@ -57,7 +57,9 @@ export interface GraphApplicationApi {
     rebuild(signal?: AbortSignal): Promise<GraphSnapshotV1>;
     getSnapshot(): Promise<GraphSnapshotV1 | null>;
     getNode(nodeId: string): Promise<KnowledgeGraphNode | null>;
+    findNodesByDocumentPath(filePath: string): Promise<KnowledgeGraphNode[]>;
     findEdgesForNode(nodeId: string): Promise<KnowledgeGraphEdge[]>;
+    findEdgesBySourceFile(filePath: string): Promise<KnowledgeGraphEdge[]>;
     getEdgeSources(edgeId: string): Promise<GraphSourceLocation[]>;
     checkIntegrity(): Promise<GraphIntegrityReport>;
 }

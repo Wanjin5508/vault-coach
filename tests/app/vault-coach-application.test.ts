@@ -52,11 +52,17 @@ describe("VaultCoachApplication", () => {
         const snapshot = await application.graph.getSnapshot();
         const edge = (await application.graph.findEdgesForNode("markdown:notes/overview.md"))
             .find((candidate) => candidate.type === "links_to");
+        const nodesByPath = await application.graph.findNodesByDocumentPath("notes/overview.md");
+        const edgesBySource = await application.graph.findEdgesBySourceFile("notes/overview.md");
         if (!snapshot || !edge) throw new Error("Expected graph API facts.");
         edge.sources[0]?.chunkIds.push("mutated");
 
         expect(snapshot.nodes).toHaveLength(3);
         expect(await application.graph.getNode("markdown:notes/details.md")).toMatchObject({ type: "document" });
+        expect(nodesByPath).toEqual([expect.objectContaining({ id: "markdown:notes/overview.md", type: "document" })]);
+        expect(edgesBySource).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: "links_to", sourceNodeId: "markdown:notes/overview.md" }),
+        ]));
         expect((await application.graph.findEdgesForNode("markdown:notes/overview.md"))
             .find((candidate) => candidate.type === "links_to")?.sources[0]?.chunkIds).toEqual(["link-chunk"]);
         expect(await application.graph.checkIntegrity()).toEqual({ valid: true, issues: [] });

@@ -92,6 +92,43 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         await harness.runtime.dispose();
     });
 
+    it("keeps graph queries and integrity correct through modify, rename, and delete", async () => {
+        const harness = createRuntimeHarness();
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+        const initialOverview = await harness.runtime.application.graph.getNode("markdown:overview.md");
+        if (!initialOverview || initialOverview.type !== "document") throw new Error("Expected initial overview document.");
+
+        harness.writeKnowledgeFile("overview.md", "# Overview\n\nUpdated retrieval notes.\n\n[[details]]");
+        harness.runtime.handleVaultPathChanged("overview.md");
+        await flushPendingKnowledgeBaseSync(harness.runtime);
+
+        const updatedOverview = await harness.runtime.application.graph.getNode("markdown:overview.md");
+        expect(updatedOverview).toMatchObject({ type: "document", filePath: "overview.md" });
+        expect(updatedOverview?.type === "document" && updatedOverview.contentHash).not.toBe(initialOverview.contentHash);
+        expect(await harness.runtime.application.graph.findNodesByDocumentPath("overview.md"))
+            .toEqual(expect.arrayContaining([expect.objectContaining({ type: "document" })]));
+        expect(await harness.runtime.application.graph.findEdgesBySourceFile("overview.md"))
+            .toEqual(expect.arrayContaining([expect.objectContaining({ type: "links_to" })]));
+
+        harness.renameKnowledgeFile("details.md", "renamed-details.md");
+        harness.runtime.handleVaultPathRenamed("details.md", "renamed-details.md");
+        await flushPendingKnowledgeBaseSync(harness.runtime);
+
+        expect(await harness.runtime.application.graph.findEdgesForNode("markdown:renamed-details.md"))
+            .toEqual(expect.arrayContaining([expect.objectContaining({ type: "links_to" })]));
+
+        harness.deleteKnowledgeFile("renamed-details.md");
+        harness.runtime.handleVaultPathChanged("renamed-details.md");
+        await flushPendingKnowledgeBaseSync(harness.runtime);
+
+        expect(await harness.runtime.application.graph.findNodesByDocumentPath("renamed-details.md")).toEqual([]);
+        expect(await harness.runtime.application.graph.findEdgesBySourceFile("overview.md"))
+            .not.toEqual(expect.arrayContaining([expect.objectContaining({ type: "links_to" })]));
+        expect(await harness.runtime.application.graph.checkIntegrity()).toEqual({ valid: true, issues: [] });
+        await harness.runtime.dispose();
+    });
+
     it("deduplicates repeated file events and does not fall back to a graph full rebuild", async () => {
         const harness = createRuntimeHarness();
         await harness.runtime.initialize();
@@ -142,6 +179,8 @@ function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = nu
     runtime: VaultCoachRuntime;
     adapter: InMemoryVaultAdapter;
     renameKnowledgeFile(oldPath: string, newPath: string): void;
+    writeKnowledgeFile(path: string, content: string): void;
+    deleteKnowledgeFile(path: string): void;
 } {
     const files = new Map<string, { file: TFile; content: string }>([
         ["details.md", {
@@ -204,6 +243,17 @@ function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = nu
                 file: createFile(newPath, entry.file.stat.mtime + 1),
                 content: entry.content,
             });
+        },
+        writeKnowledgeFile: (path, content) => {
+            const entry = files.get(path);
+            if (!entry) throw new Error(`Missing fixture file: ${path}`);
+            files.set(path, {
+                file: createFile(path, entry.file.stat.mtime + 1),
+                content,
+            });
+        },
+        deleteKnowledgeFile: (path) => {
+            if (!files.delete(path)) throw new Error(`Missing fixture file: ${path}`);
         },
     };
 }

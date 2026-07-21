@@ -166,7 +166,9 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
             },
             getSnapshot: async () => graphService.getSnapshot(),
             getNode: async (nodeId) => graphService.getNode(nodeId),
+            findNodesByDocumentPath: async (filePath) => graphService.findNodesByDocumentPath(filePath),
             findEdgesForNode: async (nodeId) => graphService.findEdgesForNode(nodeId),
+            findEdgesBySourceFile: async (filePath) => graphService.findEdgesBySourceFile(filePath),
             getEdgeSources: async (edgeId) => graphService.getEdgeSources(edgeId),
             checkIntegrity: async () => graphService.checkIntegrity(),
         };

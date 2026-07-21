@@ -100,6 +100,23 @@ describe("GraphIntegrityService", () => {
 
         expect(service.check(invalid).issues.map((issue) => issue.code)).toContain("invalid-snapshot-stats");
     });
+
+    it("rejects source evidence whose target path does not match its link endpoint", () => {
+        const snapshot = createValidSnapshot();
+        const invalid: GraphSnapshotV1 = {
+            ...snapshot,
+            edges: snapshot.edges.map((edge) => edge.type === "links_to"
+                ? {
+                    ...edge,
+                    sources: edge.sources.map((source) => ({ ...source, targetFilePath: "notes/other.md" })),
+                }
+                : edge),
+        };
+
+        expect(service.check(invalid).issues).toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: "invalid-source" }),
+        ]));
+    });
 });
 
 function createValidSnapshot(): GraphSnapshotV1 {
