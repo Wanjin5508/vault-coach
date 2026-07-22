@@ -48,6 +48,21 @@ describe("LearningGraphQueryService", () => {
             getEffectiveSemanticGraph: () => ({ concepts: [], relations: [], redirects: {}, rejectedCandidateFingerprints: [] }),
         });
         expect(queries.getProjection()).toMatchObject({ sourceReady: false, nodes: [], edges: [] });
+        expect(queries.getConceptCatalog()).toMatchObject({ sourceReady: false, concepts: [] });
+    });
+
+    it("exposes an unbounded effective-concept catalog for domain computation, not renderer candidates", () => {
+        const catalog = new LearningGraphQueryService(source()).getConceptCatalog();
+
+        expect(catalog).toEqual({
+            sourceReady: true,
+            message: null,
+            concepts: [
+                { id: "concept:alpha", label: "Alpha", aliases: ["Alpha alias"], sourcePaths: ["notes/a.md"] },
+                { id: "concept:beta", label: "Beta", aliases: ["Beta alias"], sourcePaths: ["notes/b.md"] },
+                { id: "concept:gamma", label: "Gamma", aliases: ["Gamma alias"], sourcePaths: ["notes/b.md"] },
+            ],
+        });
     });
 });
 

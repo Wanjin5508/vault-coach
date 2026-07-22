@@ -227,6 +227,19 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
                 }
             },
         });
+        this.addCommand({
+            id: "rebuild-concept-mastery",
+            name: "Rebuild concept mastery",
+            callback: async () => {
+                try {
+                    const snapshot = await this.runtime.application.mastery.rebuild();
+                    new Notice(`Concept mastery updated for ${snapshot.states.length} concepts.`);
+                    this.refreshAllViews();
+                } catch (error: unknown) {
+                    new Notice(error instanceof Error ? error.message : String(error));
+                }
+            },
+        });
     }
 
     private refreshBuiltInDefaultGreeting(): void {

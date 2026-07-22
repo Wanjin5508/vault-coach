@@ -121,6 +121,12 @@ The **Semantic concept graph** is an opt-in layer above the local structural sna
 
 The map never passes a full Vault graph to its renderer: each projection is capped at 150 nodes and 300 relationships and reports when items are hidden. Before new local semantic work, Vault Coach also evaluates local counts (chunks, Sections, text size, Concepts, relationships, and known raw vector memory). At the warning level it pauses automatic semantic sync but still permits an explicit rebuild; at higher levels it pauses new local semantic builds while preserving existing graph reads, Ask, Exam, and structural indexing. No external service is contacted by this safeguard.
 
+### Derived concept mastery
+
+**Rebuild concept mastery** creates a local, rebuildable learning-evidence cache at `.vault-coach/mastery/mastery-snapshot-v1.json`. It aggregates only immutable Assessment Session JSON events into effective Concepts: direct Concept IDs are accepted, while older provisional topics must have a unique normalized exact match against a Concept name or alias. Ambiguous and unknown topics remain unbound rather than being guessed from embeddings or graph candidates.
+
+The versioned `mastery/v1` calculation combines answer score, question difficulty, evidence/evaluation confidence, and time decay. It records a per-Concept score, confidence, level, trend, recurring errors, suggested next review date, and event-level traceability. Saving an exam always succeeds even if this derived cache cannot update; run the command later to rebuild it. At the higher local graph-capacity levels, the plugin preserves existing mastery reads and pauses new local mastery calculations until an external service is available.
+
 ![alt text](assets/screenshots/exam-mode-scope.png)
 
 Users can also manually manage the scope of test questions:

@@ -15,6 +15,7 @@ import { ObsidianDocumentFileMetadataReader } from "../infrastructure/obsidian/o
 import { ObsidianGraphSourceReader } from "../infrastructure/obsidian/obsidian-graph-source-reader";
 import { JsonGraphStore } from "../infrastructure/storage/json-graph-store";
 import { JsonSemanticGraphStore } from "../infrastructure/storage/json-semantic-graph-store";
+import { JsonMasteryStore } from "../infrastructure/storage/json-mastery-store";
 import { LongTermMemoryService } from "../memory/memory-service";
 import { VaultCoachPersistentStore } from "../persistent-store";
 import { AdvancedRagEngine } from "../rag-engine";
@@ -26,6 +27,7 @@ import { ConceptExtractionService } from "./semantic-graph/concept-extraction-se
 import { SemanticGraphService } from "./semantic-graph/semantic-graph-service";
 import { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
 import { ServiceLearningGraphSource } from "./learning-graph/learning-graph-source";
+import { MasteryService } from "./mastery/mastery-service";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
@@ -73,6 +75,7 @@ export interface ApplicationContainerServices {
     knowledgeGraphService: KnowledgeGraphService;
     semanticGraphService: SemanticGraphService;
     learningGraphQueryService: LearningGraphQueryService;
+    masteryService: MasteryService;
 }
 
 /**
@@ -144,6 +147,12 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
     const learningGraphQueryService = new LearningGraphQueryService(
         new ServiceLearningGraphSource(knowledgeGraphService, semanticGraphService),
     );
+    const masteryService = new MasteryService({
+        assessmentSessionStore,
+        catalogReader: learningGraphQueryService,
+        store: new JsonMasteryStore(dependencies.app.vault.adapter),
+        getCapacityAssessment: () => semanticGraphService.getCapacityAssessment(),
+    });
     let assessmentEventSequence = 0;
     const assessmentEventFactory = new AssessmentEventFactory({
         createEventId: () => createAssessmentEventId(assessmentEventSequence++),
@@ -195,6 +204,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         knowledgeGraphService,
         semanticGraphService,
         learningGraphQueryService,
+        masteryService,
     });
     application = applicationInstance;
 
@@ -216,6 +226,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             knowledgeGraphService,
             semanticGraphService,
             learningGraphQueryService,
+            masteryService,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();

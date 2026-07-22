@@ -92,3 +92,6 @@ export const GRAPH_SNAPSHOT_PATH = `${GRAPH_DIR_PATH}/graph-snapshot-v1.json`;
 // Semantic graph facts stay outside the deterministic M2 structure snapshot.
 export const SEMANTIC_GRAPH_DIR_PATH = `${GRAPH_DIR_PATH}/semantic`;
 export const SEMANTIC_GRAPH_MANIFEST_PATH = `${SEMANTIC_GRAPH_DIR_PATH}/semantic-manifest-v1.json`;
+// 可由 Assessment Session 与有效概念目录重建的掌握度派生快照。
+export const MASTERY_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/mastery`;
+export const MASTERY_SNAPSHOT_PATH = `${MASTERY_DIR_PATH}/mastery-snapshot-v1.json`;

@@ -121,6 +121,12 @@ session JSON 是唯一事实源，包含考试、用户答案、评分证据、�
 
 Learning Map 不会把完整 Vault 图交给渲染器：每次投影最多 150 个节点、300 条关系，并会提示被隐藏的数量。新的本地语义工作开始前，插件会评估 chunk、Section、文本量、Concept、关系及已知的原始向量内存。达到 warning 时会暂停自动语义同步，但仍允许用户显式重建；达到更高等级时会暂停新的本地语义构建，同时保留已有图读取、Ask、Exam 和确定性索引。该保护不会连接外部服务。
 
+### 派生的概念掌握度
+
+命令面板中的 **Rebuild concept mastery** 会在 `.vault-coach/mastery/mastery-snapshot-v1.json` 创建可删除、可重建的本地学习证据缓存。它只把不可变的 Assessment Session JSON 事件聚合到 effective Concept：直接的 Concept ID 可以使用；旧的 provisional topic 必须能与 Concept 名称或 Alias 形成唯一的、规范化的精确匹配。歧义或未知 topic 会保持未绑定，绝不会依据 embedding 或图谱候选关系猜测归属。
+
+版本化的 `mastery/v1` 计算综合答案得分、题目难度、证据/评分置信度与时间衰减，记录每个 Concept 的得分、置信度、等级、趋势、常见错误、建议复习时间和事件级证据链。即使该派生缓存更新失败，考试保存也一定会成功；之后可重新执行命令重建。当本地知识图谱容量达到较高等级时，插件会保留已有掌握度读取并暂停新的本地掌握度计算，等待可用的独立服务。
+
 ![alt text](assets/screenshots/exam-mode-scope.png.png)
 
 用户同样可以手动管理测试题目的范围：

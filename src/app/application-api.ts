@@ -21,7 +21,8 @@ import type {
     SemanticGraphStateView,
     SemanticRelationType,
 } from "../domain/semantic-graph/semantic-graph-types";
-import type { LearningGraphProjection, LearningGraphQuery } from "../domain/learning-graph/learning-graph-types";
+import type { LearningGraphConceptCatalog, LearningGraphProjection, LearningGraphQuery } from "../domain/learning-graph/learning-graph-types";
+import type { ConceptMasteryState, MasterySnapshotV1, MasteryStateView } from "../domain/mastery/mastery-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -94,6 +95,16 @@ export interface SemanticGraphApplicationApi {
 /** Read-only M2 + M3 projection consumed by M4B and the Learning Map. */
 export interface LearningGraphApplicationApi {
     getProjection(query?: LearningGraphQuery): Promise<LearningGraphProjection>;
+    getConceptCatalog(): Promise<LearningGraphConceptCatalog>;
+}
+
+/** M4B exposes derived mastery facts without coupling a future UI to storage. */
+export interface MasteryApplicationApi {
+    getState(): MasteryStateView;
+    getSnapshot(): MasterySnapshotV1 | null;
+    getConceptState(conceptId: string): ConceptMasteryState | null;
+    rebuild(): Promise<MasterySnapshotV1>;
+    clear(): Promise<void>;
 }
 
 export interface ProgressApplicationApi { isAvailable(): false; }
@@ -105,5 +116,6 @@ export interface VaultCoachApplicationApi {
     graph: GraphApplicationApi;
     semanticGraph: SemanticGraphApplicationApi;
     learningGraph: LearningGraphApplicationApi;
+    mastery: MasteryApplicationApi;
     progress: ProgressApplicationApi;
 }

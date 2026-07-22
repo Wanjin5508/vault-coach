@@ -1,4 +1,4 @@
-import { LEARNING_GRAPH_MAX_EDGES, LEARNING_GRAPH_MAX_NODES, type LearningGraphEdge, type LearningGraphNode, type LearningGraphProjection, type LearningGraphQuery } from "../../domain/learning-graph/learning-graph-types";
+import { LEARNING_GRAPH_MAX_EDGES, LEARNING_GRAPH_MAX_NODES, type LearningGraphConceptCatalog, type LearningGraphEdge, type LearningGraphNode, type LearningGraphProjection, type LearningGraphQuery } from "../../domain/learning-graph/learning-graph-types";
 import { compareLearningGraphEdges, compareLearningGraphNodes } from "../../domain/learning-graph/learning-graph-id";
 import { LearningGraphIntegrityService } from "../../domain/learning-graph/learning-graph-integrity";
 import type { SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
@@ -30,6 +30,37 @@ export class LearningGraphQueryService {
         if (!report.valid) throw new Error(`Learning graph integrity check failed: ${report.issues.map((issue) => issue.code).join(", ")}`);
         this.cache.set(cacheKey, cloneProjection(projection));
         return projection;
+    }
+
+    /**
+     * Domain-facing catalog for Mastery. It deliberately bypasses renderer
+     * budgets but still exposes only M3 effective Concepts.
+     */
+    getConceptCatalog(): LearningGraphConceptCatalog {
+        const snapshot = this.source.getStructuralSnapshot();
+        if (!snapshot) {
+            return {
+                concepts: [],
+                sourceReady: false,
+                message: "Rebuild the knowledge index first so the deterministic structural graph is available.",
+            };
+        }
+        const semantic = this.source.getEffectiveSemanticGraph();
+        return {
+            concepts: semantic.concepts
+                .map((concept) => ({
+                    id: concept.id,
+                    label: concept.displayName,
+                    aliases: [...concept.aliases].sort((left, right) => left.localeCompare(right)),
+                    sourcePaths: Array.from(new Set(concept.evidence
+                        .map((evidence) => evidence.locator.type === "zotero" ? "" : evidence.locator.filePath)
+                        .filter((path) => path.length > 0)))
+                        .sort((left, right) => left.localeCompare(right)),
+                }))
+                .sort((left, right) => left.id.localeCompare(right.id)),
+            sourceReady: true,
+            message: null,
+        };
     }
 
     invalidate(): void {

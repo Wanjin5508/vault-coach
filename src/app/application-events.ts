@@ -3,6 +3,7 @@ export type ApplicationEvent =
     | { type: "index-state-changed" }
     | { type: "graph-state-changed" }
     | { type: "semantic-graph-state-changed" }
+    | { type: "mastery-state-changed" }
     | { type: "conversation-changed" }
     | { type: "exam-history-changed" };
 

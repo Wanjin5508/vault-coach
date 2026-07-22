@@ -113,6 +113,24 @@ describe("VaultCoachApplication", () => {
         expect(harness.callOrder).toEqual(["facts", "report"]);
     });
 
+    it("keeps the saved exam and report when derived mastery synchronization fails", async () => {
+        const masteryError = new Error("mastery cache unavailable");
+        const harness = createExamSaveHarness({ masterySyncError: masteryError });
+        const events: string[] = [];
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        harness.application.subscribe((event) => events.push(event.type));
+
+        const saved = await harness.application.exam.saveSession(createScoredSession());
+
+        expect(saved.status).toBe("saved");
+        expect(harness.documents.get("session-1")?.assessmentEvents).toHaveLength(1);
+        expect(harness.writeAssessmentProjection).toHaveBeenCalledOnce();
+        expect(harness.syncMastery).toHaveBeenCalledOnce();
+        expect(harness.markMasteryDirty).toHaveBeenCalledOnce();
+        expect(events).toEqual(["mastery-state-changed", "exam-history-changed"]);
+        errorSpy.mockRestore();
+    });
+
     it("keeps automatic repeated saving idempotent and appends only a real re-evaluation", async () => {
         const harness = createExamSaveHarness();
         const first = createScoredSession();
@@ -199,6 +217,7 @@ interface ExamSaveHarnessOptions {
     saveFactsError?: Error;
     writeReportError?: Error;
     evaluate?: ReturnType<typeof vi.fn>;
+    masterySyncError?: Error;
 }
 
 function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
@@ -224,6 +243,11 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
     const deleteSession = vi.fn(async () => undefined);
     const deleteHistory = vi.fn(async () => undefined);
     const eventIds = ["event-1", "event-2", "event-3"];
+    const syncMastery = vi.fn(async () => {
+        if (options.masterySyncError) throw options.masterySyncError;
+        return { updated: true, recalculatedConceptIds: ["concept:rag"] };
+    });
+    const markMasteryDirty = vi.fn(() => undefined);
     const application = new VaultCoachApplication({
         chatService: {
             getMessages: () => [],
@@ -279,6 +303,12 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
             promptVersion: "evaluation/v2",
             evaluatedAt: 100,
         }),
+        ...(options.masterySyncError ? {
+            masteryService: {
+                syncForSession: syncMastery,
+                markDirty: markMasteryDirty,
+            },
+        } : {}),
     } as unknown as VaultCoachApplicationDependencies);
 
     return {
@@ -292,6 +322,8 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
         deleteSession,
         deleteHistory,
         markdownHistoryRecords,
+        syncMastery,
+        markMasteryDirty,
     };
 }
 

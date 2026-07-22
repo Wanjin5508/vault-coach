@@ -80,8 +80,10 @@ export class VaultCoachRuntime {
         await this.restoreKnowledgeBaseSnapshot();
         await this.services.knowledgeGraphService.load();
         await this.services.semanticGraphService.load();
+        await this.services.masteryService.load();
         if (this.services.knowledgeBase.isReady() && !this.services.knowledgeGraphService.getState().hasSnapshot) {
             this.services.knowledgeGraphService.markDirty();
+            this.services.masteryService.markDirty("确定性知识图谱尚未建立，需要重新计算掌握度。");
         }
         if (this.services.chatService.getMessages().length === 0) {
             this.applicationContainer.application.chat.resetConversation();
@@ -111,6 +113,7 @@ export class VaultCoachRuntime {
         this.knowledgeBaseDirty = true;
         this.vectorIndexDirty = true;
         this.services.knowledgeGraphService.markDirty();
+        this.services.masteryService.markDirty("知识库范围已变更，需要重新计算掌握度。");
     }
 
     markVectorIndexDirty(): void {
@@ -204,8 +207,10 @@ export class VaultCoachRuntime {
             try {
                 await this.services.knowledgeGraphService.rebuildAll(abortSignal);
                 this.services.learningGraphQueryService.invalidate();
+                this.services.masteryService.markDirty("确定性知识图谱已重建，需要重新计算掌握度。");
             } catch (error: unknown) {
                 if (isAbortError(error)) throw error;
+                this.services.masteryService.markDirty("知识图谱重建失败，需要重新计算掌握度。");
                 console.error("[VaultCoachRuntime] 图谱构建失败，文本索引将保持可用。", error);
             }
             this.knowledgeBaseDirty = false;
@@ -253,14 +258,18 @@ export class VaultCoachRuntime {
         try {
             await this.services.knowledgeGraphService.clear();
             this.services.learningGraphQueryService.invalidate();
+            this.services.masteryService.markDirty("知识图谱已清除，需要重新计算掌握度。");
         } catch (error: unknown) {
             this.services.knowledgeGraphService.markDirty();
+            this.services.masteryService.markDirty("知识图谱清除未完成，需要重新计算掌握度。");
             console.error("[VaultCoachRuntime] 清除图谱快照失败，文本索引已清除。", error);
         }
         try {
             await this.services.semanticGraphService.clear();
             this.services.learningGraphQueryService.invalidate();
+            this.services.masteryService.markDirty("语义概念图谱已清除，需要重新计算掌握度。");
         } catch (error: unknown) {
+            this.services.masteryService.markDirty("语义图谱清除未完成，需要重新计算掌握度。");
             console.error("[VaultCoachRuntime] 清除语义图谱失败，文本索引已清除。", error);
         }
         this.services.ragEngine.hydrateVectorStats({ ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null });
@@ -296,6 +305,7 @@ export class VaultCoachRuntime {
         this.knowledgeBaseDirty = true;
         this.vectorIndexDirty = true;
         this.services.knowledgeGraphService.markDirty();
+        this.services.masteryService.markDirty("知识库范围已变更，需要重新计算掌握度。");
         this.scheduleAutoIndexSync();
     }
 
@@ -423,18 +433,22 @@ export class VaultCoachRuntime {
                     abortSignal,
                 );
                 this.services.learningGraphQueryService.invalidate();
+                this.services.masteryService.markDirty("确定性知识图谱已增量同步，需要重新计算掌握度。");
                 this.removeProcessedGraphRenames(graphRenames);
             } catch (error: unknown) {
                 if (isAbortError(error)) throw error;
                 console.error("[VaultCoachRuntime] 自动图谱增量同步失败，文本索引将保持可用。", error);
                 this.services.knowledgeGraphService.markDirty();
+                this.services.masteryService.markDirty("知识图谱增量同步失败，需要重新计算掌握度。");
                 for (const path of syncResult.affectedFiles) this.pendingChangedKnowledgePaths.add(path);
             }
             try {
                 await this.services.semanticGraphService.syncChangedFiles(syncResult, abortSignal);
                 this.services.learningGraphQueryService.invalidate();
+                this.services.masteryService.markDirty("有效概念图谱已增量同步，需要重新计算掌握度。");
             } catch (error: unknown) {
                 if (isAbortError(error)) throw error;
+                this.services.masteryService.markDirty("语义图谱增量同步失败，需要重新计算掌握度。");
                 console.error("[VaultCoachRuntime] 自动语义图谱增量同步失败，文本索引将保持可用。", error);
             }
             this.lastAutoIndexAt = Date.now();

@@ -86,6 +86,23 @@ export interface LearningGraphProjection {
     message: string | null;
 }
 
+/**
+ * Unbounded semantic catalog for domain computation only. Unlike a renderer
+ * projection, it contains no layout data, structural nodes, or candidates.
+ */
+export interface LearningGraphConceptCatalogEntry {
+    id: string;
+    label: string;
+    aliases: string[];
+    sourcePaths: string[];
+}
+
+export interface LearningGraphConceptCatalog {
+    concepts: LearningGraphConceptCatalogEntry[];
+    sourceReady: boolean;
+    message: string | null;
+}
+
 export type LearningGraphIntegrityIssueCode =
     | "duplicate-node-id"
     | "duplicate-edge-id"
