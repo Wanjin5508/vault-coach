@@ -203,6 +203,7 @@ export class VaultCoachRuntime {
             }
             try {
                 await this.services.knowledgeGraphService.rebuildAll(abortSignal);
+                this.services.learningGraphQueryService.invalidate();
             } catch (error: unknown) {
                 if (isAbortError(error)) throw error;
                 console.error("[VaultCoachRuntime] 图谱构建失败，文本索引将保持可用。", error);
@@ -251,12 +252,14 @@ export class VaultCoachRuntime {
         await this.services.persistentStore.removeKnowledgeBaseSnapshot();
         try {
             await this.services.knowledgeGraphService.clear();
+            this.services.learningGraphQueryService.invalidate();
         } catch (error: unknown) {
             this.services.knowledgeGraphService.markDirty();
             console.error("[VaultCoachRuntime] 清除图谱快照失败，文本索引已清除。", error);
         }
         try {
             await this.services.semanticGraphService.clear();
+            this.services.learningGraphQueryService.invalidate();
         } catch (error: unknown) {
             console.error("[VaultCoachRuntime] 清除语义图谱失败，文本索引已清除。", error);
         }
@@ -419,6 +422,7 @@ export class VaultCoachRuntime {
                     graphRenames,
                     abortSignal,
                 );
+                this.services.learningGraphQueryService.invalidate();
                 this.removeProcessedGraphRenames(graphRenames);
             } catch (error: unknown) {
                 if (isAbortError(error)) throw error;
@@ -428,6 +432,7 @@ export class VaultCoachRuntime {
             }
             try {
                 await this.services.semanticGraphService.syncChangedFiles(syncResult, abortSignal);
+                this.services.learningGraphQueryService.invalidate();
             } catch (error: unknown) {
                 if (isAbortError(error)) throw error;
                 console.error("[VaultCoachRuntime] 自动语义图谱增量同步失败，文本索引将保持可用。", error);

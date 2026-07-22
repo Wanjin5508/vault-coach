@@ -24,6 +24,8 @@ import { KnowledgeIndexCoordinator } from "./index/knowledge-index-coordinator";
 import { KnowledgeGraphService } from "./graph/knowledge-graph-service";
 import { ConceptExtractionService } from "./semantic-graph/concept-extraction-service";
 import { SemanticGraphService } from "./semantic-graph/semantic-graph-service";
+import { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
+import { ServiceLearningGraphSource } from "./learning-graph/learning-graph-source";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
@@ -70,6 +72,7 @@ export interface ApplicationContainerServices {
     indexCoordinator: KnowledgeIndexCoordinator;
     knowledgeGraphService: KnowledgeGraphService;
     semanticGraphService: SemanticGraphService;
+    learningGraphQueryService: LearningGraphQueryService;
 }
 
 /**
@@ -136,7 +139,11 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         extractionService: new ConceptExtractionService(semanticModelClient),
         embeddingGateway: semanticModelClient,
         getSettings: () => dependencies.getSettings(),
+        getVectorIndexStats: () => ragEngine.getVectorIndexStats(),
     });
+    const learningGraphQueryService = new LearningGraphQueryService(
+        new ServiceLearningGraphSource(knowledgeGraphService, semanticGraphService),
+    );
     let assessmentEventSequence = 0;
     const assessmentEventFactory = new AssessmentEventFactory({
         createEventId: () => createAssessmentEventId(assessmentEventSequence++),
@@ -187,6 +194,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         abortIndex: () => dependencies.abortIndex(),
         knowledgeGraphService,
         semanticGraphService,
+        learningGraphQueryService,
     });
     application = applicationInstance;
 
@@ -207,6 +215,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             indexCoordinator,
             knowledgeGraphService,
             semanticGraphService,
+            learningGraphQueryService,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();

@@ -21,6 +21,7 @@ import type {
     SemanticGraphStateView,
     SemanticRelationType,
 } from "../domain/semantic-graph/semantic-graph-types";
+import type { LearningGraphProjection, LearningGraphQuery } from "../domain/learning-graph/learning-graph-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -90,6 +91,11 @@ export interface SemanticGraphApplicationApi {
     undoManualRelationRemoval(decisionId: string): Promise<void>;
 }
 
+/** Read-only M2 + M3 projection consumed by M4B and the Learning Map. */
+export interface LearningGraphApplicationApi {
+    getProjection(query?: LearningGraphQuery): Promise<LearningGraphProjection>;
+}
+
 export interface ProgressApplicationApi { isAvailable(): false; }
 
 export interface VaultCoachApplicationApi {
@@ -98,5 +104,6 @@ export interface VaultCoachApplicationApi {
     index: IndexApplicationApi;
     graph: GraphApplicationApi;
     semanticGraph: SemanticGraphApplicationApi;
+    learningGraph: LearningGraphApplicationApi;
     progress: ProgressApplicationApi;
 }

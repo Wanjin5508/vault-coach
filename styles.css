@@ -539,6 +539,184 @@
     font-size: var(--font-ui-small);
 }
 
+/* M4A: main-workspace explorer for the confirmed learning graph. */
+.vault-coach-learning-map {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-3);
+    height: 100%;
+    padding: var(--size-4-3);
+    box-sizing: border-box;
+}
+
+.vault-coach-learning-map-header h2 {
+    margin: 0;
+}
+
+.vault-coach-learning-map-summary,
+.vault-coach-learning-map-muted,
+.vault-coach-learning-map-legend {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    line-height: 1.45;
+}
+
+.vault-coach-learning-map-capacity,
+.vault-coach-learning-map-budget,
+.vault-coach-learning-map-empty,
+.vault-coach-learning-map-error {
+    padding: var(--size-4-2);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-learning-map-capacity,
+.vault-coach-learning-map-budget,
+.vault-coach-learning-map-error {
+    border-color: var(--text-warning);
+}
+
+.vault-coach-learning-map-toolbar,
+.vault-coach-learning-map-filter,
+.vault-coach-learning-map-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--size-2-3);
+}
+
+.vault-coach-learning-map-toolbar input[type="search"] {
+    flex: 1 1 16rem;
+}
+
+.vault-coach-learning-map-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-2-2);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-learning-map-body {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(17rem, 0.8fr);
+    gap: var(--size-4-3);
+    flex: 1;
+    min-height: 30rem;
+}
+
+.vault-coach-learning-map-graph,
+.vault-coach-learning-map-inspector {
+    min-width: 0;
+    overflow: auto;
+    padding: var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+}
+
+.vault-coach-learning-map-graph {
+    background:
+        radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text-muted) 18%, transparent) 1px, transparent 0) 0 0 / 20px 20px,
+        var(--background-primary-alt);
+}
+
+.vault-coach-learning-map-renderer {
+    display: block;
+    width: 100%;
+    min-height: 30rem;
+    touch-action: none;
+    cursor: grab;
+}
+
+.vault-coach-learning-map-renderer:active {
+    cursor: grabbing;
+}
+
+.vault-coach-learning-map-background {
+    fill: transparent;
+}
+
+.vault-coach-learning-map-edge {
+    stroke: var(--text-muted);
+    stroke-width: 1.8;
+    opacity: 0.62;
+    vector-effect: non-scaling-stroke;
+    cursor: pointer;
+}
+
+.vault-coach-learning-map-edge.is-user {
+    stroke: var(--interactive-accent);
+    opacity: 0.9;
+}
+
+.vault-coach-learning-map-edge.is-selected {
+    stroke: var(--text-accent);
+    stroke-width: 3;
+    opacity: 1;
+}
+
+.vault-coach-learning-map-arrow {
+    fill: var(--text-muted);
+}
+
+.vault-coach-learning-map-node {
+    cursor: pointer;
+}
+
+.vault-coach-learning-map-node circle {
+    fill: var(--background-primary);
+    stroke: var(--interactive-accent);
+    stroke-width: 2.4;
+    vector-effect: non-scaling-stroke;
+}
+
+.vault-coach-learning-map-node.is-section circle,
+.vault-coach-learning-map-node.is-document circle {
+    stroke: var(--text-muted);
+}
+
+.vault-coach-learning-map-node.is-tag circle {
+    stroke: var(--color-yellow);
+}
+
+.vault-coach-learning-map-node.is-selected circle {
+    fill: var(--interactive-accent);
+}
+
+.vault-coach-learning-map-node text {
+    fill: var(--text-normal);
+    font-size: 13px;
+    font-weight: 500;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: var(--background-primary-alt);
+    stroke-width: 3px;
+}
+
+.vault-coach-learning-map-node.is-selected text {
+    fill: var(--text-accent);
+}
+
+.vault-coach-learning-map-evidence {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-2);
+}
+
+.vault-coach-learning-map-evidence-row {
+    overflow-wrap: anywhere;
+    padding: var(--size-2-2);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+@media (max-width: 720px) {
+    .vault-coach-learning-map-body {
+        grid-template-columns: 1fr;
+    }
+}
+
 @media (max-width: 720px) {
     .vault-coach-concept-review-body {
         grid-template-columns: 1fr;

@@ -1,4 +1,5 @@
 import type { DocumentLocator } from "../documents/document-types";
+import type { GraphCapacityAssessment } from "../graph-capacity/graph-capacity-types";
 
 /** The persisted semantic graph schema is deliberately separate from M2 GraphSnapshotV1. */
 export const SEMANTIC_GRAPH_SCHEMA_VERSION = 1;
@@ -239,6 +240,7 @@ export interface SemanticGraphStateView {
     hasData: boolean;
     lastError: string | null;
     stats: SemanticGraphStats;
+    capacity: GraphCapacityAssessment;
 }
 
 export interface ConceptReviewQuery {

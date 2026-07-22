@@ -115,6 +115,12 @@ session JSON 是唯一事实源，包含考试、用户答案、评分证据、�
 - 相似 Concept 候选使用独立且有 Top-K 上限的近似近邻查询。插件不会执行无上限的全 Concept 两两比较，也不会只因 embedding 相似就自动合并概念。
 - **Concept review** 中，虚线是未确认候选，实线是已确认关系。你可以确认、拒绝、合并、撤销合并、编辑 Alias 或新增附带用户说明的手工关系。决策作为追加式本地事实保存，并优先于之后的模型重跑结果。
 
+### Learning Map 与本地容量预算
+
+通过命令面板执行 **Open learning map** 可在普通主工作区标签页打开独立的学习图谱。它只探索 effective Concept、已确认关系和用户手工关系；pending/rejected candidate 仍只在 **Concept review** 中审核，绝不会进入 Learning Map。点击节点或边可查看证据，使用 **Focus neighbourhood** 进行有界邻域展开；还可按需显示 Document / Section / Tag 的确定性来源结构。有向关系会显示箭头。
+
+Learning Map 不会把完整 Vault 图交给渲染器：每次投影最多 150 个节点、300 条关系，并会提示被隐藏的数量。新的本地语义工作开始前，插件会评估 chunk、Section、文本量、Concept、关系及已知的原始向量内存。达到 warning 时会暂停自动语义同步，但仍允许用户显式重建；达到更高等级时会暂停新的本地语义构建，同时保留已有图读取、Ask、Exam 和确定性索引。该保护不会连接外部服务。
+
 ![alt text](assets/screenshots/exam-mode-scope.png.png)
 
 用户同样可以手动管理测试题目的范围：

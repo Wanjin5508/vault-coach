@@ -106,6 +106,30 @@ describe("SemanticGraphService", () => {
         ]));
         expect(projection.candidates).toEqual([expect.objectContaining({ fingerprint: "candidate:tail-pair" })]);
     });
+
+    it("pauses automatic semantic sync at the local warning budget without changing existing graph reads", async () => {
+        const service = new SemanticGraphService({
+            graphService: { getSnapshot: () => null } as never,
+            documentIndex: {
+                getStats: () => ({ fileCount: 20, chunkCount: 8_001, lastIndexedAt: 1, scopeDescription: "test" }),
+                getFileRecords: () => [],
+            } as never,
+            store: new MemorySemanticStore(),
+            extractionService: {} as never,
+            embeddingGateway: {} as never,
+            getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true, enableSemanticGraphAutoSync: true }),
+        });
+        await service.load();
+
+        await service.syncChangedFiles({ affectedFiles: ["notes/changed.md"] });
+
+        expect(service.getState().capacity).toMatchObject({
+            level: "warning",
+            allowManualSemanticBuild: true,
+            allowAutomaticSemanticSync: false,
+        });
+        expect(service.getReviewProjection()).toMatchObject({ concepts: [], relations: [], candidates: [] });
+    });
 });
 
 function snapshot(sectionId: string): GraphSnapshotV1 {

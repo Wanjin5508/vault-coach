@@ -16,6 +16,7 @@ import {
     type SemanticModelMetadata,
     type SemanticRelationType,
     type ConceptEvidenceRef,
+    type EffectiveSemanticGraph,
     type UserSemanticDecision,
     type UserSemanticDecisionInput,
 } from "../../domain/semantic-graph/semantic-graph-types";
@@ -31,6 +32,9 @@ import {
 } from "./concept-similarity-index";
 import { SemanticIndexCoordinator } from "./semantic-index-coordinator";
 import { createSectionExtractionInputs, type SectionExtractionInput } from "./section-extraction-input";
+import { assessGraphCapacity } from "../../domain/graph-capacity/graph-capacity-assessment";
+import type { GraphCapacityAssessment, GraphCapacityInput } from "../../domain/graph-capacity/graph-capacity-types";
+import type { VectorIndexStats } from "../../domain/retrieval/retrieval-types";
 
 export interface SemanticEmbeddingGateway {
     embedTexts(texts: string[], options?: { allowWhenVectorRetrievalDisabled?: boolean }): Promise<number[][]>;
@@ -45,6 +49,7 @@ export interface SemanticGraphServiceDependencies {
     getSettings(): VaultCoachSettings;
     similarityIndex?: ConceptSimilarityIndex;
     getNow?(): number;
+    getVectorIndexStats?(): Pick<VectorIndexStats, "vectorCount" | "dimension">;
 }
 
 /**
@@ -83,7 +88,7 @@ export class SemanticGraphService {
     }
 
     async rebuildAll(signal?: AbortSignal): Promise<void> {
-        await this.run(undefined, signal);
+        await this.run(undefined, signal, "manual");
     }
 
     async syncChangedFiles(syncResult: Pick<KnowledgeBaseSyncResult, "affectedFiles">, signal?: AbortSignal): Promise<void> {
@@ -91,7 +96,8 @@ export class SemanticGraphService {
         if (!settings.enableSemanticGraph || !settings.enableSemanticGraphAutoSync) return;
         const affected = new Set(syncResult.affectedFiles);
         if (affected.size === 0) return;
-        await this.run(affected, signal);
+        if (!this.getCapacityAssessment().allowAutomaticSemanticSync) return;
+        await this.run(affected, signal, "automatic");
     }
 
     abort(): void {
@@ -116,7 +122,53 @@ export class SemanticGraphService {
             hasData: this.state.concepts.length > 0 || this.state.candidates.length > 0,
             lastError: this.lastError,
             stats: this.getStats(),
+            capacity: this.getCapacityAssessment(),
         };
+    }
+
+    /** Stable read boundary for M4A/M4B; pending and rejected candidates stay out. */
+    getEffectiveGraph(): EffectiveSemanticGraph {
+        return deepClone(this.projector.project(this.state));
+    }
+
+    /** A local-only policy result; it never scans the Vault or calls a model. */
+    getCapacityAssessment(): GraphCapacityAssessment {
+        const snapshot = this.dependencies.graphService.getSnapshot();
+        // Older test doubles and third-party read adapters may predate file
+        // metadata. Missing metadata is reported as unknown, never treated as
+        // an empty or safe Vault.
+        const files = typeof this.dependencies.documentIndex.getFileRecords === "function"
+            ? this.dependencies.documentIndex.getFileRecords()
+            : null;
+        const knownFileSizes = files?.map((file) => file.fileSize) ?? [];
+        const indexedTextBytes = files === null
+            ? null
+            : knownFileSizes.length === 0
+                ? 0
+                : knownFileSizes.every((size): size is number => typeof size === "number" && Number.isFinite(size) && size >= 0)
+                    ? knownFileSizes.reduce((total, size) => total + (size ?? 0), 0)
+                    : null;
+        const vectorStats = this.dependencies.getVectorIndexStats?.();
+        const effective = this.projector.project(this.state);
+        const indexStats = typeof this.dependencies.documentIndex.getStats === "function"
+            ? this.dependencies.documentIndex.getStats()
+            : null;
+        const input: GraphCapacityInput = {
+            fileCount: indexStats?.fileCount ?? null,
+            chunkCount: indexStats?.chunkCount ?? null,
+            documentCount: snapshot?.stats.documentCount ?? null,
+            sectionCount: snapshot?.stats.sectionCount ?? null,
+            structuralEdgeCount: snapshot?.stats.edgeCount ?? null,
+            indexedTextBytes,
+            extractionCount: this.state.extractions.length,
+            conceptCount: this.state.concepts.length,
+            candidateCount: this.state.candidates.length,
+            effectiveRelationCount: effective.relations.length,
+            embeddingCount: this.state.embeddings.length,
+            vectorCount: vectorStats?.vectorCount ?? null,
+            vectorDimension: vectorStats?.dimension ?? null,
+        };
+        return assessGraphCapacity(input);
     }
 
     getReviewProjection(query: ConceptReviewQuery = {}): ConceptReviewProjection {
@@ -263,10 +315,19 @@ export class SemanticGraphService {
         await this.appendDecision({ kind: "undo-manual-relation-removal", supersedesDecisionId: decisionId });
     }
 
-    private async run(affectedDocumentPaths: ReadonlySet<string> | undefined, providedSignal?: AbortSignal): Promise<void> {
+    private async run(
+        affectedDocumentPaths: ReadonlySet<string> | undefined,
+        providedSignal: AbortSignal | undefined,
+        mode: "manual" | "automatic",
+    ): Promise<void> {
         const settings = this.dependencies.getSettings();
         if (!settings.enableSemanticGraph) {
             throw new Error("语义概念图谱默认关闭。请先在设置中明确启用它，并确认模型发送范围。");
+        }
+        const capacity = this.getCapacityAssessment();
+        if ((mode === "manual" && !capacity.allowManualSemanticBuild)
+            || (mode === "automatic" && !capacity.allowAutomaticSemanticSync)) {
+            throw createCapacityError(capacity, mode);
         }
         const signal = this.coordinator.start(providedSignal);
         if (!signal) throw new Error("语义概念图谱任务正在运行。");
@@ -797,4 +858,13 @@ function isSemanticRelationType(value: string): value is SemanticRelationType {
 
 function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function createCapacityError(capacity: GraphCapacityAssessment, mode: "manual" | "automatic"): Error {
+    const action = mode === "automatic" ? "自动语义同步" : "本地语义图重建";
+    const reason = capacity.reasons[0];
+    const detail = reason
+        ? `${reason.metric}=${reason.actual}，超过 ${reason.level} 阈值 ${reason.threshold}`
+        : "当前知识库规模超过本地处理预算";
+    return new Error(`${action}已停止：${detail}。现有图谱和问答/考试不受影响；请缩小知识范围，或在后续独立图谱服务可用时使用该服务。`);
 }

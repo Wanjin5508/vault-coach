@@ -1,5 +1,5 @@
 import type { ChatService } from "./chat/chat-service";
-import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, ProgressApplicationApi, SemanticGraphApplicationApi, VaultCoachApplicationApi } from "./application-api";
+import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, LearningGraphApplicationApi, ProgressApplicationApi, SemanticGraphApplicationApi, VaultCoachApplicationApi } from "./application-api";
 import type { ApplicationEvent, ApplicationEventListener } from "./application-events";
 import type { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
 import { getQuestionIdsNeedingAssessmentEvents } from "../domain/assessment/assessment-event-fingerprint";
@@ -18,6 +18,8 @@ import type { ExamEvaluationMetadata, ExamGenerationOptions, ExamHistoryItem, Ex
 import type { KnowledgeGraphService } from "./graph/knowledge-graph-service";
 import type { SemanticGraphService } from "./semantic-graph/semantic-graph-service";
 import type { ConceptEvidenceRef, SemanticRelationType } from "../domain/semantic-graph/semantic-graph-types";
+import type { LearningGraphQuery } from "../domain/learning-graph/learning-graph-types";
+import type { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
@@ -42,6 +44,7 @@ export interface VaultCoachApplicationDependencies {
     abortIndex(): void;
     knowledgeGraphService: KnowledgeGraphService;
     semanticGraphService: SemanticGraphService;
+    learningGraphQueryService?: LearningGraphQueryService;
 }
 
 /** Application facade with grouped use-case APIs and no Obsidian UI dependency. */
@@ -51,6 +54,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
     readonly index: IndexApplicationApi;
     readonly graph: GraphApplicationApi;
     readonly semanticGraph: SemanticGraphApplicationApi;
+    readonly learningGraph: LearningGraphApplicationApi;
     readonly progress: ProgressApplicationApi = { isAvailable: () => false };
     private readonly listeners: Set<ApplicationEventListener> = new Set();
 
@@ -89,6 +93,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         };
         this.graph = this.createGraphApi();
         this.semanticGraph = this.createSemanticGraphApi();
+        this.learningGraph = this.createLearningGraphApi();
     }
 
     subscribe(listener: ApplicationEventListener): () => void {
@@ -166,6 +171,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         return {
             rebuild: async (signal) => {
                 const snapshot = await graphService.rebuildAll(signal);
+                this.dependencies.learningGraphQueryService?.invalidate();
                 this.emit({ type: "graph-state-changed" });
                 return snapshot;
             },
@@ -181,25 +187,36 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
 
     private createSemanticGraphApi(): SemanticGraphApplicationApi {
         const service = this.dependencies.semanticGraphService;
+        const invalidate = () => this.dependencies.learningGraphQueryService?.invalidate();
         return {
-            rebuild: async (signal) => { await service.rebuildAll(signal); this.emit({ type: "semantic-graph-state-changed" }); },
-            clear: async () => { await service.clear(); this.emit({ type: "semantic-graph-state-changed" }); },
+            rebuild: async (signal) => { await service.rebuildAll(signal); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
+            clear: async () => { await service.clear(); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
             abort: () => { service.abort(); this.emit({ type: "semantic-graph-state-changed" }); },
             getState: () => service.getState(),
             getReviewProjection: async (query) => service.getReviewProjection(query),
-            confirmCandidate: async (fingerprint) => { await service.confirmCandidate(fingerprint); this.emit({ type: "semantic-graph-state-changed" }); },
-            rejectCandidate: async (fingerprint, reason) => { await service.rejectCandidate(fingerprint, reason); this.emit({ type: "semantic-graph-state-changed" }); },
-            undoCandidateDecision: async (decisionId) => { await service.undoCandidateDecision(decisionId); this.emit({ type: "semantic-graph-state-changed" }); },
-            mergeConcepts: async (canonicalConceptId, mergedConceptIds) => { await service.mergeConcepts(canonicalConceptId, mergedConceptIds); this.emit({ type: "semantic-graph-state-changed" }); },
-            undoMerge: async (decisionId) => { await service.undoMerge(decisionId); this.emit({ type: "semantic-graph-state-changed" }); },
-            addAlias: async (conceptId, alias) => { await service.addAlias(conceptId, alias); this.emit({ type: "semantic-graph-state-changed" }); },
-            removeAlias: async (conceptId, alias) => { await service.removeAlias(conceptId, alias); this.emit({ type: "semantic-graph-state-changed" }); },
+            confirmCandidate: async (fingerprint) => { await service.confirmCandidate(fingerprint); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
+            rejectCandidate: async (fingerprint, reason) => { await service.rejectCandidate(fingerprint, reason); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
+            undoCandidateDecision: async (decisionId) => { await service.undoCandidateDecision(decisionId); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
+            mergeConcepts: async (canonicalConceptId, mergedConceptIds) => { await service.mergeConcepts(canonicalConceptId, mergedConceptIds); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
+            undoMerge: async (decisionId) => { await service.undoMerge(decisionId); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
+            addAlias: async (conceptId, alias) => { await service.addAlias(conceptId, alias); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
+            removeAlias: async (conceptId, alias) => { await service.removeAlias(conceptId, alias); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
             createManualRelation: async (type: SemanticRelationType, sourceConceptId: string, targetConceptId: string, evidence?: readonly ConceptEvidenceRef[], note?: string) => {
-                await service.createManualRelation(type, sourceConceptId, targetConceptId, evidence, note);
+                await service.createManualRelation(type, sourceConceptId, targetConceptId, evidence, note); invalidate();
                 this.emit({ type: "semantic-graph-state-changed" });
             },
-            removeManualRelation: async (relationId) => { await service.removeManualRelation(relationId); this.emit({ type: "semantic-graph-state-changed" }); },
-            undoManualRelationRemoval: async (decisionId) => { await service.undoManualRelationRemoval(decisionId); this.emit({ type: "semantic-graph-state-changed" }); },
+            removeManualRelation: async (relationId) => { await service.removeManualRelation(relationId); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
+            undoManualRelationRemoval: async (decisionId) => { await service.undoManualRelationRemoval(decisionId); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); },
+        };
+    }
+
+    private createLearningGraphApi(): LearningGraphApplicationApi {
+        return {
+            getProjection: async (query: LearningGraphQuery = {}) => {
+                const service = this.dependencies.learningGraphQueryService;
+                if (!service) throw new Error("Learning graph service is unavailable.");
+                return service.getProjection(query);
+            },
         };
     }
 

@@ -115,6 +115,12 @@ The **Semantic concept graph** is an opt-in layer above the local structural sna
 - Similar Concept candidates use a separate, bounded approximate nearest-neighbour lookup (Top-K). The plugin never performs an unrestricted all-Concept-pairs comparison and never auto-merges Concepts from embedding similarity alone.
 - In **Concept review**, dashed edges are unconfirmed candidates and solid edges are confirmed relations. You can confirm, reject, merge, undo a merge, edit aliases, or add a manually explained relationship. These decisions are append-only local facts and take precedence over later model reruns.
 
+### Learning map and local capacity budget
+
+**Open learning map** opens a separate normal-workspace tab. It explores only effective Concepts, confirmed relationships, and user-created relationships; pending and rejected candidates remain in **Concept review** and never enter the learning map. Select a node or edge to inspect evidence, use **Focus neighbourhood** for bounded traversal, and optionally show the deterministic document/Section/tag source context. Directed relationships show arrows.
+
+The map never passes a full Vault graph to its renderer: each projection is capped at 150 nodes and 300 relationships and reports when items are hidden. Before new local semantic work, Vault Coach also evaluates local counts (chunks, Sections, text size, Concepts, relationships, and known raw vector memory). At the warning level it pauses automatic semantic sync but still permits an explicit rebuild; at higher levels it pauses new local semantic builds while preserving existing graph reads, Ask, Exam, and structural indexing. No external service is contacted by this safeguard.
+
 ![alt text](assets/screenshots/exam-mode-scope.png)
 
 Users can also manually manage the scope of test questions:

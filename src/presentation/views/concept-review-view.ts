@@ -81,6 +81,14 @@ export class ConceptReviewView extends ItemView {
                 text: "Semantic concept graph is disabled. Enable it in Settings → VaultCoach, then rebuild from this view or the command palette. No note content is sent until you explicitly enable and run it.",
             });
         }
+        if (state.capacity.level !== "local") {
+            root.createDiv({
+                cls: "vault-coach-concept-review-notice",
+                text: state.capacity.level === "warning"
+                    ? "This vault has reached the local semantic graph warning budget. Automatic semantic sync is paused; an explicit rebuild remains available."
+                    : "This vault exceeds the local semantic graph budget. Existing concept facts remain readable, but new local semantic rebuilds are paused until the knowledge scope is reduced or an external graph service is available.",
+            });
+        }
         if (state.lastError) root.createDiv({ cls: "vault-coach-concept-review-warning", text: state.lastError });
         this.renderToolbar(root, state.busy);
         if (!this.projection || this.projection.concepts.length === 0) {

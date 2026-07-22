@@ -9,6 +9,7 @@
 // 自定义视图的唯一类型 ID；Obsidian 通过它创建和恢复右侧边栏视图。
 export const VIEW_TYPE_VAULT_COACH = "value-coach-view";
 export const VIEW_TYPE_CONCEPT_REVIEW = "vault-coach-concept-review";
+export const VIEW_TYPE_LEARNING_MAP = "vault-coach-learning-map";
 
 
 // 显示给用户看的视图名称，通常出现在标签页标题和视图列表中。

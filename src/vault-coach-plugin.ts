@@ -1,5 +1,5 @@
 import { Notice, Plugin, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
-import { VIEW_TYPE_CONCEPT_REVIEW, VIEW_TYPE_VAULT_COACH } from "./constants";
+import { VIEW_TYPE_CONCEPT_REVIEW, VIEW_TYPE_LEARNING_MAP, VIEW_TYPE_VAULT_COACH } from "./constants";
 import { VaultCoachRuntime } from "./app/vault-coach-runtime";
 import type { VaultCoachSettings } from "./app/config/settings-types";
 import type { KnowledgeIndexBusyState } from "./app/index/index-types";
@@ -11,6 +11,7 @@ import { LegacyPluginApiAdapter, type LegacyPluginApiHost } from "./presentation
 import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
 import { VaultCoachView } from "./presentation/vault-coach-view";
 import { ConceptReviewView } from "./presentation/views/concept-review-view";
+import { LearningMapView } from "./presentation/views/learning-map-view";
 
 /** Obsidian composition root: lifecycle, UI registration, and thin host adapters only. */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
@@ -34,6 +35,11 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
 
         this.registerView(VIEW_TYPE_VAULT_COACH, (leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this.runtime.application, this.legacyApi));
         this.registerView(VIEW_TYPE_CONCEPT_REVIEW, (leaf: WorkspaceLeaf) => new ConceptReviewView(leaf, this.runtime.application));
+        this.registerView(VIEW_TYPE_LEARNING_MAP, (leaf: WorkspaceLeaf) => new LearningMapView(
+            leaf,
+            this.runtime.application,
+            (filePath, heading) => this.openLearningMapSource(filePath, heading),
+        ));
         registerVaultCoachCommands(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
         this.registerSemanticGraphCommands();
         registerVaultCoachRibbon(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
@@ -84,12 +90,26 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         workspace.setActiveLeaf(leaf, { focus: true });
     }
 
+    /** Opens the read-only Learning Map in a normal workspace tab. */
+    async activateLearningMapView(): Promise<void> {
+        const { workspace } = this.app;
+        let leaf = workspace.getLeavesOfType(VIEW_TYPE_LEARNING_MAP)[0] ?? null;
+        if (!leaf) {
+            leaf = workspace.getLeaf(true);
+            await leaf.setViewState({ type: VIEW_TYPE_LEARNING_MAP, active: true });
+        }
+        workspace.setActiveLeaf(leaf, { focus: true });
+    }
+
     refreshAllViews(): void {
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH)) {
             if (leaf.view instanceof VaultCoachView) leaf.view.refresh();
         }
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_CONCEPT_REVIEW)) {
             if (leaf.view instanceof ConceptReviewView) void leaf.view.refresh();
+        }
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_LEARNING_MAP)) {
+            if (leaf.view instanceof LearningMapView) void leaf.view.refresh();
         }
     }
 
@@ -169,6 +189,11 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         await this.app.workspace.openLinkText(linkTarget, activeFilePath, false);
     }
 
+    private async openLearningMapSource(filePath: string, heading?: string): Promise<void> {
+        const activeFilePath = this.app.workspace.getActiveFile()?.path ?? "";
+        await this.app.workspace.openLinkText(heading ? `${filePath}#${heading}` : filePath, activeFilePath, false);
+    }
+
     private registerVaultEvents(): void {
         this.registerEvent(this.app.vault.on("create", (file: TAbstractFile) => this.runtime.handleVaultPathChanged(file.path)));
         this.registerEvent(this.app.vault.on("modify", (file: TAbstractFile) => this.runtime.handleVaultPathChanged(file.path)));
@@ -183,6 +208,11 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
             id: "open-concept-review",
             name: "Open concept review",
             callback: async () => this.activateConceptReviewView(),
+        });
+        this.addCommand({
+            id: "open-learning-map",
+            name: "Open learning map",
+            callback: async () => this.activateLearningMapView(),
         });
         this.addCommand({
             id: "rebuild-semantic-concept-graph",
