@@ -29,6 +29,7 @@ export class MasteryBindingResolver {
     ): MasteryBindingResolution {
         const conceptsById = new Set(catalog.concepts.map((concept) => concept.id));
         const nameMatches = createNameMatches(catalog);
+        const chunkMatches = createChunkMatches(catalog);
         const resolved: ResolvedMasteryEvidence[] = [];
         const issues: MasteryBindingIssue[] = [];
         for (const input of assessments) {
@@ -46,24 +47,50 @@ export class MasteryBindingResolver {
                 }
                 const binding = bindingsById.get(sourceConceptId);
                 if (!binding) {
-                    issues.push({ eventId: input.event.id, sourceConceptId, reason: "missing-binding" });
+                    this.resolveBySourceChunks(
+                        input,
+                        sourceConceptId,
+                        chunkMatches,
+                        resolvedConceptIds,
+                        resolved,
+                        issues,
+                        { reason: "missing-binding" },
+                    );
                     continue;
                 }
                 const matches = nameMatches.get(normalizeMasteryText(binding.label)) ?? [];
                 const conceptIds = Array.from(new Set(matches.map((match) => match.conceptId))).sort((left, right) => left.localeCompare(right));
                 if (conceptIds.length === 0) {
-                    issues.push({ eventId: input.event.id, sourceConceptId, reason: "unknown-concept" });
+                    this.resolveBySourceChunks(
+                        input,
+                        sourceConceptId,
+                        chunkMatches,
+                        resolvedConceptIds,
+                        resolved,
+                        issues,
+                        { reason: "unknown-concept" },
+                    );
                     continue;
                 }
                 if (conceptIds.length > 1) {
-                    issues.push({ eventId: input.event.id, sourceConceptId, reason: "ambiguous-label", candidateConceptIds: conceptIds });
+                    this.resolveBySourceChunks(
+                        input,
+                        sourceConceptId,
+                        chunkMatches,
+                        resolvedConceptIds,
+                        resolved,
+                        issues,
+                        { reason: "ambiguous-label", candidateConceptIds: conceptIds },
+                    );
                     continue;
                 }
                 const match = matches.find((item) => item.conceptId === conceptIds[0]);
                 const conceptId = conceptIds[0];
-                if (!match || !conceptId || resolvedConceptIds.has(conceptId)) continue;
-                resolved.push({ input, conceptId, bindingKind: match.kind });
-                resolvedConceptIds.add(conceptId);
+                if (match && conceptId && !resolvedConceptIds.has(conceptId)) {
+                    resolved.push({ input, conceptId, bindingKind: match.kind });
+                    resolvedConceptIds.add(conceptId);
+                    continue;
+                }
             }
         }
         return {
@@ -71,11 +98,41 @@ export class MasteryBindingResolver {
             issues: issues.sort(compareIssues),
         };
     }
+
+    /**
+     * Legacy Exam events used a provisional topic ID. When that topic cannot
+     * be matched exactly, the persisted source chunks are the only safe bridge
+     * to the current effective Concept catalog. This never uses fuzzy text or
+     * semantic similarity and never attributes evidence outside a question's
+     * own source chunks.
+     */
+    private resolveBySourceChunks(
+        input: MasteryAssessmentInput,
+        sourceConceptId: string,
+        chunkMatches: ReadonlyMap<string, readonly string[]>,
+        resolvedConceptIds: Set<string>,
+        resolved: ResolvedMasteryEvidence[],
+        issues: MasteryBindingIssue[],
+        fallbackIssue: Omit<MasteryBindingIssue, "eventId" | "sourceConceptId">,
+    ): void {
+        const conceptIds = Array.from(new Set(input.event.sourceChunkIds
+            .flatMap((chunkId) => chunkMatches.get(chunkId) ?? [])))
+            .sort((left, right) => left.localeCompare(right));
+        if (conceptIds.length === 0) {
+            issues.push({ eventId: input.event.id, sourceConceptId, ...fallbackIssue });
+            return;
+        }
+        for (const conceptId of conceptIds) {
+            if (resolvedConceptIds.has(conceptId)) continue;
+            resolved.push({ input, conceptId, bindingKind: "source-chunk-evidence" });
+            resolvedConceptIds.add(conceptId);
+        }
+    }
 }
 
 interface NameMatch {
     conceptId: string;
-    kind: Exclude<MasteryBindingKind, "direct-concept-id">;
+    kind: Exclude<MasteryBindingKind, "direct-concept-id" | "source-chunk-evidence">;
 }
 
 function createNameMatches(catalog: LearningGraphConceptCatalog): Map<string, NameMatch[]> {
@@ -86,6 +143,20 @@ function createNameMatches(catalog: LearningGraphConceptCatalog): Map<string, Na
             appendMatch(matches, normalizeMasteryText(alias), { conceptId: concept.id, kind: "exact-alias" });
         }
     }
+    return matches;
+}
+
+function createChunkMatches(catalog: LearningGraphConceptCatalog): Map<string, string[]> {
+    const matches = new Map<string, string[]>();
+    for (const concept of catalog.concepts) {
+        for (const chunkId of concept.sourceChunkIds) {
+            if (!chunkId) continue;
+            const values = matches.get(chunkId) ?? [];
+            if (!values.includes(concept.id)) values.push(concept.id);
+            matches.set(chunkId, values);
+        }
+    }
+    for (const values of matches.values()) values.sort((left, right) => left.localeCompare(right));
     return matches;
 }
 

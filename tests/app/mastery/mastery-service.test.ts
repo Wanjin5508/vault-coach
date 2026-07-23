@@ -60,10 +60,10 @@ describe("MasteryService", () => {
         await expect(service.rebuildAll()).rejects.toThrow("独立服务");
     });
 
-    it("loads an older algorithm snapshot as dirty instead of discarding it", async () => {
+    it("loads a v1 snapshot as dirty instead of treating pre-source-chunk evidence as current", async () => {
         const store = new MemoryMasteryStore({
             schemaVersion: 1,
-            algorithmVersion: "mastery/old",
+            algorithmVersion: "mastery/v1",
             calculatedAt: 1,
             states: [],
             sourceEventCount: 0,
@@ -78,7 +78,7 @@ describe("MasteryService", () => {
 
         await service.load();
 
-        expect(service.getState()).toMatchObject({ hasSnapshot: true, dirty: true, algorithmVersion: "mastery/old" });
+        expect(service.getState()).toMatchObject({ hasSnapshot: true, dirty: true, algorithmVersion: "mastery/v1" });
     });
 });
 
@@ -124,8 +124,8 @@ function catalog(): LearningGraphConceptCatalog {
         sourceReady: true,
         message: null,
         concepts: [
-            { id: "concept:alpha", label: "Alpha", aliases: [], sourcePaths: [] },
-            { id: "concept:beta", label: "Beta", aliases: [], sourcePaths: [] },
+            { id: "concept:alpha", label: "Alpha", aliases: [], sourcePaths: [], sourceChunkIds: [] },
+            { id: "concept:beta", label: "Beta", aliases: [], sourcePaths: [], sourceChunkIds: [] },
         ],
     };
 }

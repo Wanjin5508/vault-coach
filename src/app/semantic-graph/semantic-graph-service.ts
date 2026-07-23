@@ -122,6 +122,7 @@ export class SemanticGraphService {
             hasData: this.state.concepts.length > 0 || this.state.candidates.length > 0,
             lastError: this.lastError,
             stats: this.getStats(),
+            progress: this.coordinator.getProgress(),
             capacity: this.getCapacityAssessment(),
         };
     }

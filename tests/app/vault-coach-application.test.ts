@@ -52,6 +52,42 @@ describe("VaultCoachApplication", () => {
         expect(getSnapshot).toHaveBeenCalledOnce();
     });
 
+    it("publishes semantic graph state immediately when a rebuild starts and again when it finishes", async () => {
+        let busy = false;
+        let completeRebuild: (() => void) | undefined;
+        const rebuildAll = vi.fn(async () => {
+            busy = true;
+            await new Promise<void>((resolve) => { completeRebuild = resolve; });
+            busy = false;
+        });
+        const application = new VaultCoachApplication({
+            chatService: {
+                getMessages: () => [],
+                appendUserMessage: async () => undefined,
+                streamAssistantTurn: async () => ({ text: "", sources: [], retrievalModeUsed: "keyword", rewriteResult: { originalQuery: "", rewrittenQuery: "", useRewrite: false } }),
+                resetConversation: () => undefined,
+            },
+            semanticGraphService: {
+                rebuildAll,
+                getState: () => ({ busy }),
+            },
+        } as unknown as VaultCoachApplicationDependencies);
+        const events: string[] = [];
+        application.subscribe((event) => events.push(event.type));
+
+        const rebuilding = application.semanticGraph.rebuild();
+
+        expect(application.semanticGraph.getState().busy).toBe(true);
+        expect(events).toEqual(["semantic-graph-state-changed"]);
+        completeRebuild?.();
+        await rebuilding;
+
+        expect(events).toEqual([
+            "semantic-graph-state-changed",
+            "semantic-graph-state-changed",
+        ]);
+    });
+
     it("exposes graph rebuild and read APIs without leaking mutable snapshot state", async () => {
         const store = new ApplicationGraphStore();
         const graphService = new KnowledgeGraphService(createApplicationGraphReader(), new DeterministicGraphBuilder(), store);

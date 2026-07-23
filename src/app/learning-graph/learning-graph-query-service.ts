@@ -56,11 +56,37 @@ export class LearningGraphQueryService {
                         .map((evidence) => evidence.locator.type === "zotero" ? "" : evidence.locator.filePath)
                         .filter((path) => path.length > 0)))
                         .sort((left, right) => left.localeCompare(right)),
+                    sourceChunkIds: Array.from(new Set(concept.evidence
+                        .map((evidence) => evidence.chunkId)
+                        .filter((chunkId) => chunkId.length > 0)))
+                        .sort((left, right) => left.localeCompare(right)),
                 }))
                 .sort((left, right) => left.id.localeCompare(right.id)),
             sourceReady: true,
             message: null,
         };
+    }
+
+    /**
+     * Builds one bounded, read-only provenance index for an Exam generation.
+     * It maps only exact text-index chunk IDs to current effective Concepts;
+     * topic labels, graph traversal, embeddings, and candidates are excluded.
+     */
+    getConceptIdsByChunk(): ReadonlyMap<string, readonly string[]> {
+        const catalog = this.getConceptCatalog();
+        const conceptIdsByChunk = new Map<string, string[]>();
+        if (!catalog.sourceReady) return conceptIdsByChunk;
+        for (const concept of catalog.concepts) {
+            for (const chunkId of concept.sourceChunkIds) {
+                const conceptIds = conceptIdsByChunk.get(chunkId) ?? [];
+                if (!conceptIds.includes(concept.id)) conceptIds.push(concept.id);
+                conceptIdsByChunk.set(chunkId, conceptIds);
+            }
+        }
+        for (const conceptIds of conceptIdsByChunk.values()) {
+            conceptIds.sort((left, right) => left.localeCompare(right));
+        }
+        return conceptIdsByChunk;
     }
 
     invalidate(): void {

@@ -123,7 +123,7 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
             if (leaf.view instanceof LearningMapView) void leaf.view.refresh();
         }
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROGRESS)) {
-            if (leaf.view instanceof ProgressWorkspaceView) leaf.view.refresh();
+            if (leaf.view instanceof ProgressWorkspaceView) void leaf.view.refresh();
         }
     }
 
@@ -220,37 +220,41 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
     private registerSemanticGraphCommands(): void {
         this.addCommand({
             id: "open-concept-review",
-            name: "Open concept review",
+            name: this.t("command.openConceptReview"),
             callback: async () => this.activateConceptReviewView(),
         });
         this.addCommand({
             id: "open-learning-map",
-            name: "Open learning map",
+            name: this.t("command.openLearningMap"),
             callback: async () => this.activateLearningMapView(),
         });
         this.addCommand({
             id: "rebuild-semantic-concept-graph",
-            name: "Rebuild semantic concept graph",
+            name: this.t("command.rebuildSemanticGraph"),
             callback: async () => {
+                if (this.runtime.application.semanticGraph.getState().busy) {
+                    new Notice(this.t("semantic.building"));
+                    return;
+                }
                 try {
                     await this.runtime.application.semanticGraph.rebuild();
-                    new Notice("Semantic concept graph updated.");
+                    new Notice(this.t("notice.semanticGraphUpdated"));
                     this.refreshAllViews();
-                } catch (error: unknown) {
-                    new Notice(error instanceof Error ? error.message : String(error));
+                } catch {
+                    new Notice(this.t("notice.semanticGraphBuildFailed"));
                 }
             },
         });
         this.addCommand({
             id: "rebuild-concept-mastery",
-            name: "Rebuild concept mastery",
+            name: this.t("command.rebuildConceptMastery"),
             callback: async () => {
                 try {
                     const snapshot = await this.runtime.application.mastery.rebuild();
-                    new Notice(`Concept mastery updated for ${snapshot.states.length} concepts.`);
+                    new Notice(this.t("notice.conceptMasteryUpdated", { count: snapshot.states.length }));
                     this.refreshAllViews();
-                } catch (error: unknown) {
-                    new Notice(error instanceof Error ? error.message : String(error));
+                } catch {
+                    new Notice(this.t("notice.conceptMasteryBuildFailed"));
                 }
             },
         });
@@ -259,10 +263,10 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
     private registerLearningDashboardEntry(): void {
         this.addCommand({
             id: "open-learning-dashboard",
-            name: "Open learning dashboard",
+            name: this.t("command.openLearningDashboard"),
             callback: async () => this.activateProgressView(),
         });
-        this.addRibbonIcon("chart-line", "Open learning dashboard", () => {
+        this.addRibbonIcon("chart-line", this.t("ribbon.openLearningDashboard"), () => {
             void this.activateProgressView();
         });
     }

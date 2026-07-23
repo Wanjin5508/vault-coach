@@ -215,6 +215,7 @@ function createCatalog(conceptIds: readonly string[]): LearningGraphConceptCatal
             label: id,
             aliases: [],
             sourcePaths: [],
+            sourceChunkIds: [],
         })),
         sourceReady: true,
         message: null,

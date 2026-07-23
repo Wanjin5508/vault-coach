@@ -209,7 +209,20 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
             this.invalidateProgress();
         };
         return {
-            rebuild: async (signal) => { await service.rebuildAll(signal); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            rebuild: async (signal) => {
+                const rebuilding = service.rebuildAll(signal);
+                // SemanticIndexCoordinator enters busy state synchronously before
+                // its first await. Publish it now so every open workspace can
+                // show a single, non-clickable build-in-progress state.
+                this.emit({ type: "semantic-graph-state-changed" });
+                try {
+                    await rebuilding;
+                    invalidate();
+                    this.emit({ type: "mastery-state-changed" });
+                } finally {
+                    this.emit({ type: "semantic-graph-state-changed" });
+                }
+            },
             clear: async () => { await service.clear(); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
             abort: () => { service.abort(); this.emit({ type: "semantic-graph-state-changed" }); },
             getState: () => service.getState(),

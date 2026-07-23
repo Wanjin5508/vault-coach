@@ -46,6 +46,13 @@ export interface ExamQuestionGenerationResult {
 }
 
 /**
+ * A per-exam read-only index from deterministic text chunk IDs to effective
+ * semantic Concept IDs. The generator intentionally has no graph-service
+ * dependency; the application composition root supplies this optional fact.
+ */
+export type ExamConceptIdsByChunk = ReadonlyMap<string, readonly string[]>;
+
+/**
  * 考试题目生成器。
  */
 export class ExamQuestionGenerator {
@@ -72,6 +79,7 @@ export class ExamQuestionGenerator {
         chunks: IndexedChunk[],
         abortSignal?: AbortSignal,
         onProgress?: (current: number, total: number) => void,
+        conceptIdsByChunk: ExamConceptIdsByChunk = new Map(),
     ): Promise<ExamQuestionGenerationResult> {
         const chunksById: Map<string, IndexedChunk> = new Map<string, IndexedChunk>(
             chunks.map((chunk: IndexedChunk) => [chunk.id, chunk]),
@@ -152,6 +160,7 @@ export class ExamQuestionGenerator {
                     chunksById,
                     index + 1,
                     generationMetadata,
+                    conceptIdsByChunk,
                 );
             }),
             firstPassQuestions: generatedCandidates.length,
@@ -623,6 +632,7 @@ export class ExamQuestionGenerator {
         chunksById: Map<string, IndexedChunk>,
         index: number,
         generationMetadata: ModelPromptMetadata & { generatedAt: number },
+        conceptIdsByChunk: ExamConceptIdsByChunk,
     ): ExamQuestion {
         const blueprintItem: ExamBlueprintItem | undefined = blueprintItemsById.get(candidate.blueprintItemId);
         if (!blueprintItem) {
@@ -647,9 +657,31 @@ export class ExamQuestionGenerator {
             sourceChunkIds,
             evidenceExcerptIds: Array.from(new Set(candidate.evidenceExcerptIds)),
             sourcePaths,
-            conceptIds: [this.createProvisionalConceptId(blueprintItem.topic, blueprintItem.id)],
+            conceptIds: this.resolveConfirmedConceptIds(
+                sourceChunkIds,
+                conceptIdsByChunk,
+                blueprintItem.topic,
+                blueprintItem.id,
+            ),
             generationMetadata: { ...generationMetadata },
         };
+    }
+
+    /**
+     * A question receives only concepts proven by its own source chunks. An
+     * empty result preserves the M1 provisional topic ID for Vaults without a
+     * semantic graph or without extracted concept evidence.
+     */
+    private resolveConfirmedConceptIds(
+        sourceChunkIds: readonly string[],
+        conceptIdsByChunk: ExamConceptIdsByChunk,
+        topic: string,
+        blueprintItemId: string,
+    ): string[] {
+        const conceptIds = Array.from(new Set(sourceChunkIds
+            .flatMap((chunkId) => conceptIdsByChunk.get(chunkId) ?? [])))
+            .sort((left, right) => left.localeCompare(right));
+        return conceptIds.length > 0 ? conceptIds : [this.createProvisionalConceptId(topic, blueprintItemId)];
     }
 
     /** Creates metadata once for a generation run so every question shares the same provenance context. */
@@ -666,8 +698,8 @@ export class ExamQuestionGenerator {
     }
 
     /**
-     * M1 has no semantic graph yet. Persist a deterministic topic reference so
-     * later graph milestones can map it without rewriting existing questions.
+     * Compatibility fallback for Vaults with no confirmed Concept evidence.
+     * New questions prefer stable concept:* IDs resolved by source chunk.
      */
     private createProvisionalConceptId(topic: string, blueprintItemId: string): string {
         const normalizedTopic: string = normalizeWhitespace(topic.normalize("NFKC")).toLowerCase();

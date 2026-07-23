@@ -233,6 +233,13 @@ export interface SemanticGraphStats {
     embeddingCount: number;
 }
 
+/** In-memory progress only; never persisted with semantic graph facts. */
+export interface SemanticGraphBuildProgress {
+    processedSections: number;
+    queuedSections: number;
+    failedSections: number;
+}
+
 export interface SemanticGraphStateView {
     enabled: boolean;
     dirty: boolean;
@@ -240,6 +247,7 @@ export interface SemanticGraphStateView {
     hasData: boolean;
     lastError: string | null;
     stats: SemanticGraphStats;
+    progress: SemanticGraphBuildProgress;
     capacity: GraphCapacityAssessment;
 }
 

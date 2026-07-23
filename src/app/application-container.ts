@@ -110,13 +110,6 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         () => chatService.getMessagesForMemory(),
         ragEngine,
     );
-    const examEngine = new ExamEngine(
-        dependencies.app,
-        knowledgeBase,
-        new ObsidianDocumentFileMetadataReader(dependencies.app),
-        () => dependencies.getSettings(),
-        () => dependencies.getCloudApiKey(),
-    );
     const examEvaluationService = new ExamEvaluationService(
         new LocalModelClient(
             () => dependencies.getSettings(),
@@ -148,6 +141,14 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
     });
     const learningGraphQueryService = new LearningGraphQueryService(
         new ServiceLearningGraphSource(knowledgeGraphService, semanticGraphService),
+    );
+    const examEngine = new ExamEngine(
+        dependencies.app,
+        knowledgeBase,
+        new ObsidianDocumentFileMetadataReader(dependencies.app),
+        () => dependencies.getSettings(),
+        () => dependencies.getCloudApiKey(),
+        () => learningGraphQueryService.getConceptIdsByChunk(),
     );
     const masteryService = new MasteryService({
         assessmentSessionStore,

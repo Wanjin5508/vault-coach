@@ -18,9 +18,16 @@ describe("ProgressController", () => {
         });
 
         expect(controller.isAvailable()).toBe(false);
-        expect(controller.getState()).toEqual({ available: false });
+        expect(controller.getState()).toEqual({
+            available: false,
+            hasSnapshot: false,
+            dirty: true,
+            busy: false,
+            lastError: "Progress service is unavailable.",
+            generatedAt: null,
+        });
 
         controller.dispose();
-        expect(controller.getState()).toEqual({ available: false });
+        expect(controller.getState()).toMatchObject({ available: false, dirty: true });
     });
 });

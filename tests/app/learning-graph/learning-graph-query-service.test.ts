@@ -58,11 +58,15 @@ describe("LearningGraphQueryService", () => {
             sourceReady: true,
             message: null,
             concepts: [
-                { id: "concept:alpha", label: "Alpha", aliases: ["Alpha alias"], sourcePaths: ["notes/a.md"] },
-                { id: "concept:beta", label: "Beta", aliases: ["Beta alias"], sourcePaths: ["notes/b.md"] },
-                { id: "concept:gamma", label: "Gamma", aliases: ["Gamma alias"], sourcePaths: ["notes/b.md"] },
+                { id: "concept:alpha", label: "Alpha", aliases: ["Alpha alias"], sourcePaths: ["notes/a.md"], sourceChunkIds: ["chunk:section:a"] },
+                { id: "concept:beta", label: "Beta", aliases: ["Beta alias"], sourcePaths: ["notes/b.md"], sourceChunkIds: ["chunk:section:b"] },
+                { id: "concept:gamma", label: "Gamma", aliases: ["Gamma alias"], sourcePaths: ["notes/b.md"], sourceChunkIds: ["chunk:section:b"] },
             ],
         });
+        expect(Array.from(new LearningGraphQueryService(source()).getConceptIdsByChunk().entries())).toEqual([
+            ["chunk:section:a", ["concept:alpha"]],
+            ["chunk:section:b", ["concept:beta", "concept:gamma"]],
+        ]);
     });
 });
 

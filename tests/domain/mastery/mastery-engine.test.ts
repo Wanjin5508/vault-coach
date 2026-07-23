@@ -18,8 +18,8 @@ describe("MasteryEngine", () => {
                     supersedesEventId: "old-alpha", errorCodes: ["missing-key-point"],
                 })),
                 input(event("beta", { conceptIds: ["concept:beta"], normalizedScore: 0.6, occurredAt: DAY_MS * 10 })),
-                input(event("ambiguous", { conceptIds: ["exam-topic:shared"], occurredAt: DAY_MS * 10 }), [binding("exam-topic:shared", "Shared")]),
-                input(event("unknown", { conceptIds: ["exam-topic:unknown"], occurredAt: DAY_MS * 10 }), [binding("exam-topic:unknown", "Not in graph")]),
+                input(event("ambiguous", { conceptIds: ["exam-topic:shared"], sourceChunkIds: ["chunk:ambiguous"], occurredAt: DAY_MS * 10 }), [binding("exam-topic:shared", "Shared")]),
+                input(event("unknown", { conceptIds: ["exam-topic:unknown"], sourceChunkIds: ["chunk:unknown"], occurredAt: DAY_MS * 10 }), [binding("exam-topic:unknown", "Not in graph")]),
             ],
         });
 
@@ -67,6 +67,32 @@ describe("MasteryEngine", () => {
         expect(alpha?.masteryScore).toBeGreaterThan(0.2);
         expect(alpha?.masteryScore).toBeLessThan(1);
     });
+
+    it("rebinds legacy provisional Exam topics through exact source chunk evidence", () => {
+        const result = new MasteryEngine().calculateAll({
+            catalog: catalog(),
+            now: DAY_MS,
+            assessments: [input(
+                event("legacy-empty-answer", {
+                    conceptIds: ["exam-topic:legacy"],
+                    sourceChunkIds: ["chunk-1", "chunk-2"],
+                    normalizedScore: 0,
+                    occurredAt: DAY_MS,
+                }),
+                [binding("exam-topic:legacy", "A chapter title that is not a concept")],
+            )],
+        });
+
+        expect(result.unboundIssues).toEqual([]);
+        expect(result.states.find((state) => state.conceptId === "concept:alpha")).toMatchObject({
+            level: "weak",
+            evidence: [expect.objectContaining({ bindingKind: "source-chunk-evidence", normalizedScore: 0 })],
+        });
+        expect(result.states.find((state) => state.conceptId === "concept:beta")).toMatchObject({
+            level: "weak",
+            evidence: [expect.objectContaining({ bindingKind: "source-chunk-evidence", normalizedScore: 0 })],
+        });
+    });
 });
 
 function catalog(): LearningGraphConceptCatalog {
@@ -74,9 +100,9 @@ function catalog(): LearningGraphConceptCatalog {
         sourceReady: true,
         message: null,
         concepts: [
-            { id: "concept:alpha", label: "Alpha", aliases: ["Shared"], sourcePaths: ["notes/a.md"] },
-            { id: "concept:beta", label: "Beta", aliases: ["Shared", "B"], sourcePaths: ["notes/b.md"] },
-            { id: "concept:gamma", label: "Gamma", aliases: [], sourcePaths: ["notes/c.md"] },
+            { id: "concept:alpha", label: "Alpha", aliases: ["Shared"], sourcePaths: ["notes/a.md"], sourceChunkIds: ["chunk-1"] },
+            { id: "concept:beta", label: "Beta", aliases: ["Shared", "B"], sourcePaths: ["notes/b.md"], sourceChunkIds: ["chunk-2"] },
+            { id: "concept:gamma", label: "Gamma", aliases: [], sourcePaths: ["notes/c.md"], sourceChunkIds: ["chunk-3"] },
         ],
     };
 }

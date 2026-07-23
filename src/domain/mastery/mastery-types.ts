@@ -3,11 +3,13 @@ import type { AssessmentErrorCode, ExamDifficulty } from "../exam/exam-types";
 import type { LearningGraphConceptCatalog, LearningGraphConceptCatalogEntry } from "../learning-graph/learning-graph-types";
 
 export const MASTERY_SNAPSHOT_SCHEMA_VERSION = 1 as const;
-export const MASTERY_ALGORITHM_VERSION = "mastery/v1";
+// v2 adds exact source-chunk provenance for legacy provisional Exam topics.
+// Existing v1 snapshots must be rebuilt instead of being shown as current.
+export const MASTERY_ALGORITHM_VERSION = "mastery/v2";
 
 export type MasteryLevel = "unknown" | "weak" | "developing" | "proficient" | "mastered";
 export type MasteryTrend = "unknown" | "improving" | "stable" | "declining";
-export type MasteryBindingKind = "direct-concept-id" | "exact-display-name" | "exact-alias";
+export type MasteryBindingKind = "direct-concept-id" | "exact-display-name" | "exact-alias" | "source-chunk-evidence";
 export type MasteryBindingIssueReason = "missing-binding" | "unknown-concept" | "ambiguous-label";
 
 export interface MasteryAlgorithmConfig {

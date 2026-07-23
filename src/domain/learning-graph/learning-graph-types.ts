@@ -95,6 +95,12 @@ export interface LearningGraphConceptCatalogEntry {
     label: string;
     aliases: string[];
     sourcePaths: string[];
+    /**
+     * Exact index provenance for safe Exam → Concept and Assessment → Concept
+     * binding. It is not a renderer concern and must never be inferred from
+     * labels, embeddings, or graph neighbourhoods.
+     */
+    sourceChunkIds: string[];
 }
 
 export interface LearningGraphConceptCatalog {

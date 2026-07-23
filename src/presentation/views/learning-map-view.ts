@@ -1,8 +1,9 @@
 import { ItemView, Notice, type WorkspaceLeaf } from "obsidian";
 import type { VaultCoachApplicationApi } from "../../app/application-api";
 import { VIEW_TYPE_LEARNING_MAP } from "../../constants";
-import type { LearningGraphEdge, LearningGraphEvidence, LearningGraphNode, LearningGraphProjection } from "../../domain/learning-graph/learning-graph-types";
+import type { LearningGraphEdge, LearningGraphEvidence, LearningGraphNode, LearningGraphProjection, LearningGraphRelationType } from "../../domain/learning-graph/learning-graph-types";
 import type { SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
+import { translate, type TranslationKey } from "../../i18n";
 import { LearningGraphRenderer } from "../components/learning-graph-renderer";
 import { LearningMapController } from "../controllers/learning-map-controller";
 
@@ -32,7 +33,7 @@ export class LearningMapView extends ItemView {
     }
 
     getViewType(): string { return VIEW_TYPE_LEARNING_MAP; }
-    getDisplayText(): string { return "Learning map"; }
+    getDisplayText(): string { return this.t("learningMap.title"); }
     getIcon(): string { return "waypoints"; }
 
     async onOpen(): Promise<void> { await this.refresh(); }
@@ -50,9 +51,9 @@ export class LearningMapView extends ItemView {
         try {
             this.projection = await this.controller.getProjection();
             if (!this.disposed) this.render();
-        } catch (error: unknown) {
+        } catch {
             this.contentEl.empty();
-            this.contentEl.createDiv({ cls: "vault-coach-learning-map-error", text: describeError(error) });
+            this.contentEl.createDiv({ cls: "vault-coach-learning-map-error", text: this.t("learningMap.unavailable") });
         }
     }
 
@@ -64,31 +65,44 @@ export class LearningMapView extends ItemView {
         this.contentEl.addClass("vault-coach-learning-map");
         const projection = this.projection;
         if (!projection) return;
+        const semanticState = this.application.semanticGraph.getState();
         const header = this.contentEl.createDiv({ cls: "vault-coach-learning-map-header" });
-        header.createEl("h2", { text: "Learning map" });
+        header.createEl("h2", { text: this.t("learningMap.title") });
         header.createDiv({
             cls: "vault-coach-learning-map-summary",
-            text: `${projection.stats.visibleNodeCount} nodes · ${projection.stats.visibleEdgeCount} relationships · confirmed facts only`,
+            text: this.t("learningMap.summary", {
+                nodes: projection.stats.visibleNodeCount,
+                relationships: projection.stats.visibleEdgeCount,
+            }),
         });
-        const capacity = this.application.semanticGraph.getState().capacity;
+        if (semanticState.busy) this.renderSemanticBuildStatus(header, semanticState.progress);
+        const capacity = semanticState.capacity;
         if (capacity.level !== "local") {
             header.createDiv({
                 cls: "vault-coach-learning-map-capacity",
                 text: capacity.level === "warning"
-                    ? "Local semantic auto-sync is paused for this vault size. Manual rebuild remains available."
-                    : "New local semantic rebuilds are paused for this vault size. Existing confirmed facts remain available.",
+                    ? this.t("learningMap.capacityWarning")
+                    : this.t("learningMap.capacityPaused"),
             });
         }
         this.renderToolbar(this.contentEl);
         if (!projection.sourceReady || projection.nodes.length === 0) {
-            this.contentEl.createDiv({ cls: "vault-coach-learning-map-empty", text: projection.message ?? "No learning graph facts are available." });
+            this.contentEl.createDiv({
+                cls: "vault-coach-learning-map-empty",
+                text: semanticState.busy
+                    ? this.t("learningMap.emptyBuilding")
+                    : projection.sourceReady ? this.t("learningMap.empty") : this.t("learningMap.unavailable"),
+            });
             return;
         }
         this.retainSelection(projection);
         if (projection.stats.truncated) {
             this.contentEl.createDiv({
                 cls: "vault-coach-learning-map-budget",
-                text: `Local projection budget applied: ${projection.stats.hiddenNodeCount} nodes and ${projection.stats.hiddenEdgeCount} relationships are hidden. Search or focus a node to explore another bounded neighbourhood.`,
+                text: this.t("learningMap.budget", {
+                    nodes: projection.stats.hiddenNodeCount,
+                    relationships: projection.stats.hiddenEdgeCount,
+                }),
             });
         }
         const body = this.contentEl.createDiv({ cls: "vault-coach-learning-map-body" });
@@ -111,24 +125,24 @@ export class LearningMapView extends ItemView {
                 this.refreshInspector();
             },
         });
-        graph.createDiv({ cls: "vault-coach-learning-map-legend", text: "Drag empty space to pan; scroll to zoom. Arrows show relationship direction. This view only shows confirmed and user-created relationships." });
+        graph.createDiv({ cls: "vault-coach-learning-map-legend", text: this.t("learningMap.legend") });
         this.inspectorEl = body.createDiv({ cls: "vault-coach-learning-map-inspector" });
         this.renderInspectorContent(this.inspectorEl, projection);
     }
 
     private renderToolbar(root: HTMLElement): void {
         const toolbar = root.createDiv({ cls: "vault-coach-learning-map-toolbar" });
-        const search = toolbar.createEl("input", { attr: { type: "search", placeholder: "Search confirmed concepts" } });
+        const search = toolbar.createEl("input", { attr: { type: "search", placeholder: this.t("learningMap.search") } });
         search.value = this.controller.getSearch();
         search.addEventListener("change", () => { this.controller.setSearch(search.value); void this.refresh(); });
         const structureLabel = toolbar.createEl("label", { cls: "vault-coach-learning-map-toggle" });
         const structure = structureLabel.createEl("input", { attr: { type: "checkbox" } });
         structure.checked = this.controller.hasStructuralContext();
-        structureLabel.createSpan({ text: "Show source structure" });
+        structureLabel.createSpan({ text: this.t("learningMap.showSource") });
         structure.addEventListener("change", () => { this.controller.setStructuralContext(structure.checked); void this.refresh(); });
-        const fit = toolbar.createEl("button", { text: "Fit graph" });
+        const fit = toolbar.createEl("button", { text: this.t("learningMap.fit") });
         fit.addEventListener("click", () => this.renderer?.fit());
-        const reset = toolbar.createEl("button", { text: "Reset exploration" });
+        const reset = toolbar.createEl("button", { text: this.t("learningMap.reset") });
         reset.addEventListener("click", () => {
             this.controller.reset();
             this.selectedNodeId = null;
@@ -136,13 +150,13 @@ export class LearningMapView extends ItemView {
             void this.refresh();
         });
         const filter = root.createDiv({ cls: "vault-coach-learning-map-filter" });
-        filter.createSpan({ text: "Relationship types:" });
+        filter.createSpan({ text: this.t("learningMap.relationshipTypes") });
         const selected = new Set(this.controller.getRelationTypes());
         for (const type of RELATION_TYPES) {
             const label = filter.createEl("label", { cls: "vault-coach-learning-map-toggle" });
             const checkbox = label.createEl("input", { attr: { type: "checkbox" } });
             checkbox.checked = selected.size === 0 || selected.has(type);
-            label.createSpan({ text: type });
+            label.createSpan({ text: this.relationLabel(type) });
             checkbox.addEventListener("change", () => {
                 const next = new Set(this.controller.getRelationTypes());
                 if (next.size === 0) RELATION_TYPES.forEach((item) => next.add(item));
@@ -171,20 +185,23 @@ export class LearningMapView extends ItemView {
             this.renderEdgeInspector(inspector, edge, projection);
             return;
         }
-        inspector.createEl("h3", { text: "Inspector" });
-        inspector.createDiv({ text: "Select a confirmed concept or relationship to inspect its direction and source evidence." });
+        inspector.createEl("h3", { text: this.t("learningMap.inspector") });
+        inspector.createDiv({ text: this.t("learningMap.select") });
     }
 
     private renderNodeInspector(inspector: HTMLElement, node: LearningGraphNode, projection: LearningGraphProjection): void {
         inspector.createEl("h3", { text: node.label });
-        inspector.createDiv({ cls: "vault-coach-learning-map-muted", text: `${node.kind} · ${node.id}` });
+        inspector.createDiv({ cls: "vault-coach-learning-map-muted", text: `${this.nodeKindLabel(node.kind)} · ${node.id}` });
         if (node.description) inspector.createDiv({ text: node.description });
-        if (node.aliases.length > 0) inspector.createDiv({ cls: "vault-coach-learning-map-muted", text: `Aliases: ${node.aliases.join(", ")}` });
+        if (node.aliases.length > 0) inspector.createDiv({ cls: "vault-coach-learning-map-muted", text: this.t("learningMap.aliases", { aliases: node.aliases.join(", ") }) });
         const outgoing = projection.edges.filter((edge) => edge.sourceNodeId === node.id);
         const incoming = projection.edges.filter((edge) => edge.targetNodeId === node.id);
-        inspector.createDiv({ cls: "vault-coach-learning-map-muted", text: `${outgoing.length} outgoing · ${incoming.length} incoming relationship(s) in this local projection` });
+        inspector.createDiv({
+            cls: "vault-coach-learning-map-muted",
+            text: this.t("learningMap.relationshipCount", { outgoing: outgoing.length, incoming: incoming.length }),
+        });
         const actions = inspector.createDiv({ cls: "vault-coach-learning-map-actions" });
-        const focus = actions.createEl("button", { text: "Focus neighbourhood", cls: "mod-cta" });
+        const focus = actions.createEl("button", { text: this.t("learningMap.focus"), cls: "mod-cta" });
         focus.addEventListener("click", () => { this.controller.setFocus(node.id); this.selectedEdgeId = null; void this.refresh(); });
         this.renderEvidence(inspector, node.evidence);
     }
@@ -192,22 +209,28 @@ export class LearningMapView extends ItemView {
     private renderEdgeInspector(inspector: HTMLElement, edge: LearningGraphEdge, projection: LearningGraphProjection): void {
         const source = projection.nodes.find((node) => node.id === edge.sourceNodeId)?.label ?? edge.sourceNodeId;
         const target = projection.nodes.find((node) => node.id === edge.targetNodeId)?.label ?? edge.targetNodeId;
-        inspector.createEl("h3", { text: edge.type });
+        inspector.createEl("h3", { text: this.relationLabel(edge.type) });
         inspector.createDiv({ text: `${source} ${edge.directed ? "→" : "—"} ${target}` });
-        inspector.createDiv({ cls: "vault-coach-learning-map-muted", text: `${edge.origin} · ${Math.round(edge.confidence * 100)}% confidence` });
+        inspector.createDiv({
+            cls: "vault-coach-learning-map-muted",
+            text: this.t("learningMap.confidence", {
+                origin: this.originLabel(edge.origin),
+                confidence: Math.round(edge.confidence * 100),
+            }),
+        });
         this.renderEvidence(inspector, edge.evidence);
     }
 
     private renderEvidence(container: HTMLElement, evidence: readonly LearningGraphEvidence[]): void {
-        container.createEl("h4", { text: "Evidence" });
+        container.createEl("h4", { text: this.t("learningMap.evidence") });
         if (evidence.length === 0) {
-            container.createDiv({ cls: "vault-coach-learning-map-muted", text: "No additional source location is stored for this structural node." });
+            container.createDiv({ cls: "vault-coach-learning-map-muted", text: this.t("learningMap.noEvidence") });
             return;
         }
         const list = container.createDiv({ cls: "vault-coach-learning-map-evidence" });
         for (const item of evidence) {
             if (item.kind === "user-decision") {
-                list.createDiv({ text: `User decision: ${item.decisionId}` });
+                list.createDiv({ text: this.t("learningMap.userDecision", { id: item.decisionId }) });
                 continue;
             }
             const filePath = item.kind === "concept-evidence"
@@ -220,7 +243,7 @@ export class LearningMapView extends ItemView {
             const row = list.createDiv({ cls: "vault-coach-learning-map-evidence-row" });
             row.createDiv({ text: summary });
             if (filePath) {
-                const open = row.createEl("button", { text: "Open source" });
+                const open = row.createEl("button", { text: this.t("learningMap.openSource") });
                 open.addEventListener("click", () => void this.openEvidence(filePath, heading));
             }
         }
@@ -229,8 +252,8 @@ export class LearningMapView extends ItemView {
     private async openEvidence(filePath: string, heading?: string): Promise<void> {
         try {
             await this.openSource(filePath, heading);
-        } catch (error: unknown) {
-            new Notice(describeError(error));
+        } catch {
+            new Notice(this.t("learningMap.unavailable"));
         }
     }
 
@@ -238,8 +261,35 @@ export class LearningMapView extends ItemView {
         if (this.selectedNodeId && !projection.nodes.some((node) => node.id === this.selectedNodeId)) this.selectedNodeId = null;
         if (this.selectedEdgeId && !projection.edges.some((edge) => edge.id === this.selectedEdgeId)) this.selectedEdgeId = null;
     }
-}
 
-function describeError(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    private renderSemanticBuildStatus(container: HTMLElement, progress: { processedSections: number; queuedSections: number }): void {
+        const status = container.createDiv({
+            cls: "vault-coach-semantic-build-status",
+            attr: { role: "status", "aria-live": "polite" },
+        });
+        status.createSpan({ cls: "vault-coach-thinking-spinner", attr: { "aria-hidden": "true" } });
+        const text = progress.queuedSections > 0
+            ? this.t("learningMap.buildingProgress", { processed: progress.processedSections, total: progress.queuedSections })
+            : this.t("learningMap.building");
+        status.createSpan({ text });
+    }
+
+    private relationLabel(type: LearningGraphRelationType): string {
+        if (RELATION_TYPES.includes(type as SemanticRelationType)) {
+            return this.t(`semantic.relation.${type}` as TranslationKey);
+        }
+        return this.t(`learningMap.relation.${type}` as TranslationKey);
+    }
+
+    private nodeKindLabel(kind: LearningGraphNode["kind"]): string {
+        return this.t(`learningMap.kind.${kind}` as TranslationKey);
+    }
+
+    private originLabel(origin: LearningGraphEdge["origin"]): string {
+        return this.t(`learningMap.origin.${origin}` as TranslationKey);
+    }
+
+    private t(key: TranslationKey, replacements?: Record<string, string | number>): string {
+        return translate(key, replacements);
+    }
 }

@@ -9,6 +9,7 @@ import type {
     SemanticRelationType,
     UserSemanticDecision,
 } from "../../domain/semantic-graph/semantic-graph-types";
+import { translate, type TranslationKey } from "../../i18n";
 import { ConceptForceGraph } from "../components/concept-force-graph";
 import { ConceptReviewController } from "../controllers/concept-review-controller";
 
@@ -25,6 +26,8 @@ export class ConceptReviewView extends ItemView {
     private isDisposed = false;
     private forceGraph: ConceptForceGraph | null = null;
     private inspectorEl: HTMLElement | null = null;
+    /** Covers the synchronous gap before application events refresh this View. */
+    private semanticRebuildInFlight = false;
 
     constructor(leaf: WorkspaceLeaf, application: VaultCoachApplicationApi) {
         super(leaf);
@@ -32,7 +35,7 @@ export class ConceptReviewView extends ItemView {
     }
 
     getViewType(): string { return VIEW_TYPE_CONCEPT_REVIEW; }
-    getDisplayText(): string { return "Concept review"; }
+    getDisplayText(): string { return this.t("conceptReview.title"); }
     getIcon(): string { return "git-fork"; }
 
     async onOpen(): Promise<void> {
@@ -55,9 +58,9 @@ export class ConceptReviewView extends ItemView {
         try {
             this.projection = await this.controller.getProjection();
             if (!this.isDisposed) this.render();
-        } catch (error: unknown) {
+        } catch {
             this.contentEl.empty();
-            this.contentEl.createDiv({ cls: "vault-coach-concept-review-error", text: describeError(error) });
+            this.contentEl.createDiv({ cls: "vault-coach-concept-review-error", text: this.t("conceptReview.actionFailed") });
         }
     }
 
@@ -70,31 +73,37 @@ export class ConceptReviewView extends ItemView {
         root.addClass("vault-coach-concept-review");
         const state = this.controller.getState();
         const header = root.createDiv({ cls: "vault-coach-concept-review-header" });
-        header.createEl("h2", { text: "Concept review" });
+        const busy = state.busy || this.semanticRebuildInFlight;
+        header.createEl("h2", { text: this.t("conceptReview.title") });
         header.createDiv({
             cls: "vault-coach-concept-review-summary",
-            text: `${state.stats.conceptCount} concepts · ${state.stats.pendingCandidateCount} pending candidates · ${state.stats.confirmedRelationCount} confirmed relations`,
+            text: this.t("conceptReview.summary", {
+                concepts: state.stats.conceptCount,
+                pending: state.stats.pendingCandidateCount,
+                confirmed: state.stats.confirmedRelationCount,
+            }),
         });
+        if (busy) this.renderSemanticBuildStatus(header, state.progress);
         if (!state.enabled) {
             root.createDiv({
                 cls: "vault-coach-concept-review-notice",
-                text: "Semantic concept graph is disabled. Enable it in Settings → VaultCoach, then rebuild from this view or the command palette. No note content is sent until you explicitly enable and run it.",
+                text: this.t("conceptReview.disabled"),
             });
         }
         if (state.capacity.level !== "local") {
             root.createDiv({
                 cls: "vault-coach-concept-review-notice",
                 text: state.capacity.level === "warning"
-                    ? "This vault has reached the local semantic graph warning budget. Automatic semantic sync is paused; an explicit rebuild remains available."
-                    : "This vault exceeds the local semantic graph budget. Existing concept facts remain readable, but new local semantic rebuilds are paused until the knowledge scope is reduced or an external graph service is available.",
+                    ? this.t("conceptReview.capacityWarning")
+                    : this.t("conceptReview.capacityPaused"),
             });
         }
-        if (state.lastError) root.createDiv({ cls: "vault-coach-concept-review-warning", text: state.lastError });
-        this.renderToolbar(root, state.busy);
+        if (state.lastError) root.createDiv({ cls: "vault-coach-concept-review-warning", text: this.t("conceptReview.lastBuildFailed") });
+        this.renderToolbar(root, busy);
         if (!this.projection || this.projection.concepts.length === 0) {
             root.createDiv({
                 cls: "vault-coach-concept-review-empty",
-                text: state.enabled ? "No verified concept candidates yet. Run a semantic graph rebuild after the deterministic graph and text index are ready." : "Enable the feature before creating a semantic graph.",
+                text: state.enabled ? this.t("conceptReview.empty") : this.t("conceptReview.emptyDisabled"),
             });
             return;
         }
@@ -106,7 +115,7 @@ export class ConceptReviewView extends ItemView {
 
     private renderToolbar(root: HTMLElement, busy: boolean): void {
         const toolbar = root.createDiv({ cls: "vault-coach-concept-review-toolbar" });
-        const search = toolbar.createEl("input", { attr: { type: "search", placeholder: "Search concepts" } });
+        const search = toolbar.createEl("input", { attr: { type: "search", placeholder: this.t("conceptReview.search") } });
         search.value = this.controller.getSearch();
         search.addEventListener("change", () => {
             this.controller.setSearch(search.value);
@@ -115,17 +124,26 @@ export class ConceptReviewView extends ItemView {
         const pendingLabel = toolbar.createEl("label", { cls: "vault-coach-concept-review-toggle" });
         const pending = pendingLabel.createEl("input", { attr: { type: "checkbox" } });
         pending.checked = this.controller.isPendingVisible();
-        pendingLabel.createSpan({ text: "Show pending candidates" });
+        pendingLabel.createSpan({ text: this.t("conceptReview.showPending") });
         pending.addEventListener("change", () => {
             this.controller.setPendingVisible(pending.checked);
             void this.refresh();
         });
-        const rebuild = toolbar.createEl("button", { text: busy ? "Building…" : "Rebuild semantic graph", cls: "mod-cta" });
+        const rebuild = toolbar.createEl("button", {
+            cls: "mod-cta vault-coach-semantic-build-button",
+            attr: { "aria-busy": String(busy) },
+        });
+        if (busy) {
+            rebuild.createSpan({ cls: "vault-coach-thinking-spinner", attr: { "aria-hidden": "true" } });
+            rebuild.createSpan({ text: this.t("conceptReview.rebuilding") });
+        } else {
+            rebuild.setText(this.t("conceptReview.rebuild"));
+        }
         rebuild.disabled = busy;
-        rebuild.addEventListener("click", () => void this.runAction(() => this.controller.rebuild()));
-        const fit = toolbar.createEl("button", { text: "Fit graph" });
+        rebuild.addEventListener("click", () => void this.rebuildSemanticGraph());
+        const fit = toolbar.createEl("button", { text: this.t("conceptReview.fit") });
         fit.addEventListener("click", () => this.forceGraph?.fit());
-        const reset = toolbar.createEl("button", { text: "Reset local graph" });
+        const reset = toolbar.createEl("button", { text: this.t("conceptReview.reset") });
         reset.addEventListener("click", () => {
             this.controller.focusConcept(undefined);
             this.selectedConceptIds.clear();
@@ -134,7 +152,7 @@ export class ConceptReviewView extends ItemView {
             void this.refresh();
         });
         if (busy) {
-            const abort = toolbar.createEl("button", { text: "Stop" });
+            const abort = toolbar.createEl("button", { text: this.t("semantic.stop") });
             abort.addEventListener("click", () => { this.controller.abort(); void this.refresh(); });
         }
     }
@@ -176,7 +194,10 @@ export class ConceptReviewView extends ItemView {
         });
         graphArea.createDiv({
             cls: "vault-coach-concept-review-legend",
-            text: `Showing ${projection.concepts.length} local concepts from ${projection.stats.conceptCount}. Search or focus a node to inspect another local neighbourhood. Drag nodes, drag empty space to pan, scroll to zoom. Arrows show direction; solid = confirmed; dashed = pending. Ctrl/Cmd-click selects multiple nodes.`,
+            text: this.t("conceptReview.legend", {
+                visible: projection.concepts.length,
+                total: projection.stats.conceptCount,
+            }),
         });
     }
 
@@ -205,8 +226,8 @@ export class ConceptReviewView extends ItemView {
         }
         const selected = projection.concepts.filter((concept) => this.selectedConceptIds.has(concept.id));
         if (selected.length === 0) {
-            inspector.createEl("h3", { text: "Inspector" });
-            inspector.createDiv({ text: "Select a node or relationship to inspect its evidence and decision actions." });
+            inspector.createEl("h3", { text: this.t("conceptReview.inspector") });
+            inspector.createDiv({ text: this.t("conceptReview.select") });
             this.renderDecisionHistory(inspector, projection);
             return;
         }
@@ -219,36 +240,36 @@ export class ConceptReviewView extends ItemView {
     }
 
     private renderCandidateInspector(container: HTMLElement, candidate: SemanticCandidate, projection: ConceptReviewProjection): void {
-        container.createEl("h3", { text: "Pending relationship" });
+        container.createEl("h3", { text: this.t("conceptReview.pendingRelationship") });
         const source = projection.concepts.find((concept) => concept.id === candidate.sourceConceptId)?.displayName ?? candidate.sourceConceptId;
         const target = projection.concepts.find((concept) => concept.id === candidate.targetConceptId)?.displayName ?? candidate.targetConceptId;
-        container.createDiv({ text: formatRelationship(source, candidate.type, target) });
-        container.createDiv({ cls: "vault-coach-concept-review-muted", text: `${candidate.origin} · ${Math.round(candidate.confidence * 100)}%` });
+        container.createDiv({ text: this.formatRelationship(source, candidate.type, target) });
+        container.createDiv({ cls: "vault-coach-concept-review-muted", text: `${this.originLabel(candidate.origin)} · ${Math.round(candidate.confidence * 100)}%` });
         this.renderEvidence(container, candidate.evidence);
         const actions = container.createDiv({ cls: "vault-coach-concept-review-actions" });
-        const confirm = actions.createEl("button", { text: "Confirm", cls: "mod-cta" });
+        const confirm = actions.createEl("button", { text: this.t("conceptReview.confirm"), cls: "mod-cta" });
         confirm.addEventListener("click", () => void this.runAction(() => this.controller.confirm(candidate.fingerprint)));
-        const reason = container.createEl("input", { attr: { type: "text", placeholder: "Optional rejection reason" } });
-        const reject = actions.createEl("button", { text: "Reject" });
+        const reason = container.createEl("input", { attr: { type: "text", placeholder: this.t("conceptReview.optionalRejectionReason") } });
+        const reject = actions.createEl("button", { text: this.t("conceptReview.reject") });
         reject.addEventListener("click", () => void this.runAction(() => this.controller.reject(candidate.fingerprint, reason.value || undefined)));
     }
 
     private renderRelationInspector(container: HTMLElement, relation: EffectiveSemanticRelation, projection: ConceptReviewProjection): void {
-        container.createEl("h3", { text: relation.origin === "user" ? "Manual relationship" : "Confirmed relationship" });
+        container.createEl("h3", { text: relation.origin === "user" ? this.t("conceptReview.manualRelationship") : this.t("conceptReview.confirmedRelationship") });
         const source = projection.concepts.find((concept) => concept.id === relation.sourceConceptId)?.displayName ?? relation.sourceConceptId;
         const target = projection.concepts.find((concept) => concept.id === relation.targetConceptId)?.displayName ?? relation.targetConceptId;
-        container.createDiv({ text: formatRelationship(source, relation.type, target) });
-        container.createDiv({ cls: "vault-coach-concept-review-muted", text: `${relation.origin} · ${Math.round(relation.confidence * 100)}%` });
+        container.createDiv({ text: this.formatRelationship(source, relation.type, target) });
+        container.createDiv({ cls: "vault-coach-concept-review-muted", text: `${this.originLabel(relation.origin)} · ${Math.round(relation.confidence * 100)}%` });
         this.renderEvidence(container, relation.evidence);
         const actions = container.createDiv({ cls: "vault-coach-concept-review-actions" });
         if (relation.origin === "user") {
-            const remove = actions.createEl("button", { text: "Remove manual relation", cls: "mod-warning" });
+            const remove = actions.createEl("button", { text: this.t("conceptReview.removeManual"), cls: "mod-warning" });
             remove.addEventListener("click", () => void this.runAction(() => this.controller.removeManualRelation(relation.id)));
             return;
         }
         const decision = findActiveCandidateDecision(projection.decisions, relation.candidateFingerprint);
         if (decision) {
-            const undo = actions.createEl("button", { text: "Revert to pending candidate" });
+            const undo = actions.createEl("button", { text: this.t("conceptReview.revertPending") });
             undo.addEventListener("click", () => void this.runAction(() => this.controller.undoCandidateDecision(decision.id)));
         }
     }
@@ -257,21 +278,21 @@ export class ConceptReviewView extends ItemView {
         container.createEl("h3", { text: concept.displayName });
         container.createDiv({ cls: "vault-coach-concept-review-muted", text: concept.id });
         if (concept.description) container.createDiv({ text: concept.description });
-        container.createEl("h4", { text: "Aliases" });
+        container.createEl("h4", { text: this.t("conceptReview.aliases") });
         const aliases = container.createDiv({ cls: "vault-coach-concept-review-aliases" });
         for (const alias of concept.aliases) {
             const aliasRow = aliases.createDiv({ cls: "vault-coach-concept-review-alias" });
             aliasRow.createSpan({ text: alias });
-            const remove = aliasRow.createEl("button", { text: "×", attr: { "aria-label": `Remove ${alias}` } });
+            const remove = aliasRow.createEl("button", { text: "×", attr: { "aria-label": this.t("conceptReview.removeAlias", { alias }) } });
             remove.addEventListener("click", () => void this.runAction(() => this.controller.removeAlias(concept.id, alias)));
         }
-        const alias = container.createEl("input", { attr: { type: "text", placeholder: "New alias" } });
-        const addAlias = container.createEl("button", { text: "Add alias" });
+        const alias = container.createEl("input", { attr: { type: "text", placeholder: this.t("conceptReview.newAlias") } });
+        const addAlias = container.createEl("button", { text: this.t("conceptReview.addAlias") });
         addAlias.addEventListener("click", () => {
             if (alias.value.trim()) void this.runAction(() => this.controller.addAlias(concept.id, alias.value));
         });
         this.renderEvidence(container, concept.evidence);
-        const focus = container.createEl("button", { text: "Focus local neighbourhood" });
+        const focus = container.createEl("button", { text: this.t("conceptReview.focus") });
         focus.addEventListener("click", () => {
             this.controller.focusConcept(concept.id);
             this.selectedCandidateFingerprint = null;
@@ -281,18 +302,18 @@ export class ConceptReviewView extends ItemView {
     }
 
     private renderMultiConceptInspector(container: HTMLElement, concepts: readonly SemanticConcept[]): void {
-        container.createEl("h3", { text: `${concepts.length} selected concepts` });
+        container.createEl("h3", { text: this.t("conceptReview.selectedConcepts", { count: concepts.length }) });
         const canonical = container.createEl("select");
         for (const concept of concepts) canonical.createEl("option", { value: concept.id, text: concept.displayName });
-        const merge = container.createEl("button", { text: "Merge selected concepts", cls: "mod-warning" });
+        const merge = container.createEl("button", { text: this.t("conceptReview.merge"), cls: "mod-warning" });
         merge.addEventListener("click", () => void this.runAction(() => this.controller.merge(canonical.value, concepts.map((concept) => concept.id).filter((id) => id !== canonical.value))));
-        container.createEl("h4", { text: "Manual relation" });
+        container.createEl("h4", { text: this.t("conceptReview.manualRelation") });
         const relation = container.createEl("select");
         for (const type of ["same_as", "part_of", "prerequisite_of", "used_for", "contrasts_with", "related_to"] as SemanticRelationType[]) {
-            relation.createEl("option", { value: type, text: type });
+            relation.createEl("option", { value: type, text: this.relationLabel(type) });
         }
-        const note = container.createEl("textarea", { attr: { placeholder: "Required user note when no chunk evidence is selected" } });
-        const create = container.createEl("button", { text: "Create manual relation" });
+        const note = container.createEl("textarea", { attr: { placeholder: this.t("conceptReview.notePlaceholder") } });
+        const create = container.createEl("button", { text: this.t("conceptReview.createManual") });
         create.addEventListener("click", () => void this.runAction(() => this.controller.createManualRelation(
             relation.value as SemanticRelationType,
             concepts[0]?.id ?? "",
@@ -304,12 +325,12 @@ export class ConceptReviewView extends ItemView {
     private renderDecisionHistory(container: HTMLElement, projection: ConceptReviewProjection): void {
         const entries = getUndoableDecisions(projection.decisions);
         if (entries.length === 0) return;
-        container.createEl("h4", { text: "Recent reversible changes" });
+        container.createEl("h4", { text: this.t("conceptReview.recentChanges") });
         const history = container.createDiv({ cls: "vault-coach-concept-review-history" });
         for (const decision of entries.slice(-8).reverse()) {
             const row = history.createDiv({ cls: "vault-coach-concept-review-history-row" });
-            row.createSpan({ text: describeDecision(decision) });
-            const undo = row.createEl("button", { text: "Undo" });
+            row.createSpan({ text: this.describeDecision(decision) });
+            const undo = row.createEl("button", { text: this.t("conceptReview.undo") });
             if (decision.kind === "confirm-candidate" || decision.kind === "reject-candidate") {
                 undo.addEventListener("click", () => void this.runAction(() => this.controller.undoCandidateDecision(decision.id)));
             } else if (decision.kind === "remove-manual-relation") {
@@ -321,9 +342,9 @@ export class ConceptReviewView extends ItemView {
     }
 
     private renderEvidence(container: HTMLElement, evidence: readonly { chunkId: string; textPreview: string; sectionId: string }[]): void {
-        container.createEl("h4", { text: "Evidence" });
+        container.createEl("h4", { text: this.t("conceptReview.evidence") });
         if (evidence.length === 0) {
-            container.createDiv({ cls: "vault-coach-concept-review-muted", text: "User-created relation with an explicit note." });
+            container.createDiv({ cls: "vault-coach-concept-review-muted", text: this.t("conceptReview.userCreatedEvidence") });
             return;
         }
         const list = container.createEl("ul", { cls: "vault-coach-concept-review-evidence" });
@@ -334,9 +355,68 @@ export class ConceptReviewView extends ItemView {
         try {
             await action();
             await this.refresh();
-        } catch (error: unknown) {
-            new Notice(describeError(error));
+        } catch {
+            new Notice(this.t("conceptReview.actionFailed"));
         }
+    }
+
+    private async rebuildSemanticGraph(): Promise<void> {
+        if (this.semanticRebuildInFlight || this.controller.getState().busy) return;
+        this.semanticRebuildInFlight = true;
+        this.render();
+        try {
+            await this.controller.rebuild();
+        } catch {
+            new Notice(this.t("conceptReview.actionFailed"));
+        } finally {
+            this.semanticRebuildInFlight = false;
+            await this.refresh();
+        }
+    }
+
+    private renderSemanticBuildStatus(
+        container: HTMLElement,
+        progress: { processedSections: number; queuedSections: number },
+    ): void {
+        const status = container.createDiv({
+            cls: "vault-coach-semantic-build-status",
+            attr: { role: "status", "aria-live": "polite" },
+        });
+        status.createSpan({ cls: "vault-coach-thinking-spinner", attr: { "aria-hidden": "true" } });
+        const text = progress.queuedSections > 0
+            ? this.t("semantic.buildingProgress", { processed: progress.processedSections, total: progress.queuedSections })
+            : this.t("semantic.building");
+        status.createSpan({ text });
+    }
+
+    private formatRelationship(source: string, type: SemanticRelationType, target: string): string {
+        const connector = type === "same_as" || type === "related_to" || type === "contrasts_with" ? " ↔ " : " → ";
+        return `${source}${connector}${target} (${this.relationLabel(type)})`;
+    }
+
+    private relationLabel(type: SemanticRelationType): string {
+        return this.t(`semantic.relation.${type}` as TranslationKey);
+    }
+
+    private originLabel(origin: "model" | "rule" | "similarity" | "user"): string {
+        return this.t(`semantic.origin.${origin}` as TranslationKey);
+    }
+
+    private describeDecision(decision: ReturnType<typeof getUndoableDecisions>[number]): string {
+        if (decision.kind === "confirm-candidate") {
+            return this.t("conceptReview.decision.confirmed", { id: shortId(decision.candidateFingerprint) });
+        }
+        if (decision.kind === "reject-candidate") {
+            return this.t("conceptReview.decision.rejected", { id: shortId(decision.candidateFingerprint) });
+        }
+        if (decision.kind === "remove-manual-relation") {
+            return this.t("conceptReview.decision.removed", { id: shortId(decision.relationId) });
+        }
+        return this.t("conceptReview.decision.merged", { count: decision.mergedConceptIds.length });
+    }
+
+    private t(key: TranslationKey, replacements?: Record<string, string | number>): string {
+        return translate(key, replacements);
     }
 
     private retainVisibleSelections(projection: ConceptReviewProjection): void {
@@ -351,11 +431,6 @@ export class ConceptReviewView extends ItemView {
             this.selectedRelationId = null;
         }
     }
-}
-
-function formatRelationship(source: string, type: SemanticRelationType, target: string): string {
-    const connector = type === "same_as" || type === "related_to" || type === "contrasts_with" ? " ↔ " : " → ";
-    return `${source}${connector}${target} (${type})`;
 }
 
 function findActiveCandidateDecision(
@@ -402,19 +477,8 @@ function getUndoableDecisions(decisions: readonly UserSemanticDecision[]): Array
     });
 }
 
-function describeDecision(decision: ReturnType<typeof getUndoableDecisions>[number]): string {
-    if (decision.kind === "confirm-candidate") return `Confirmed candidate ${shortId(decision.candidateFingerprint)}`;
-    if (decision.kind === "reject-candidate") return `Rejected candidate ${shortId(decision.candidateFingerprint)}`;
-    if (decision.kind === "remove-manual-relation") return `Removed manual relationship ${shortId(decision.relationId)}`;
-    return `Merged ${decision.mergedConceptIds.length} concept(s)`;
-}
-
 function shortId(value: string): string {
     return value.length > 18 ? `${value.slice(0, 17)}…` : value;
-}
-
-function describeError(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
 }
 
 function truncate(value: string, length: number): string {
