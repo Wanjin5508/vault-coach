@@ -72,6 +72,10 @@ export class LearningGraphRenderer {
     private readonly positions: Map<string, LearningGraphPosition>;
     private readonly degrees: ReadonlyMap<string, number>;
     private readonly layoutContext: LayoutContext;
+    /** Logical Canvas viewport in CSS pixels; updated with the graph container. */
+    private viewportWidth = WIDTH;
+    private viewportHeight = HEIGHT;
+    private resizeObserver: ResizeObserver | null = null;
     private transform: Transform = { x: 0, y: 0, scale: 1 };
     private selectedNodeId: string | null;
     private selectedEdgeId: string | null;
@@ -88,8 +92,6 @@ export class LearningGraphRenderer {
         this.selectedEdgeId = options.selectedEdgeId;
         this.canvas = document.createElement("canvas");
         this.canvas.classList.add("vault-coach-learning-map-canvas");
-        this.canvas.width = WIDTH * Math.max(1, window.devicePixelRatio || 1);
-        this.canvas.height = HEIGHT * Math.max(1, window.devicePixelRatio || 1);
         this.canvas.setAttribute("role", "img");
         this.canvas.setAttribute("aria-label", options.accessibleTitle);
         this.canvas.title = options.accessibleTitle;
@@ -97,6 +99,12 @@ export class LearningGraphRenderer {
         if (!context) throw new Error("Canvas 2D context is unavailable.");
         this.context = context;
         this.root.appendChild(this.canvas);
+        this.syncCanvasSize();
+        this.resizeObserver = new ResizeObserver(() => {
+            if (this.destroyed || !this.syncCanvasSize()) return;
+            this.fit();
+        });
+        this.resizeObserver.observe(this.canvas);
         this.bindInteractions();
         this.fit();
     }
@@ -113,11 +121,11 @@ export class LearningGraphRenderer {
         const padding = 46;
         const worldWidth = Math.max(90, bounds.maxX - bounds.minX + padding * 2);
         const worldHeight = Math.max(90, bounds.maxY - bounds.minY + padding * 2);
-        const scale = clamp(Math.min(WIDTH / worldWidth, HEIGHT / worldHeight), 0.12, 1.55);
+        const scale = clamp(Math.min(this.viewportWidth / worldWidth, this.viewportHeight / worldHeight), 0.12, 1.55);
         this.transform = {
             scale,
-            x: WIDTH / 2 - ((bounds.minX + bounds.maxX) / 2) * scale,
-            y: HEIGHT / 2 - ((bounds.minY + bounds.maxY) / 2) * scale,
+            x: this.viewportWidth / 2 - ((bounds.minX + bounds.maxX) / 2) * scale,
+            y: this.viewportHeight / 2 - ((bounds.minY + bounds.maxY) / 2) * scale,
         };
         this.draw();
     }
@@ -140,6 +148,8 @@ export class LearningGraphRenderer {
     destroy(): void {
         this.destroyed = true;
         this.drag = null;
+        this.resizeObserver?.disconnect();
+        this.resizeObserver = null;
         this.root.empty();
     }
 
@@ -188,8 +198,8 @@ export class LearningGraphRenderer {
             const rect = this.canvas.getBoundingClientRect();
             this.transform = {
                 ...this.transform,
-                x: drag.transform.x + dx * (WIDTH / Math.max(1, rect.width)),
-                y: drag.transform.y + dy * (HEIGHT / Math.max(1, rect.height)),
+                x: drag.transform.x + dx * (this.viewportWidth / Math.max(1, rect.width)),
+                y: drag.transform.y + dy * (this.viewportHeight / Math.max(1, rect.height)),
             };
             this.draw();
             return;
@@ -226,10 +236,10 @@ export class LearningGraphRenderer {
     private zoom(event: WheelEvent): void {
         event.preventDefault();
         const rect = this.canvas.getBoundingClientRect();
-        const x = (event.clientX - rect.left) * (WIDTH / Math.max(1, rect.width));
-        const y = (event.clientY - rect.top) * (HEIGHT / Math.max(1, rect.height));
+        const x = (event.clientX - rect.left) * (this.viewportWidth / Math.max(1, rect.width));
+        const y = (event.clientY - rect.top) * (this.viewportHeight / Math.max(1, rect.height));
         const previous = this.transform.scale;
-        const next = clamp(previous * learningGraphZoomMultiplier(event.deltaY, event.deltaMode), 0.1, 4);
+        const next = clamp(previous * learningGraphZoomMultiplier(event.deltaY, event.deltaMode, this.viewportHeight), 0.1, 4);
         const worldX = (x - this.transform.x) / previous;
         const worldY = (y - this.transform.y) / previous;
         this.transform = { scale: next, x: x - worldX * next, y: y - worldY * next };
@@ -239,9 +249,9 @@ export class LearningGraphRenderer {
     private draw(): void {
         const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
         this.context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-        this.context.clearRect(0, 0, WIDTH, HEIGHT);
+        this.context.clearRect(0, 0, this.viewportWidth, this.viewportHeight);
         this.context.fillStyle = COLORS.background;
-        this.context.fillRect(0, 0, WIDTH, HEIGHT);
+        this.context.fillRect(0, 0, this.viewportWidth, this.viewportHeight);
         this.drawGrid();
         this.context.save();
         this.context.translate(this.transform.x, this.transform.y);
@@ -263,8 +273,8 @@ export class LearningGraphRenderer {
         // A sparse dot field offers orientation without competing with graph
         // edges; full square grid lines made dense candidate maps look like a
         // debugging overlay rather than an Obsidian-style graph.
-        for (let x = 14; x <= WIDTH; x += 28) {
-            for (let y = 14; y <= HEIGHT; y += 28) {
+        for (let x = 14; x <= this.viewportWidth; x += 28) {
+            for (let y = 14; y <= this.viewportHeight; y += 28) {
                 context.fillRect(x, y, 1, 1);
             }
         }
@@ -356,7 +366,7 @@ export class LearningGraphRenderer {
             context.textBaseline = "bottom";
             context.lineJoin = "round";
             context.strokeStyle = COLORS.background;
-            context.lineWidth = (2.3 * WIDTH / Math.max(1, this.canvas.getBoundingClientRect().width)) / Math.max(0.1, this.transform.scale);
+            context.lineWidth = (2.3 * this.viewportWidth / Math.max(1, this.canvas.getBoundingClientRect().width)) / Math.max(0.1, this.transform.scale);
             context.strokeText(truncate(node.label, 19), position.x, position.y - radius - 7);
             context.fillText(truncate(node.label, 19), position.x, position.y - radius - 7);
         }
@@ -369,7 +379,29 @@ export class LearningGraphRenderer {
         // to see matching labels rather than a second, unrelated scale.
         const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
         const displayWidth = Math.max(1, this.canvas.getBoundingClientRect().width);
-        return rootFontSize * 0.78 * (WIDTH / displayWidth);
+        return rootFontSize * 0.78 * (this.viewportWidth / displayWidth);
+    }
+
+    /**
+     * Keep the backing store and logical coordinate system equal to the CSS
+     * viewport. CSS may make the graph taller than its initial 23:16 shape;
+     * drawing into a matching backing store preserves circular nodes and gives
+     * `fit()` genuinely more vertical view space instead of stretching pixels.
+     */
+    private syncCanvasSize(): boolean {
+        const rect = this.canvas.getBoundingClientRect();
+        const width = Math.max(1, Math.round(rect.width || WIDTH));
+        const height = Math.max(1, Math.round(rect.height || HEIGHT));
+        const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
+        const backingWidth = Math.round(width * pixelRatio);
+        const backingHeight = Math.round(height * pixelRatio);
+        if (width === this.viewportWidth && height === this.viewportHeight
+            && this.canvas.width === backingWidth && this.canvas.height === backingHeight) return false;
+        this.viewportWidth = width;
+        this.viewportHeight = height;
+        this.canvas.width = backingWidth;
+        this.canvas.height = backingHeight;
+        return true;
     }
 
     private getNeighbourIds(activeNodeId: string | null): Set<string> {
@@ -408,8 +440,8 @@ export class LearningGraphRenderer {
     private toViewPoint(event: PointerEvent): { x: number; y: number } {
         const rect = this.canvas.getBoundingClientRect();
         return {
-            x: (event.clientX - rect.left) * (WIDTH / Math.max(1, rect.width)),
-            y: (event.clientY - rect.top) * (HEIGHT / Math.max(1, rect.height)),
+            x: (event.clientX - rect.left) * (this.viewportWidth / Math.max(1, rect.width)),
+            y: (event.clientY - rect.top) * (this.viewportHeight / Math.max(1, rect.height)),
         };
     }
 
@@ -445,8 +477,8 @@ export function learningGraphNodeRadiusForDegree(degree: number): number {
  * Trackpads emit many small wheel deltas. Scaling from the delta magnitude
  * avoids turning every tiny gesture into the old fixed 12% zoom jump.
  */
-export function learningGraphZoomMultiplier(deltaY: number, deltaMode = 0): number {
-    const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * HEIGHT : deltaY;
+export function learningGraphZoomMultiplier(deltaY: number, deltaMode = 0, pageHeight = HEIGHT): number {
+    const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * pageHeight : deltaY;
     return Math.exp(-clamp(pixels, -180, 180) * 0.0011);
 }
 

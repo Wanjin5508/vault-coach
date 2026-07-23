@@ -13,8 +13,11 @@ import type { SemanticRelationType } from "../../domain/semantic-graph/semantic-
 export class LearningMapController {
     private query: LearningGraphQuery = {
         depth: 1,
-        maxNodes: LEARNING_GRAPH_DEFAULT_MAX_NODES,
-        maxEdges: LEARNING_GRAPH_DEFAULT_MAX_EDGES,
+        // The renderer and query service enforce the local 500 / 2,000 hard
+        // ceiling. Prefer the complete bounded map by default so a normal
+        // vault is not silently split into an overview plus hidden nodes.
+        maxNodes: LEARNING_GRAPH_MAX_NODES,
+        maxEdges: LEARNING_GRAPH_MAX_EDGES,
     };
     /**
      * Focus is exploration state, not a destructive filter. Keep a small

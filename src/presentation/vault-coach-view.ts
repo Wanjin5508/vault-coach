@@ -94,6 +94,14 @@ export class VaultCoachView extends ItemView {
         this.render();
     }
 
+    /** Opens the ordinary Exam setup with a Learning Map source-file scope. */
+    openSourceScopedExam(filePaths: readonly string[]): boolean {
+        if (!this.examController.prepareSourceScopedExam(filePaths)) return false;
+        this.activeInteractionMode = "exam";
+        this.render();
+        return true;
+    }
+
     private t(key: TranslationKey, replacements?: Record<string, string | number>): string {
         return translate(key, replacements);
     }

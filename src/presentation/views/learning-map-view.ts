@@ -11,11 +11,14 @@ import {
     type LearningGraphRelationType,
 } from "../../domain/learning-graph/learning-graph-types";
 import type { SemanticGraphStateView, SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
+import type { ConceptMasteryState } from "../../domain/mastery/mastery-types";
 import { translate, type TranslationKey } from "../../i18n";
 import { LearningGraphRenderer } from "../components/learning-graph-renderer";
 import { LearningMapController } from "../controllers/learning-map-controller";
 
 export type LearningMapSourceOpener = (filePath: string, heading?: string) => Promise<void>;
+/** Opens the existing Exam setup with a transparent, source-file-bound scope. */
+export type LearningMapExamStarter = (sourcePaths: readonly string[]) => Promise<void>;
 
 const RELATION_TYPES: readonly SemanticRelationType[] = [
     "same_as", "part_of", "prerequisite_of", "used_for", "contrasts_with", "related_to",
@@ -41,6 +44,7 @@ export class LearningMapView extends ItemView {
         leaf: WorkspaceLeaf,
         private readonly application: VaultCoachApplicationApi,
         private readonly openSource: LearningMapSourceOpener,
+        private readonly startExamForSources?: LearningMapExamStarter,
     ) {
         super(leaf);
         this.controller = new LearningMapController(application.learningGraph);
@@ -200,7 +204,7 @@ export class LearningMapView extends ItemView {
         fit.addEventListener("click", () => this.renderer?.fit());
         const canShowFull = projection.stats.sourceNodeCount <= LEARNING_GRAPH_MAX_NODES
             && projection.stats.sourceEdgeCount <= LEARNING_GRAPH_MAX_EDGES;
-        if ((canShowFull && projection.stats.truncated) || this.controller.isFullGraph()) {
+        if (canShowFull && (projection.stats.truncated || this.controller.isFullGraph())) {
             const full = this.createGraphControlButton(
                 controls,
                 this.controller.isFullGraph() ? "shrink" : "expand",
@@ -307,17 +311,31 @@ export class LearningMapView extends ItemView {
         const title = details.createDiv({ cls: "vault-coach-learning-map-inspector-title" });
         title.createEl("strong", { text: node.label });
         title.createSpan({ cls: "vault-coach-learning-map-concept-id", text: this.t("learningMap.conceptId", { id: node.id }) });
-        if (node.description) details.createDiv({ cls: "vault-coach-learning-map-description", text: node.description });
+        details.createDiv({
+            cls: "vault-coach-learning-map-description",
+            text: node.description || this.t("learningMap.noDescription"),
+            attr: { title: node.description || this.t("learningMap.noDescription") },
+        });
+        if (node.aliases.length > 0) {
+            const aliases = this.t("learningMap.aliases", { aliases: node.aliases.join(", ") });
+            details.createDiv({
+                cls: "vault-coach-learning-map-inspector-line",
+                text: aliases,
+                attr: { title: aliases },
+            });
+        }
         const outgoing = projection.edges.filter((edge) => edge.sourceNodeId === node.id);
         const incoming = projection.edges.filter((edge) => edge.targetNodeId === node.id);
-        details.createDiv({
-            cls: "vault-coach-learning-map-muted",
-            text: this.t("learningMap.relationshipCount", { outgoing: outgoing.length, incoming: incoming.length }),
-        });
+        const relationSummary = this.t("learningMap.relationshipCount", { outgoing: outgoing.length, incoming: incoming.length });
+        const summary = node.kind === "concept"
+            ? `${this.getMasterySummary(node.id)} · ${relationSummary}`
+            : `${this.nodeKindLabel(node.kind)} · ${relationSummary}`;
+        details.createDiv({ cls: "vault-coach-learning-map-muted vault-coach-learning-map-inspector-line", text: summary, attr: { title: summary } });
         const actions = content.createDiv({ cls: "vault-coach-learning-map-inspector-actions" });
         const focus = actions.createEl("button", { text: this.t("learningMap.focus"), cls: "mod-cta" });
         focus.addEventListener("click", () => { this.controller.setFocus(node.id); this.selectedEdgeId = null; void this.refresh(); });
         this.renderEvidenceSourceButton(actions, node.evidence);
+        if (node.kind === "concept") this.renderSourceExamButton(actions, this.getExamSourcePaths(node));
     }
 
     private renderEdgeInspector(inspector: HTMLElement, edge: LearningGraphEdge, projection: LearningGraphProjection): void {
@@ -382,6 +400,18 @@ export class LearningMapView extends ItemView {
         });
     }
 
+    private renderSourceExamButton(container: HTMLElement, sourcePaths: readonly string[]): void {
+        const canStart = sourcePaths.length > 0 && this.startExamForSources !== undefined;
+        const button = container.createEl("button", {
+            text: this.t("learningMap.sourceExam"),
+            attr: canStart ? {} : { disabled: "true", title: this.t("learningMap.sourceExamUnavailable") },
+        });
+        if (!canStart) return;
+        button.addEventListener("click", () => {
+            void this.startExamForSources!(sourcePaths).catch(() => new Notice(this.t("learningMap.sourceExamUnavailable")));
+        });
+    }
+
     private getEvidenceSources(evidence: readonly LearningGraphEvidence[]): EvidenceSource[] {
         const sources = new Map<string, EvidenceSource>();
         for (const item of evidence) {
@@ -395,6 +425,36 @@ export class LearningMapView extends ItemView {
             sources.set(key, { filePath, heading, label: `${filePath}${heading ? ` › ${heading}` : ""}` });
         }
         return Array.from(sources.values()).sort((left, right) => left.label.localeCompare(right.label));
+    }
+
+    private getExamSourcePaths(node: LearningGraphNode): string[] {
+        return Array.from(new Set([
+            ...node.sourcePaths,
+            ...this.getEvidenceSources(node.evidence).map((source) => source.filePath),
+        ].filter((path) => path.length > 0))).sort((left, right) => left.localeCompare(right));
+    }
+
+    private getMasterySummary(conceptId: string): string {
+        const masteryState = this.application.mastery.getState();
+        const mastery = this.application.mastery.getConceptState(conceptId);
+        if (!mastery) {
+            if (masteryState.busy) return this.t("progress.mastery.calculating");
+            return masteryState.dirty
+                ? this.t("progress.mastery.stale")
+                : this.t("learningMap.masteryUnavailable");
+        }
+        const summary = this.formatMasterySummary(mastery);
+        return masteryState.dirty ? `${summary} · ${this.t("progress.mastery.stale")}` : summary;
+    }
+
+    private formatMasterySummary(mastery: ConceptMasteryState): string {
+        return this.t("learningMap.masterySummary", {
+            level: this.t(`progress.level.${mastery.level}` as TranslationKey),
+            score: mastery.masteryScore === null ? this.t("learningMap.masteryNoScore") : `${Math.round(mastery.masteryScore * 100)}%`,
+            confidence: Math.round(mastery.confidence * 100),
+            trend: this.t(`learningMap.trend.${mastery.trend}` as TranslationKey),
+            evidence: mastery.effectiveEvidenceCount,
+        });
     }
 
     private async openEvidence(filePath: string, heading?: string): Promise<void> {

@@ -102,6 +102,45 @@ export class ExamController {
         return this.api.getExamScopeSnapshot(this.getScopeSelection(scopeOptions));
     }
 
+    /**
+     * Starts the existing manual Exam workflow with exactly the source files
+     * selected by another feature (currently Learning Map). This is a visible,
+     * editable file scope, not an adaptive Exam target or a graph mutation.
+     */
+    prepareSourceScopedExam(filePaths: readonly string[]): boolean {
+        if (this.state.busy) return false;
+        const requested = new Set(filePaths.map((path) => path.trim()).filter((path) => path.length > 0));
+        const allFiles = this.api.getExamFileOptions([]);
+        const sourceFiles = allFiles.filter((file) => requested.has(file.filePath) && !file.permanentlyExcluded);
+        if (sourceFiles.length === 0) return false;
+
+        const sourcePaths = new Set(sourceFiles.map((file) => file.filePath));
+        const narrowestSourceFolder = findNarrowestCommonSourceFolder(
+            Array.from(sourcePaths),
+            this.getScopeOptions(),
+        );
+        const scopedFiles = narrowestSourceFolder
+            ? this.api.getExamFileOptions([narrowestSourceFolder.folderPath])
+            : allFiles;
+        this.state.session = null;
+        this.state.phase = "setup";
+        // Prefer the deepest directory containing every source. The visible
+        // folder selection now tells the same story as the source-file scope;
+        // only root/disjoint sources fall back to the full-vault option.
+        this.state.selectedScopeIds = new Set<string>(narrowestSourceFolder ? [narrowestSourceFolder.id] : ["__all__"]);
+        this.state.excludedFilePaths = new Set(scopedFiles
+            .filter((file) => !sourcePaths.has(file.filePath))
+            .map((file) => file.filePath));
+        // The source has already been selected deliberately from graph
+        // evidence, so smart content profiling must not silently remove it.
+        this.state.forceIncludedFilePaths = sourcePaths;
+        this.state.showFileManager = true;
+        this.state.fileSearchText = "";
+        this.invalidateAnalysis();
+        this.notifyStateChanged();
+        return true;
+    }
+
     getScopeSelection(scopeOptions = this.getScopeOptions()): ExamScopeSelection {
         return {
             selectedFolderPaths: this.getSelectedFolderPaths(scopeOptions),
@@ -590,4 +629,15 @@ export class ExamController {
             await listener(event);
         }
     }
+}
+
+function findNarrowestCommonSourceFolder(
+    sourcePaths: readonly string[],
+    scopeOptions: readonly ExamScopeOption[],
+): (ExamScopeOption & { folderPath: string }) | null {
+    return scopeOptions
+        .filter((option): option is ExamScopeOption & { folderPath: string } => option.folderPath !== null)
+        .filter((option) => sourcePaths.every((path) => path.startsWith(`${option.folderPath}/`)))
+        .sort((left, right) => right.folderPath.length - left.folderPath.length || left.folderPath.localeCompare(right.folderPath))[0]
+        ?? null;
 }

@@ -8,6 +8,8 @@ describe("LearningMapController", () => {
             getConceptCatalog: async () => { throw new Error("not used by this state test"); },
         });
 
+        expect(controller.isFullGraph()).toBe(true);
+
         controller.setSearch("database");
         controller.setFocus("concept:sql");
         controller.setFocus("concept:index");

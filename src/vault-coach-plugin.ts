@@ -51,6 +51,7 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
             leaf,
             this.runtime.application,
             (filePath, heading) => this.openLearningMapSource(filePath, heading),
+            (sourcePaths) => this.startLearningMapSourceExam(sourcePaths),
         ));
         this.registerView(VIEW_TYPE_PROGRESS, (leaf: WorkspaceLeaf) => new ProgressWorkspaceView(
             leaf,
@@ -206,6 +207,17 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
     private async openLearningMapSource(filePath: string, heading?: string): Promise<void> {
         const activeFilePath = this.app.workspace.getActiveFile()?.path ?? "";
         await this.app.workspace.openLinkText(heading ? `${filePath}#${heading}` : filePath, activeFilePath, false);
+    }
+
+    /** Bridges a Learning Map concept to the existing, user-editable Exam setup. */
+    private async startLearningMapSourceExam(sourcePaths: readonly string[]): Promise<void> {
+        await this.activateView();
+        const coachView = this.app.workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH)
+            .map((leaf) => leaf.view)
+            .find((view): view is VaultCoachView => view instanceof VaultCoachView);
+        if (!coachView?.openSourceScopedExam(sourcePaths)) {
+            new Notice(this.t("learningMap.sourceExamUnavailable"));
+        }
     }
 
     private registerVaultEvents(): void {
