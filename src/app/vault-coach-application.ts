@@ -49,6 +49,7 @@ export interface VaultCoachApplicationDependencies {
     rebuildIndex(signal?: AbortSignal): Promise<void>;
     clearIndex(): Promise<void>;
     abortIndex(): void;
+    getStorageFootprint(): Promise<import("../domain/index-lifecycle/storage-footprint").StorageFootprint>;
     knowledgeGraphService: KnowledgeGraphService;
     semanticGraphService: SemanticGraphService;
     learningGraphQueryService?: LearningGraphQueryService;
@@ -100,6 +101,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 this.emit({ type: "index-state-changed" });
             },
             getState: () => dependencies.getIndexState(),
+            getStorageFootprint: () => dependencies.getStorageFootprint(),
         };
         this.graph = this.createGraphApi();
         this.semanticGraph = this.createSemanticGraphApi();
@@ -224,6 +226,13 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 }
             },
             clear: async () => { await service.clear(); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            resetGovernanceDecisions: async () => {
+                await service.resetGovernanceDecisions();
+                invalidate();
+                this.emit({ type: "semantic-graph-state-changed" });
+                this.emit({ type: "mastery-state-changed" });
+            },
+            getGovernanceImpact: () => service.getGovernanceImpact(),
             abort: () => { service.abort(); this.emit({ type: "semantic-graph-state-changed" }); },
             getState: () => service.getState(),
             getReviewProjection: async (query) => service.getReviewProjection(query),

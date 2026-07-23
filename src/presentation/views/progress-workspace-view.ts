@@ -89,6 +89,17 @@ export class ProgressWorkspaceView extends ItemView {
             text: this.t("progress.summary"),
         });
 
+        const indexState = this.application.index.getState();
+        if (indexState.sourceInventoryStatus === "source-sync-required" || indexState.sourceInventoryStatus === "possible-domain-switch") {
+            this.contentEl.createDiv({
+                cls: "vault-coach-progress-workspace-message is-error",
+                text: indexState.sourceInventoryStatus === "possible-domain-switch"
+                    ? this.t("indexLifecycle.domainSwitch")
+                    : this.t("indexLifecycle.sourceSyncRequired"),
+            });
+            return;
+        }
+
         const state = this.controller.getState();
         if (!state.available) {
             this.contentEl.createDiv({

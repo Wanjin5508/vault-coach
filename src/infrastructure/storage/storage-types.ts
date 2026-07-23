@@ -11,6 +11,7 @@ import type {
     KnowledgeBaseStats,
 } from "../../domain/documents/document-types";
 import type { MemoryItem } from "../../domain/memory/memory-types";
+import type { SourceInventoryV1 } from "../../domain/index-lifecycle/source-inventory";
 
 export interface KnowledgeBaseSnapshot {
     version: number;
@@ -21,6 +22,8 @@ export interface KnowledgeBaseSnapshot {
     chunks: IndexedChunk[];
     embeddings?: ChunkEmbedding[];
     files: KnowledgeBaseFileRecord[];
+    /** Version 3+: prevents stale index restoration after offline Vault changes. */
+    sourceInventory?: SourceInventoryV1;
 }
 
 export interface PersistedPluginState {

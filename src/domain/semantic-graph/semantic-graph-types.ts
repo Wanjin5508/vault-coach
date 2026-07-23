@@ -244,6 +244,12 @@ export interface SemanticGraphStats {
     embeddingCount: number;
 }
 
+/** Preview shown before removing the user-authored governance overlay. */
+export interface SemanticGovernanceImpact {
+    decisionCount: number;
+    affectedConceptCount: number;
+}
+
 /** In-memory progress only; never persisted with semantic graph facts. */
 export interface SemanticGraphBuildProgress {
     processedSections: number;

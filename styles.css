@@ -1952,3 +1952,37 @@
         animation: none;
     }
 }
+
+.vault-coach-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.vault-coach-storage-footprint-summary {
+    margin-bottom: 12px;
+    color: var(--text-muted);
+}
+
+.vault-coach-storage-footprint-list {
+    display: grid;
+    gap: 8px;
+}
+
+.vault-coach-storage-footprint-row {
+    padding: 8px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+}
+
+.vault-coach-storage-footprint-detail,
+.vault-coach-storage-footprint-note {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-storage-footprint-note {
+    margin-top: 14px;
+}

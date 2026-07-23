@@ -19,6 +19,9 @@ import { VaultCoachView } from "./presentation/vault-coach-view";
 import { ConceptReviewView } from "./presentation/views/concept-review-view";
 import { LearningMapView } from "./presentation/views/learning-map-view";
 import { ProgressWorkspaceView } from "./presentation/views/progress-workspace-view";
+import type { SourceInventoryStatus } from "./domain/index-lifecycle/source-inventory";
+import { ConfirmActionModal } from "./presentation/modals/confirm-action-modal";
+import { StorageFootprintModal } from "./presentation/modals/storage-footprint-modal";
 
 /** Obsidian composition root: lifecycle, UI registration, and thin host adapters only. */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
@@ -156,6 +159,10 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         return this.runtime.isVectorIndexDirty();
     }
 
+    getSourceInventoryStatus(): SourceInventoryStatus {
+        return this.runtime.getSourceInventoryStatus();
+    }
+
     getKnowledgeIndexBusyState(): KnowledgeIndexBusyState {
         return this.runtime.getKnowledgeIndexBusyState();
     }
@@ -256,6 +263,40 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
                     new Notice(this.t("notice.semanticGraphBuildFailed"));
                 }
             },
+        });
+        this.addCommand({
+            id: "reset-semantic-governance-decisions",
+            name: this.t("command.resetSemanticGovernance"),
+            callback: () => {
+                const impact = this.runtime.application.semanticGraph.getGovernanceImpact();
+                new ConfirmActionModal(this.app, {
+                    title: this.t("semanticGovernance.resetTitle"),
+                    description: this.t("semanticGovernance.resetDescription", {
+                        decisions: impact.decisionCount,
+                        affectedConceptCount: impact.affectedConceptCount,
+                    }),
+                    confirmLabel: this.t("semanticGovernance.resetConfirm"),
+                    cancelLabel: this.t("semanticGovernance.cancel"),
+                    onConfirm: async () => {
+                        try {
+                            await this.runtime.application.semanticGraph.resetGovernanceDecisions();
+                            new Notice(this.t("notice.semanticGovernanceReset"));
+                            this.refreshAllViews();
+                        } catch {
+                            new Notice(this.t("notice.semanticGovernanceResetFailed"));
+                            throw new Error("Semantic governance reset failed.");
+                        }
+                    },
+                }).open();
+            },
+        });
+        this.addCommand({
+            id: "show-derived-storage-footprint",
+            name: this.t("command.showStorageFootprint"),
+            callback: () => new StorageFootprintModal(this.app, {
+                getFootprint: () => this.runtime.application.index.getStorageFootprint(),
+                t: (key, replacements) => this.t(key, replacements),
+            }).open(),
         });
         this.addCommand({
             id: "rebuild-concept-mastery",

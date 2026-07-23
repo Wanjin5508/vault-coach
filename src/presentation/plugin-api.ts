@@ -19,6 +19,7 @@ import type {
 import type { KnowledgeBaseStats } from "../domain/documents/document-types";
 import type { KnowledgeIndexBusyState } from "../app/index/index-types";
 import type { VaultCoachSettings } from "../app/config/settings-types";
+import type { SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 
 /**
  * UI 层和设置页能调用的插件能力。
@@ -41,6 +42,7 @@ export interface VaultCoachPluginApi {
     abortKnowledgeIndexBuild(showNotice: boolean): void;
     isTextIndexDirty(): boolean;
     isVectorIndexDirty(): boolean;
+    getSourceInventoryStatus(): SourceInventoryStatus;
     getKnowledgeIndexBusyState(): KnowledgeIndexBusyState;
     getKnowledgeBaseStats(): KnowledgeBaseStats;
     getVectorIndexStats(): VectorIndexStats;

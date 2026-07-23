@@ -4,6 +4,7 @@ import { createDocumentId, hashArrayBuffer, hashString, type DocumentParser, Doc
 import { MarkdownDocumentParser } from "./markdown-document-parser";
 import { PdfDocumentParser } from "./pdf-document-parser";
 import type { DocumentIndexReader } from "./domain/documents/document-index-reader";
+import { createSourceInventory, type SourceInventoryV1 } from "./domain/index-lifecycle/source-inventory";
 import type {
     ChunkContentKind,
     DocumentLocator,
@@ -204,6 +205,22 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
             parserLayer: DOCUMENT_PARSER_LAYER_VERSION,
             chunkerVersion: DOCUMENT_CHUNKER_VERSION,
         });
+    }
+
+    /**
+     * Produces a lightweight current-Vault inventory without reading document
+     * contents. Runtime uses it before hydrating any persisted derived data.
+     */
+    getSourceInventory(generatedAt: number = Date.now()): SourceInventoryV1 {
+        return createSourceInventory(
+            this.getSettingsSignature(),
+            this.resolveTargetKnowledgeFiles().map((file: TFile) => ({
+                path: normalizePath(file.path),
+                size: file.stat.size,
+                modifiedAt: file.stat.mtime,
+            })),
+            generatedAt,
+        );
     }
 
     /**

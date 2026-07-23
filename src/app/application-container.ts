@@ -16,6 +16,7 @@ import { ObsidianGraphSourceReader } from "../infrastructure/obsidian/obsidian-g
 import { JsonGraphStore } from "../infrastructure/storage/json-graph-store";
 import { JsonSemanticGraphStore } from "../infrastructure/storage/json-semantic-graph-store";
 import { JsonMasteryStore } from "../infrastructure/storage/json-mastery-store";
+import { StorageFootprintReporter } from "../infrastructure/storage/storage-footprint-reporter";
 import { LongTermMemoryService } from "../memory/memory-service";
 import { VaultCoachPersistentStore } from "../persistent-store";
 import { AdvancedRagEngine } from "../rag-engine";
@@ -36,6 +37,7 @@ import type { VaultCoachSettings } from "./config/settings-types";
 import type { ExamEvaluationMetadata, ExamScopeSelection } from "../domain/exam/exam-types";
 import type { AssessmentSessionStore } from "../domain/assessment/assessment-types";
 import type { VectorStore } from "../domain/retrieval/retrieval-types";
+import type { StorageFootprint } from "../domain/index-lifecycle/storage-footprint";
 
 /** Host callbacks needed to connect application services to the Obsidian plugin lifecycle. */
 export interface ApplicationContainerDependencies {
@@ -57,6 +59,7 @@ export interface ApplicationContainerDependencies {
     rebuildIndex(signal?: AbortSignal): Promise<void>;
     clearIndex(): Promise<void>;
     abortIndex(): void;
+    getStorageFootprint(): Promise<StorageFootprint>;
 }
 
 /** Concrete services retained for the legacy plugin adapter during incremental migration. */
@@ -72,6 +75,7 @@ export interface ApplicationContainerServices {
     assessmentEventFactory: AssessmentEventFactory;
     memoryService: LongTermMemoryService;
     persistentStore: VaultCoachPersistentStore;
+    storageFootprintReporter: StorageFootprintReporter;
     indexCoordinator: KnowledgeIndexCoordinator;
     knowledgeGraphService: KnowledgeGraphService;
     semanticGraphService: SemanticGraphService;
@@ -95,6 +99,7 @@ export interface ApplicationContainer {
 
 export function createApplicationContainer(dependencies: ApplicationContainerDependencies): ApplicationContainer {
     const persistentStore = new VaultCoachPersistentStore(dependencies.app, dependencies.pluginId);
+    const storageFootprintReporter = new StorageFootprintReporter(dependencies.app.vault.adapter, persistentStore);
     const knowledgeBase = new VaultKnowledgeBase(dependencies.app, () => dependencies.getSettings());
     const vectorStore = new EmbeddedExactVectorStore(persistentStore);
     const chatService = new ChatService(() => dependencies.getSettings());
@@ -209,6 +214,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         rebuildIndex: (signal) => dependencies.rebuildIndex(signal),
         clearIndex: () => dependencies.clearIndex(),
         abortIndex: () => dependencies.abortIndex(),
+        getStorageFootprint: () => dependencies.getStorageFootprint(),
         knowledgeGraphService,
         semanticGraphService,
         learningGraphQueryService,
@@ -231,6 +237,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             assessmentEventFactory,
             memoryService,
             persistentStore,
+            storageFootprintReporter,
             indexCoordinator,
             knowledgeGraphService,
             semanticGraphService,

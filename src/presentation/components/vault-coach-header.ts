@@ -57,13 +57,18 @@ export class VaultCoachHeader {
         vectorStats: VectorIndexStats,
         indexBusyState: KnowledgeIndexBusyState,
     ): void {
+        const sourceInventoryStatus = this.plugin.getSourceInventoryStatus();
         const textIndexStatusText = indexBusyState.busy && indexBusyState.phase === "vector"
             ? (textStats.lastIndexedAt ? this.t("view.indexStatus.ready") : this.t("view.indexStatus.building"))
             : indexBusyState.busy
                 ? this.t("view.indexStatus.building")
-                : this.plugin.isTextIndexDirty()
-                    ? this.t("view.indexStatus.dirty")
-                    : (textStats.lastIndexedAt ? this.t("view.indexStatus.ready") : this.t("view.indexStatus.notBuilt"));
+                : sourceInventoryStatus === "possible-domain-switch"
+                    ? this.t("view.indexStatus.domainSwitch")
+                    : sourceInventoryStatus === "source-sync-required"
+                        ? this.t("view.indexStatus.sourceSync")
+                        : this.plugin.isTextIndexDirty()
+                            ? this.t("view.indexStatus.dirty")
+                            : (textStats.lastIndexedAt ? this.t("view.indexStatus.ready") : this.t("view.indexStatus.notBuilt"));
         const vectorIndexStatusText = indexBusyState.busy && indexBusyState.phase === "vector"
             ? this.t("view.indexStatus.building")
             : this.getVectorIndexStatusText(vectorStats);

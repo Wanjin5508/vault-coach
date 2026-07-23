@@ -13,6 +13,7 @@ import {
     type SemanticGraphState,
     type SemanticGraphStateView,
     type SemanticGraphStats,
+    type SemanticGovernanceImpact,
     type SemanticModelMetadata,
     type SemanticRelationType,
     type ConceptEvidenceRef,
@@ -100,6 +101,59 @@ export class SemanticGraphService {
         await this.run(affected, signal, "automatic");
     }
 
+    /**
+     * Reconciles persisted semantic facts with the current deterministic graph
+     * without calling an extraction or embedding model. It is used after an
+     * offline Vault change: stale records are removed, while the append-only
+     * user decision audit is retained for concepts that may reappear later.
+     */
+    async reconcileWithCurrentSources(): Promise<void> {
+        if (this.coordinator.isBusy()) throw new Error("语义概念图谱任务正在运行，暂时无法对齐来源。");
+        const snapshot = this.dependencies.graphService.getSnapshot();
+        if (!snapshot) throw new Error("确定性知识图谱尚未建立，无法对齐语义概念图谱。");
+
+        const persisted = await this.dependencies.store.load();
+        if (!persisted) {
+            // A first-ever text/graph build has nothing semantic to reconcile.
+            // Do not surface a misleading "source changed" warning merely
+            // because there was no previous source inventory.
+            this.state = createEmptySemanticGraphState(this.now());
+            await this.similarityIndex.clear();
+            this.similarityInitialized = true;
+            this.dirty = false;
+            this.lastError = null;
+            return;
+        }
+        const inputs = createSectionExtractionInputs(
+            snapshot,
+            this.dependencies.documentIndex,
+            this.dependencies.getSettings().semanticGraphMaxSectionCharacters,
+        );
+        const validExtractionKeys = new Set(inputs.map((input) => `${input.sectionId}\u0000${input.inputHash}`));
+        const extractions = persisted.extractions.filter((record) => validExtractionKeys.has(`${record.sectionId}\u0000${record.inputHash}`));
+        const concepts = buildConcepts(extractions);
+        const conceptIds = new Set(concepts.map((concept) => concept.id));
+        const candidates = persisted.candidates.filter((candidate) => (
+            conceptIds.has(candidate.sourceConceptId) && conceptIds.has(candidate.targetConceptId)
+        ));
+        const embeddings = persisted.embeddings.filter((embedding) => conceptIds.has(embedding.conceptId));
+        const next: SemanticGraphState = {
+            ...persisted,
+            extractions,
+            concepts,
+            candidates,
+            embeddings,
+            updatedAt: this.now(),
+        };
+        this.assertIntegrity(next);
+        await this.dependencies.store.save(next);
+        this.state = next;
+        await this.similarityIndex.rebuild(next.embeddings.map(toConceptEmbeddingRecord));
+        this.similarityInitialized = true;
+        this.dirty = true;
+        this.lastError = "知识来源已变更；未抽取的当前 Section 需要重建语义概念图谱。";
+    }
+
     abort(): void {
         this.coordinator.abort();
     }
@@ -112,6 +166,63 @@ export class SemanticGraphService {
         this.state = createEmptySemanticGraphState(this.now());
         this.dirty = false;
         this.lastError = null;
+    }
+
+    /**
+     * Removes the user-governed overlay without repeating extraction or
+     * embedding.  This is the deliberate recovery path after a confirmed
+     * knowledge-domain replacement: source-derived records can be rebuilt,
+     * while obsolete confirmations, aliases, merges, and manual relations no
+     * longer influence the effective graph.
+     */
+    async resetGovernanceDecisions(): Promise<void> {
+        if (this.coordinator.isBusy()) {
+            throw new Error("语义概念图谱任务正在运行，暂时无法重置人工治理决策。");
+        }
+        if (this.state.decisions.length === 0) return;
+        const next: SemanticGraphState = {
+            ...this.state,
+            decisions: [],
+            updatedAt: this.now(),
+        };
+        this.assertIntegrity(next);
+        await this.dependencies.store.save(next);
+        this.state = next;
+        // Keep a source-reconciliation warning intact. Resetting manual
+        // governance does not mean every current Section was re-extracted.
+    }
+
+    getGovernanceImpact(): SemanticGovernanceImpact {
+        const candidateByFingerprint = new Map(this.state.candidates.map((candidate) => [candidate.fingerprint, candidate]));
+        const affectedConceptIds = new Set<string>();
+        for (const decision of this.state.decisions) {
+            if (decision.kind === "confirm-candidate" || decision.kind === "reject-candidate") {
+                const candidate = candidateByFingerprint.get(decision.candidateFingerprint);
+                if (candidate) {
+                    affectedConceptIds.add(candidate.sourceConceptId);
+                    affectedConceptIds.add(candidate.targetConceptId);
+                }
+                continue;
+            }
+            if (decision.kind === "merge-concepts") {
+                affectedConceptIds.add(decision.canonicalConceptId);
+                decision.mergedConceptIds.forEach((conceptId) => affectedConceptIds.add(conceptId));
+                continue;
+            }
+            if (decision.kind === "add-alias" || decision.kind === "remove-alias") {
+                affectedConceptIds.add(decision.conceptId);
+                continue;
+            }
+            if (decision.kind === "create-manual-relation") {
+                affectedConceptIds.add(decision.sourceConceptId);
+                affectedConceptIds.add(decision.targetConceptId);
+            }
+        }
+        const currentConceptIds = new Set(this.state.concepts.map((concept) => concept.id));
+        return {
+            decisionCount: this.state.decisions.length,
+            affectedConceptCount: Array.from(affectedConceptIds).filter((conceptId) => currentConceptIds.has(conceptId)).length,
+        };
     }
 
     getState(): SemanticGraphStateView {

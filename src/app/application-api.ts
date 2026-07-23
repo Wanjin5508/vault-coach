@@ -19,11 +19,14 @@ import type {
     ConceptReviewProjection,
     ConceptReviewQuery,
     SemanticGraphStateView,
+    SemanticGovernanceImpact,
     SemanticRelationType,
 } from "../domain/semantic-graph/semantic-graph-types";
 import type { LearningGraphConceptCatalog, LearningGraphProjection, LearningGraphQuery } from "../domain/learning-graph/learning-graph-types";
 import type { ConceptMasteryState, MasterySnapshotV1, MasteryStateView } from "../domain/mastery/mastery-types";
 import type { ProgressSnapshot, ProgressStateView } from "./progress/progress-types";
+import type { SourceInventoryDiff, SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
+import type { StorageFootprint } from "../domain/index-lifecycle/storage-footprint";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -50,6 +53,8 @@ export interface ExamApplicationApi {
 export interface KnowledgeIndexViewState {
     textDirty: boolean;
     vectorDirty: boolean;
+    sourceInventoryStatus: SourceInventoryStatus;
+    sourceInventoryDiff: SourceInventoryDiff | null;
     busy: KnowledgeIndexBusyState;
     stats: KnowledgeBaseStats;
     vectorStats: VectorIndexStats;
@@ -60,6 +65,7 @@ export interface IndexApplicationApi {
     clear(): Promise<void>;
     abort(): void;
     getState(): KnowledgeIndexViewState;
+    getStorageFootprint(): Promise<StorageFootprint>;
 }
 
 /** The only graph entry point available to future presentation code. */
@@ -78,6 +84,9 @@ export interface GraphApplicationApi {
 export interface SemanticGraphApplicationApi {
     rebuild(signal?: AbortSignal): Promise<void>;
     clear(): Promise<void>;
+    /** Clears only user-authored semantic decisions; extracted facts and embeddings remain available. */
+    resetGovernanceDecisions(): Promise<void>;
+    getGovernanceImpact(): SemanticGovernanceImpact;
     abort(): void;
     getState(): SemanticGraphStateView;
     getReviewProjection(query?: ConceptReviewQuery): Promise<ConceptReviewProjection>;

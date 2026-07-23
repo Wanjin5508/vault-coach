@@ -70,6 +70,17 @@ describe("SemanticGraphService", () => {
         if (!removalDecision || removalDecision.kind !== "remove-manual-relation") throw new Error("Expected manual removal decision.");
         await service.undoManualRelationRemoval(removalDecision.id);
         expect(service.getReviewProjection().relations).toEqual([expect.objectContaining({ id: manualRelation.id, origin: "user" })]);
+
+        expect(service.getGovernanceImpact()).toMatchObject({
+            decisionCount: 5,
+            affectedConceptCount: 2,
+        });
+
+        await service.resetGovernanceDecisions();
+        expect(store.state?.decisions).toEqual([]);
+        expect(store.state?.concepts).toHaveLength(2);
+        expect(store.state?.embeddings).toHaveLength(2);
+        expect(service.getReviewProjection().relations).toEqual([]);
     });
 
     it("keeps both endpoints of high-priority pending candidates in a bounded default review", async () => {
@@ -129,6 +140,58 @@ describe("SemanticGraphService", () => {
             allowAutomaticSemanticSync: false,
         });
         expect(service.getReviewProjection()).toMatchObject({ concepts: [], relations: [], candidates: [] });
+    });
+
+    it("prunes stale source-derived semantic facts while retaining the user decision audit", async () => {
+        const store = new MemorySemanticStore();
+        let currentSnapshot = snapshot("section:doc:one");
+        const sectionId = "section:doc:one";
+        const retrievalCandidate = createSectionConceptCandidateId(sectionId, "retrieval");
+        const rankingCandidate = createSectionConceptCandidateId(sectionId, "ranking");
+        const service = new SemanticGraphService({
+            graphService: { getSnapshot: () => currentSnapshot } as never,
+            documentIndex: reader() as DocumentIndexReader,
+            store,
+            extractionService: new ConceptExtractionService({
+                generateJsonAnswer: async (messages) => messages[1]?.content.includes("已验证候选概念")
+                    ? JSON.stringify({ relations: [{
+                        type: "used_for",
+                        source_candidate_id: retrievalCandidate,
+                        target_candidate_id: rankingCandidate,
+                        confidence: 0.9,
+                        source_excerpt_ids: ["E1"],
+                    }] })
+                    : JSON.stringify({ concepts: [
+                        { name: "Retrieval", aliases: [], description: "Find evidence.", source_excerpt_ids: ["E1"] },
+                        { name: "Ranking", aliases: [], description: "Order evidence.", source_excerpt_ids: ["E1"] },
+                    ] }),
+            }),
+            embeddingGateway: { embedTexts: async (texts) => texts.map((_text, index) => index === 0 ? [1, 0] : [0, 1]) },
+            getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true, semanticGraphMaxSectionsPerRun: 10 }),
+            getNow: () => 10,
+        });
+        await service.load();
+        await service.rebuildAll();
+        const candidate = service.getReviewProjection().candidates.find((item) => item.type === "used_for");
+        if (!candidate) throw new Error("Expected a candidate to confirm.");
+        await service.confirmCandidate(candidate.fingerprint);
+
+        // The same file's source Section changed while the plugin was offline.
+        // Its new input hash invalidates the old extraction without invoking a model.
+        currentSnapshot = snapshot("section:doc:replacement");
+        await service.reconcileWithCurrentSources();
+
+        expect(store.state).toMatchObject({
+            extractions: [],
+            concepts: [],
+            candidates: [],
+            embeddings: [],
+            decisions: [expect.objectContaining({ kind: "confirm-candidate" })],
+        });
+        expect(service.getReviewProjection().relations).toEqual([]);
+        const stateView = service.getState();
+        expect(stateView.dirty).toBe(true);
+        expect(stateView.lastError ?? "").toContain("知识来源已变更");
     });
 });
 

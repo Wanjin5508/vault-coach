@@ -145,6 +145,16 @@ export class LearningMapView extends ItemView {
         this.contentEl.addClass("vault-coach-learning-map");
         const projection = this.projection;
         if (!projection) return;
+        const indexState = this.application.index.getState();
+        if (indexState.sourceInventoryStatus === "source-sync-required" || indexState.sourceInventoryStatus === "possible-domain-switch") {
+            this.contentEl.createDiv({
+                cls: "vault-coach-learning-map-empty",
+                text: indexState.sourceInventoryStatus === "possible-domain-switch"
+                    ? this.t("indexLifecycle.domainSwitch")
+                    : this.t("indexLifecycle.sourceSyncRequired"),
+            });
+            return;
+        }
         const semanticState = this.application.semanticGraph.getState();
         if (!projection.sourceReady || projection.nodes.length === 0) {
             this.contentEl.createDiv({
