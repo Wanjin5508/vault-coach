@@ -5,6 +5,13 @@ describe("ProgressController", () => {
     it("keeps Progress unavailable without fabricating a dashboard state", () => {
         const controller = new ProgressController({
             isAvailable: () => false,
+            getState: () => ({
+                hasSnapshot: false,
+                dirty: true,
+                busy: false,
+                lastError: "Progress service is unavailable.",
+                generatedAt: null,
+            }),
             getSnapshot: async () => {
                 throw new Error("Progress service is unavailable.");
             },

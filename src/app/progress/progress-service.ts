@@ -9,6 +9,7 @@ import {
     type ProgressMasteryStatus,
     type ProgressMasterySummary,
     type ProgressSnapshot,
+    type ProgressStateView,
 } from "./progress-types";
 
 export interface ProgressCatalogReader {
@@ -33,9 +34,73 @@ export interface ProgressServiceDependencies {
  * projections, semantic candidates, or Markdown report files.
  */
 export class ProgressService {
+    private snapshot: ProgressSnapshot | null = null;
+    private dirty = true;
+    private busy = false;
+    private lastError: string | null = null;
+    private revision = 0;
+    private inFlightRead: Promise<ProgressSnapshot> | null = null;
+
     constructor(private readonly dependencies: ProgressServiceDependencies) {}
 
     async getSnapshot(): Promise<ProgressSnapshot> {
+        while (true) {
+            if (this.snapshot && !this.dirty) {
+                return cloneSnapshot(this.snapshot);
+            }
+            await (this.inFlightRead ?? this.startRead());
+        }
+    }
+
+    getState(): ProgressStateView {
+        return {
+            hasSnapshot: this.snapshot !== null,
+            dirty: this.dirty,
+            busy: this.busy,
+            lastError: this.lastError,
+            generatedAt: this.snapshot?.generatedAt ?? null,
+        };
+    }
+
+    /**
+     * Invalidates only the disposable read model. The next explicit consumer
+     * read rebuilds it lazily, so startup and source-change events never scan
+     * the Vault or enumerate Assessment history on their own.
+     */
+    invalidate(): void {
+        this.revision += 1;
+        this.dirty = true;
+    }
+
+    private startRead(): Promise<ProgressSnapshot> {
+        const sourceRevision = this.revision;
+        this.busy = true;
+        let request: Promise<ProgressSnapshot>;
+        request = this.createSnapshot()
+            .then((snapshot) => {
+                if (sourceRevision === this.revision) {
+                    this.snapshot = cloneSnapshot(snapshot);
+                    this.dirty = false;
+                    this.lastError = null;
+                }
+                return snapshot;
+            })
+            .catch((error: unknown) => {
+                this.dirty = true;
+                this.lastError = describeError(error);
+                throw error;
+            })
+            .finally(() => {
+                if (this.inFlightRead === request) {
+                    this.inFlightRead = null;
+                    this.busy = false;
+                }
+            });
+        this.inFlightRead = request;
+        return request;
+    }
+
+    private async createSnapshot(): Promise<ProgressSnapshot> {
         const catalogResult = readCatalog(this.dependencies.catalogReader);
         const mastery = readMastery(
             this.dependencies.masteryReader,
@@ -215,6 +280,22 @@ function createLevelCounts(): Record<"unknown" | "weak" | "developing" | "profic
         developing: 0,
         proficient: 0,
         mastered: 0,
+    };
+}
+
+function cloneSnapshot(snapshot: ProgressSnapshot): ProgressSnapshot {
+    return {
+        ...snapshot,
+        graph: { ...snapshot.graph },
+        mastery: {
+            ...snapshot.mastery,
+            levelCounts: { ...snapshot.mastery.levelCounts },
+        },
+        assessments: { ...snapshot.assessments },
+        recommendations: snapshot.recommendations.map((recommendation) => ({
+            ...recommendation,
+            targetConceptIds: [...recommendation.targetConceptIds],
+        })),
     };
 }
 

@@ -8,6 +8,7 @@ import type { GraphSnapshotV1, GraphSourceDocument } from "../../src/domain/grap
 import type { AssessmentExamHistoryItem, AssessmentSessionDocumentV1 } from "../../src/domain/assessment/assessment-types";
 import type { ExamEvaluation, ExamSession } from "../../src/domain/exam/exam-types";
 import type { MarkdownExamHistoryRecord } from "../../src/exam/exam-session-store";
+import type { MasteryService } from "../../src/app/mastery/mastery-service";
 import type { ProgressService } from "../../src/app/progress/progress-service";
 
 describe("VaultCoachApplication", () => {
@@ -86,6 +87,43 @@ describe("VaultCoachApplication", () => {
             .find((candidate) => candidate.type === "links_to")?.sources[0]?.chunkIds).toEqual(["link-chunk"]);
         expect(await application.graph.checkIntegrity()).toEqual({ valid: true, issues: [] });
         expect(events).toEqual(["graph-state-changed"]);
+    });
+
+    it("invalidates cached Progress for index, effective graph, and Mastery source changes", async () => {
+        const progressInvalidate = vi.fn();
+        const store = new ApplicationGraphStore();
+        const graphService = new KnowledgeGraphService(createApplicationGraphReader(), new DeterministicGraphBuilder(), store);
+        const application = new VaultCoachApplication({
+            chatService: {
+                getMessages: () => [],
+                appendUserMessage: async () => undefined,
+                streamAssistantTurn: async () => ({ text: "", sources: [], retrievalModeUsed: "keyword", rewriteResult: { originalQuery: "", rewrittenQuery: "", useRewrite: false } }),
+                resetConversation: () => undefined,
+            },
+            knowledgeGraphService: graphService,
+            masteryService: {
+                rebuildAll: vi.fn(async () => ({ states: [] })),
+                clear: vi.fn(async () => undefined),
+                markDirty: vi.fn(),
+            } as unknown as MasteryService,
+            progressService: {
+                invalidate: progressInvalidate,
+            } as unknown as ProgressService,
+        } as unknown as VaultCoachApplicationDependencies);
+        const events: string[] = [];
+        application.subscribe((event) => events.push(event.type));
+
+        application.notifyIndexStateChanged();
+        await application.graph.rebuild();
+        await application.mastery.rebuild();
+
+        expect(progressInvalidate).toHaveBeenCalledTimes(3);
+        expect(events).toEqual([
+            "index-state-changed",
+            "graph-state-changed",
+            "mastery-state-changed",
+            "mastery-state-changed",
+        ]);
     });
 
     it("persists assessment facts before the Markdown projection and then notifies history", async () => {
@@ -170,6 +208,18 @@ describe("VaultCoachApplication", () => {
         expect(harness.writeAssessmentProjection).toHaveBeenCalledTimes(3);
     });
 
+    it("invalidates cached Progress only when persisted Assessment facts change", async () => {
+        const progressInvalidate = vi.fn();
+        const harness = createExamSaveHarness({ progressInvalidate });
+        const first = createScoredSession();
+
+        await harness.application.exam.saveSession(first);
+        await harness.application.exam.saveSession(first);
+        await harness.application.exam.saveSession(createScoredSession({ score: 92, evaluatedAt: 200 }));
+
+        expect(progressInvalidate).toHaveBeenCalledTimes(2);
+    });
+
     it("keeps submitSession report-free until the existing caller performs its automatic save", async () => {
         const evaluation = createEvaluation();
         const harness = createExamSaveHarness({ evaluate: vi.fn(async () => evaluation) });
@@ -237,6 +287,7 @@ interface ExamSaveHarnessOptions {
     writeReportError?: Error;
     evaluate?: ReturnType<typeof vi.fn>;
     masterySyncError?: Error;
+    progressInvalidate?: ReturnType<typeof vi.fn>;
 }
 
 function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
@@ -326,6 +377,11 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
             masteryService: {
                 syncForSession: syncMastery,
                 markDirty: markMasteryDirty,
+            },
+        } : {}),
+        ...(options.progressInvalidate ? {
+            progressService: {
+                invalidate: options.progressInvalidate,
             },
         } : {}),
     } as unknown as VaultCoachApplicationDependencies);

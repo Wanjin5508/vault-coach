@@ -22,7 +22,11 @@ import type { LearningGraphQuery } from "../domain/learning-graph/learning-graph
 import type { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
 import type { MasteryService } from "./mastery/mastery-service";
 import type { ProgressService } from "./progress/progress-service";
-import { PROGRESS_SNAPSHOT_SCHEMA_VERSION, type ProgressSnapshot } from "./progress/progress-types";
+import {
+    PROGRESS_SNAPSHOT_SCHEMA_VERSION,
+    type ProgressSnapshot,
+    type ProgressStateView,
+} from "./progress/progress-types";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
@@ -115,6 +119,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
 
     /** Allows non-UI coordinators to publish an index state change. */
     notifyIndexStateChanged(): void {
+        this.invalidateProgress();
         this.emit({ type: "index-state-changed" });
     }
 
@@ -181,6 +186,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 const snapshot = await graphService.rebuildAll(signal);
                 this.dependencies.learningGraphQueryService?.invalidate();
                 this.dependencies.masteryService?.markDirty("知识图谱已变更，需要重新计算掌握度。");
+                this.invalidateProgress();
                 this.emit({ type: "graph-state-changed" });
                 this.emit({ type: "mastery-state-changed" });
                 return snapshot;
@@ -200,6 +206,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         const invalidate = () => {
             this.dependencies.learningGraphQueryService?.invalidate();
             this.dependencies.masteryService?.markDirty("有效概念图谱已变更，需要重新计算掌握度。");
+            this.invalidateProgress();
         };
         return {
             rebuild: async (signal) => { await service.rebuildAll(signal); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
@@ -247,12 +254,14 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
             rebuild: async () => {
                 if (!service) throw new Error("Mastery service is unavailable.");
                 const snapshot = await service.rebuildAll();
+                this.invalidateProgress();
                 this.emit({ type: "mastery-state-changed" });
                 return snapshot;
             },
             clear: async () => {
                 if (!service) throw new Error("Mastery service is unavailable.");
                 await service.clear();
+                this.invalidateProgress();
                 this.emit({ type: "mastery-state-changed" });
             },
         };
@@ -262,6 +271,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         const service = this.dependencies.progressService;
         return {
             isAvailable: () => service !== undefined,
+            getState: (): ProgressStateView => service?.getState() ?? unavailableProgressState(),
             getSnapshot: async (): Promise<ProgressSnapshot> => {
                 if (!service) {
                     return createUnavailableProgressSnapshot();
@@ -313,6 +323,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
 
         if (document !== existingDocument) {
             await dependencies.assessmentSessionStore.save(document);
+            this.invalidateProgress();
         }
 
         const projectedSession = await dependencies.examSessionStore.writeAssessmentProjection(
@@ -378,6 +389,10 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         if (event.type === "mastery-state-changed" && !this.dependencies.masteryService) return;
         this.listeners.forEach((listener) => listener(event));
     }
+
+    private invalidateProgress(): void {
+        this.dependencies.progressService?.invalidate();
+    }
 }
 
 function unavailableMasteryState() {
@@ -428,6 +443,16 @@ function createUnavailableProgressSnapshot(): ProgressSnapshot {
             latestSessionAt: null,
         },
         recommendations: [],
+    };
+}
+
+function unavailableProgressState(): ProgressStateView {
+    return {
+        hasSnapshot: false,
+        dirty: true,
+        busy: false,
+        lastError: "Progress service is unavailable.",
+        generatedAt: null,
     };
 }
 

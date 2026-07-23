@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ProgressService } from "../../../src/app/progress/progress-service";
 import type { AssessmentExamHistoryItem } from "../../../src/domain/assessment/assessment-types";
 import type { LearningGraphConceptCatalog } from "../../../src/domain/learning-graph/learning-graph-types";
@@ -108,6 +108,104 @@ describe("ProgressService", () => {
         });
         expect(snapshot.recommendations).toEqual([]);
     });
+
+    it("caches completed reads, protects the cache from caller mutation, and rebuilds lazily after invalidation", async () => {
+        let historyReadCount = 0;
+        const listHistory = vi.fn(async () => {
+            historyReadCount += 1;
+            return createHistory();
+        });
+        const service = new ProgressService({
+            catalogReader: {
+                getConceptCatalog: () => createCatalog(["concept:rag"]),
+            },
+            masteryReader: {
+                getState: () => createMasteryState({ stateCount: 1 }),
+                getSnapshot: () => createSnapshot([createConceptState("concept:rag", "weak", 1)]),
+            },
+            assessmentSessionStore: { listHistory },
+            getNow: () => 1000 + historyReadCount,
+        });
+
+        const first = await service.getSnapshot();
+        (first.mastery.levelCounts as Record<string, number>).weak = 999;
+        const cached = await service.getSnapshot();
+
+        expect(listHistory).toHaveBeenCalledOnce();
+        expect(cached.generatedAt).toBe(1001);
+        expect(cached.mastery.levelCounts.weak).toBe(1);
+        expect(service.getState()).toEqual({
+            hasSnapshot: true,
+            dirty: false,
+            busy: false,
+            lastError: null,
+            generatedAt: 1001,
+        });
+
+        service.invalidate();
+        expect(service.getState()).toMatchObject({ hasSnapshot: true, dirty: true, busy: false });
+
+        const refreshed = await service.getSnapshot();
+        expect(listHistory).toHaveBeenCalledTimes(2);
+        expect(refreshed.generatedAt).toBe(1002);
+        expect(service.getState()).toMatchObject({ dirty: false, generatedAt: 1002 });
+    });
+
+    it("coalesces concurrent reads so one view refresh does not duplicate Assessment history work", async () => {
+        const deferredHistory = createDeferred<AssessmentExamHistoryItem[]>();
+        const listHistory = vi.fn(() => deferredHistory.promise);
+        const service = new ProgressService({
+            catalogReader: {
+                getConceptCatalog: () => createCatalog(["concept:rag"]),
+            },
+            masteryReader: {
+                getState: () => createMasteryState({ stateCount: 1 }),
+                getSnapshot: () => createSnapshot([createConceptState("concept:rag", "weak", 1)]),
+            },
+            assessmentSessionStore: { listHistory },
+            getNow: () => 1000,
+        });
+
+        const first = service.getSnapshot();
+        const second = service.getSnapshot();
+        expect(service.getState()).toMatchObject({ busy: true, dirty: true });
+        expect(listHistory).toHaveBeenCalledOnce();
+
+        deferredHistory.resolve(createHistory());
+        await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+
+        expect(listHistory).toHaveBeenCalledOnce();
+        expect(service.getState()).toMatchObject({ busy: false, dirty: false, hasSnapshot: true });
+    });
+
+    it("rebuilds before resolving when a source event invalidates an in-flight read", async () => {
+        const firstHistory = createDeferred<AssessmentExamHistoryItem[]>();
+        let readCount = 0;
+        const listHistory = vi.fn(async () => {
+            readCount += 1;
+            if (readCount === 1) return firstHistory.promise;
+            return createHistory();
+        });
+        const service = new ProgressService({
+            catalogReader: {
+                getConceptCatalog: () => createCatalog(["concept:rag"]),
+            },
+            masteryReader: {
+                getState: () => createMasteryState({ stateCount: 1 }),
+                getSnapshot: () => createSnapshot([createConceptState("concept:rag", "weak", 1)]),
+            },
+            assessmentSessionStore: { listHistory },
+            getNow: () => readCount,
+        });
+
+        const pending = service.getSnapshot();
+        service.invalidate();
+        firstHistory.resolve(createHistory());
+
+        await expect(pending).resolves.toMatchObject({ generatedAt: 2 });
+        expect(listHistory).toHaveBeenCalledTimes(2);
+        expect(service.getState()).toMatchObject({ dirty: false, generatedAt: 2 });
+    });
 });
 
 function createCatalog(conceptIds: readonly string[]): LearningGraphConceptCatalog {
@@ -197,4 +295,12 @@ function createHistory(): AssessmentExamHistoryItem[] {
         maxScore: null,
         modifiedAt: null,
     }];
+}
+
+function createDeferred<T>() {
+    let resolve: (value: T) => void = () => undefined;
+    const promise = new Promise<T>((nextResolve) => {
+        resolve = nextResolve;
+    });
+    return { promise, resolve };
 }

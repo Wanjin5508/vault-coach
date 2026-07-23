@@ -23,7 +23,7 @@ import type {
 } from "../domain/semantic-graph/semantic-graph-types";
 import type { LearningGraphConceptCatalog, LearningGraphProjection, LearningGraphQuery } from "../domain/learning-graph/learning-graph-types";
 import type { ConceptMasteryState, MasterySnapshotV1, MasteryStateView } from "../domain/mastery/mastery-types";
-import type { ProgressSnapshot } from "./progress/progress-types";
+import type { ProgressSnapshot, ProgressStateView } from "./progress/progress-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -114,6 +114,7 @@ export interface MasteryApplicationApi {
  */
 export interface ProgressApplicationApi {
     isAvailable(): boolean;
+    getState(): ProgressStateView;
     getSnapshot(): Promise<ProgressSnapshot>;
 }
 

@@ -57,6 +57,19 @@ export interface ProgressRecommendationPreview {
 }
 
 /**
+ * Cache freshness for the disposable Progress read model. This is separate
+ * from Mastery freshness because an index, graph, or Assessment event can
+ * invalidate the composed snapshot before it is read again.
+ */
+export interface ProgressStateView {
+    hasSnapshot: boolean;
+    dirty: boolean;
+    busy: boolean;
+    lastError: string | null;
+    generatedAt: number | null;
+}
+
+/**
  * One disposable read model for the future Progress Dashboard / Learning Map.
  * It is never persisted and cannot mutate a graph, mastery state, assessment,
  * or recommendation decision.
