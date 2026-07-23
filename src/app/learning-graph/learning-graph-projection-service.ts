@@ -11,9 +11,17 @@ export interface LearningGraphFacts {
 
 /** Converts M2 structural facts and M3 effective facts into one read-only graph. */
 export class LearningGraphProjectionService {
-    build(snapshot: GraphSnapshotV1, semantic: EffectiveSemanticGraph, includeStructuralContext: boolean): LearningGraphFacts {
+    build(
+        snapshot: GraphSnapshotV1,
+        semantic: EffectiveSemanticGraph,
+        autoRelations: readonly EffectiveSemanticRelation[],
+        includeStructuralContext: boolean,
+    ): LearningGraphFacts {
         const conceptNodes = semantic.concepts.map(toConceptNode);
-        const semanticEdges = semantic.relations.map(toSemanticEdge);
+        const semanticEdges = [
+            ...semantic.relations.map((relation) => toSemanticEdge(relation, "confirmed")),
+            ...autoRelations.map((relation) => toSemanticEdge(relation, "automatic")),
+        ];
         if (!includeStructuralContext) {
             return { nodes: conceptNodes.sort(compareLearningGraphNodes), edges: semanticEdges.sort(compareLearningGraphEdges) };
         }
@@ -31,6 +39,7 @@ export class LearningGraphProjectionService {
                 targetNodeId: edge.targetNodeId,
                 directed: true,
                 origin: "structural",
+                trust: "structural",
                 confidence: edge.confidence,
                 evidence: edge.sources.map((source) => ({ kind: "structural-evidence", source: { ...source, chunkIds: [...source.chunkIds] } })),
             }));
@@ -54,7 +63,7 @@ function toConceptNode(concept: SemanticConcept): LearningGraphNode {
     };
 }
 
-function toSemanticEdge(relation: EffectiveSemanticRelation): LearningGraphEdge {
+function toSemanticEdge(relation: EffectiveSemanticRelation, trust: "confirmed" | "automatic"): LearningGraphEdge {
     const evidence: LearningGraphEvidence[] = relation.evidence.map(toConceptEvidence);
     if (relation.origin === "user" && relation.decisionId) {
         evidence.push({ kind: "user-decision", decisionId: relation.decisionId });
@@ -66,6 +75,7 @@ function toSemanticEdge(relation: EffectiveSemanticRelation): LearningGraphEdge 
         targetNodeId: relation.targetConceptId,
         directed: !isUndirectedRelation(relation.type),
         origin: relation.origin === "user" ? "user" : "semantic",
+        trust,
         confidence: relation.confidence,
         evidence,
     };

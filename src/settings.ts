@@ -99,6 +99,10 @@ export function createDefaultSettings(): VaultCoachSettings {
         semanticGraphMaxSectionCharacters: 9000,
         semanticGraphSimilarityTopK: 30,
         semanticGraphSimilarityThreshold: 0.86,
+        learningMapAutoRelationsEnabled: true,
+        learningMapAutoModelThreshold: 0.95,
+        learningMapAutoIncludeRuleRelations: true,
+        learningMapAutoIncludeSimilarityRelations: false,
     };
 }
 
@@ -222,6 +226,11 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             this.createRawNumericDefinition("semanticGraphMaxSectionCharacters", "Maximum characters per Section window", "Long Sections are split only at Chunk boundaries.", 9000),
             this.createRawNumericDefinition("semanticGraphSimilarityTopK", "Similarity candidates per Concept", "ANN lookups are bounded; the plugin never compares every Concept pair.", 30),
             this.createRawNumericDefinition("semanticGraphSimilarityThreshold", "Similarity threshold", "Only nearby Concept candidates above this cosine threshold are shown.", 0.86),
+            this.createRawHeadingDefinition("settings.learningMapAuto.heading", "settings.learningMapAuto.desc"),
+            this.createToggleDefinition("learningMapAutoRelationsEnabled", "settings.learningMapAuto.enabled.name", "settings.learningMapAuto.enabled.desc"),
+            this.createNumericTextDefinition("learningMapAutoModelThreshold", "settings.learningMapAuto.threshold.name", "settings.learningMapAuto.threshold.desc", 0.95),
+            this.createToggleDefinition("learningMapAutoIncludeRuleRelations", "settings.learningMapAuto.rules.name", "settings.learningMapAuto.rules.desc"),
+            this.createToggleDefinition("learningMapAutoIncludeSimilarityRelations", "settings.learningMapAuto.similarity.name", "settings.learningMapAuto.similarity.desc"),
         ];
     }
 
@@ -273,12 +282,18 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             case "enableSemanticGraph":
             case "enableSemanticGraphAutoSync":
                 return this.updateSemanticBooleanSetting(key, value);
+            case "learningMapAutoRelationsEnabled":
+            case "learningMapAutoIncludeRuleRelations":
+            case "learningMapAutoIncludeSimilarityRelations":
+                return this.updateLearningMapAutoBoolean(key, value);
             case "semanticGraphMaxSectionsPerRun":
             case "semanticGraphMaxSectionCharacters":
             case "semanticGraphSimilarityTopK":
                 return this.updateSemanticPositiveIntegerSetting(key, value);
             case "semanticGraphSimilarityThreshold":
                 return this.updateSemanticThreshold(value);
+            case "learningMapAutoModelThreshold":
+                return this.updateLearningMapAutoThreshold(value);
             case "modelProvider":
                 return this.updateModelProvider(value);
             case "llmBaseUrl":
@@ -562,6 +577,28 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
     }
 
+    private async updateLearningMapAutoBoolean(
+        key: "learningMapAutoRelationsEnabled" | "learningMapAutoIncludeRuleRelations" | "learningMapAutoIncludeSimilarityRelations",
+        value: unknown,
+    ): Promise<void> {
+        const enabled = this.getBooleanValue(value);
+        if (enabled === null) return;
+        this.plugin.settings[key] = enabled;
+        await this.plugin.saveSettings();
+        this.plugin.refreshAllViews();
+    }
+
+    private async updateLearningMapAutoThreshold(value: unknown): Promise<void> {
+        const text = this.getStringValue(value);
+        if (text === null) return;
+        const parsed = Number.parseFloat(text);
+        this.plugin.settings.learningMapAutoModelThreshold = Number.isFinite(parsed)
+            ? Math.min(1, Math.max(0.7, parsed))
+            : 0.95;
+        await this.plugin.saveSettings();
+        this.plugin.refreshAllViews();
+    }
+
     private async updateModelProvider(value: unknown): Promise<void> {
         if (value !== "ollama" && value !== "openai-compatible") return;
         this.plugin.settings.modelProvider = value;
@@ -706,6 +743,47 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     this.plugin.settings.semanticGraphSimilarityThreshold = Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 0.86;
                     await this.plugin.saveSettings();
                 }));
+        new Setting(containerEl)
+            .setHeading()
+            .setName(this.t("settings.learningMapAuto.heading"))
+            .setDesc(this.t("settings.learningMapAuto.desc"));
+        new Setting(containerEl)
+            .setName(this.t("settings.learningMapAuto.enabled.name"))
+            .setDesc(this.t("settings.learningMapAuto.enabled.desc"))
+            .addToggle((toggle) => toggle.setValue(this.plugin.settings.learningMapAutoRelationsEnabled).onChange(async (value) => {
+                this.plugin.settings.learningMapAutoRelationsEnabled = value;
+                await this.plugin.saveSettings();
+                this.plugin.refreshAllViews();
+            }));
+        new Setting(containerEl)
+            .setName(this.t("settings.learningMapAuto.threshold.name"))
+            .setDesc(this.t("settings.learningMapAuto.threshold.desc"))
+            .addText((text) => text
+                .setValue(String(this.plugin.settings.learningMapAutoModelThreshold))
+                .onChange(async (value) => {
+                    const parsed = Number.parseFloat(value);
+                    this.plugin.settings.learningMapAutoModelThreshold = Number.isFinite(parsed)
+                        ? Math.min(1, Math.max(0.7, parsed))
+                        : 0.95;
+                    await this.plugin.saveSettings();
+                    this.plugin.refreshAllViews();
+                }));
+        new Setting(containerEl)
+            .setName(this.t("settings.learningMapAuto.rules.name"))
+            .setDesc(this.t("settings.learningMapAuto.rules.desc"))
+            .addToggle((toggle) => toggle.setValue(this.plugin.settings.learningMapAutoIncludeRuleRelations).onChange(async (value) => {
+                this.plugin.settings.learningMapAutoIncludeRuleRelations = value;
+                await this.plugin.saveSettings();
+                this.plugin.refreshAllViews();
+            }));
+        new Setting(containerEl)
+            .setName(this.t("settings.learningMapAuto.similarity.name"))
+            .setDesc(this.t("settings.learningMapAuto.similarity.desc"))
+            .addToggle((toggle) => toggle.setValue(this.plugin.settings.learningMapAutoIncludeSimilarityRelations).onChange(async (value) => {
+                this.plugin.settings.learningMapAutoIncludeSimilarityRelations = value;
+                await this.plugin.saveSettings();
+                this.plugin.refreshAllViews();
+            }));
     }
 
     private addSemanticNumberSetting(

@@ -223,6 +223,17 @@ export interface EffectiveSemanticGraph {
     rejectedCandidateFingerprints: string[];
 }
 
+/**
+ * Read-only display policy. It must never write confirmation decisions or be
+ * used by Mastery/Exam calculations.
+ */
+export interface SemanticAutoRelationPolicy {
+    enabled: boolean;
+    modelMinConfidence: number;
+    includeRuleRelations: boolean;
+    includeSimilarityRelations: boolean;
+}
+
 export interface SemanticGraphStats {
     extractionCount: number;
     conceptCount: number;

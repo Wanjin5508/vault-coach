@@ -7,6 +7,12 @@ import type { SemanticGraphService } from "../semantic-graph/semantic-graph-serv
 export interface LearningGraphSource {
     getStructuralSnapshot(): GraphSnapshotV1 | null;
     getEffectiveSemanticGraph(): EffectiveSemanticGraph;
+    getAutoDisplayRelations(): EffectiveSemanticGraph["relations"];
+    /**
+     * Covers persisted relation decisions and the display-only policy.  Query
+     * caching must never hide a just-confirmed relation or a settings change.
+     */
+    getLearningMapRevision(): string;
 }
 
 export class ServiceLearningGraphSource implements LearningGraphSource {
@@ -21,5 +27,13 @@ export class ServiceLearningGraphSource implements LearningGraphSource {
 
     getEffectiveSemanticGraph(): EffectiveSemanticGraph {
         return this.semanticGraph.getEffectiveGraph();
+    }
+
+    getAutoDisplayRelations(): EffectiveSemanticGraph["relations"] {
+        return this.semanticGraph.getAutoDisplayRelations();
+    }
+
+    getLearningMapRevision(): string {
+        return this.semanticGraph.getLearningMapRevision();
     }
 }

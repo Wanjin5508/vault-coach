@@ -1,4 +1,4 @@
-import { LEARNING_GRAPH_MAX_EDGES, LEARNING_GRAPH_MAX_NODES, type LearningGraphConceptCatalog, type LearningGraphEdge, type LearningGraphNode, type LearningGraphProjection, type LearningGraphQuery } from "../../domain/learning-graph/learning-graph-types";
+import { LEARNING_GRAPH_DEFAULT_MAX_EDGES, LEARNING_GRAPH_DEFAULT_MAX_NODES, LEARNING_GRAPH_MAX_EDGES, LEARNING_GRAPH_MAX_NODES, type LearningGraphConceptCatalog, type LearningGraphEdge, type LearningGraphNode, type LearningGraphProjection, type LearningGraphQuery } from "../../domain/learning-graph/learning-graph-types";
 import { compareLearningGraphEdges, compareLearningGraphNodes } from "../../domain/learning-graph/learning-graph-id";
 import { LearningGraphIntegrityService } from "../../domain/learning-graph/learning-graph-integrity";
 import type { SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
@@ -18,13 +18,18 @@ export class LearningGraphQueryService {
 
     getProjection(query: LearningGraphQuery = {}): LearningGraphProjection {
         const normalizedQuery = normalizeQuery(query);
-        const cacheKey = JSON.stringify(normalizedQuery);
+        const cacheKey = `${this.source.getLearningMapRevision()}\u0000${JSON.stringify(normalizedQuery)}`;
         const cached = this.cache.get(cacheKey);
         if (cached) return cloneProjection(cached);
         const snapshot = this.source.getStructuralSnapshot();
         if (!snapshot) return createUnavailableProjection(normalizedQuery);
         const semantic = this.source.getEffectiveSemanticGraph();
-        const facts = this.projector.build(snapshot, semantic, normalizedQuery.includeStructuralContext === true);
+        const facts = this.projector.build(
+            snapshot,
+            semantic,
+            this.source.getAutoDisplayRelations(),
+            normalizedQuery.includeStructuralContext === true,
+        );
         const projection = projectFacts(facts.nodes, facts.edges, normalizedQuery);
         const report = this.integrity.check(projection);
         if (!report.valid) throw new Error(`Learning graph integrity check failed: ${report.issues.map((issue) => issue.code).join(", ")}`);
@@ -95,9 +100,12 @@ export class LearningGraphQueryService {
 }
 
 function projectFacts(nodes: readonly LearningGraphNode[], edges: readonly LearningGraphEdge[], query: LearningGraphQuery): LearningGraphProjection {
-    const filteredEdges = edges.filter((edge) => query.relationTypes === undefined
-        || edge.origin === "structural"
-        || query.relationTypes.includes(edge.type as SemanticRelationType));
+    const filteredEdges = edges.filter((edge) => (
+        (query.includeAutomaticRelations !== false || edge.trust !== "automatic")
+        && (query.relationTypes === undefined
+            || edge.origin === "structural"
+            || query.relationTypes.includes(edge.type as SemanticRelationType))
+    ));
     const visibleSourceNodeIds = selectSourceNodeIds(nodes, filteredEdges, query);
     const sourceNodes = nodes.filter((node) => visibleSourceNodeIds.has(node.id));
     const sourceEdges = filteredEdges.filter((edge) => visibleSourceNodeIds.has(edge.sourceNodeId) && visibleSourceNodeIds.has(edge.targetNodeId));
@@ -221,10 +229,11 @@ function normalizeQuery(query: LearningGraphQuery): LearningGraphQuery {
         ...(query.filePath?.trim() ? { filePath: normalizePath(query.filePath) } : {}),
         ...(query.folderPath?.trim() ? { folderPath: normalizePath(query.folderPath) } : {}),
         ...(relationTypes ? { relationTypes } : {}),
+        ...(query.includeAutomaticRelations === false ? { includeAutomaticRelations: false } : {}),
         ...(query.includeStructuralContext === true ? { includeStructuralContext: true } : {}),
         depth: query.depth ?? 1,
-        maxNodes: clampInteger(query.maxNodes, LEARNING_GRAPH_MAX_NODES, 1, LEARNING_GRAPH_MAX_NODES),
-        maxEdges: clampInteger(query.maxEdges, LEARNING_GRAPH_MAX_EDGES, 1, LEARNING_GRAPH_MAX_EDGES),
+        maxNodes: clampInteger(query.maxNodes, LEARNING_GRAPH_DEFAULT_MAX_NODES, 1, LEARNING_GRAPH_MAX_NODES),
+        maxEdges: clampInteger(query.maxEdges, LEARNING_GRAPH_DEFAULT_MAX_EDGES, 1, LEARNING_GRAPH_MAX_EDGES),
     };
 }
 

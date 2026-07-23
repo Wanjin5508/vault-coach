@@ -132,6 +132,42 @@ export class SemanticGraphService {
         return deepClone(this.projector.project(this.state));
     }
 
+    /**
+     * Display-only candidates for Learning Map. They are deliberately kept
+     * outside getEffectiveGraph(), so downstream learning facts remain based
+     * on explicit user decisions.
+     */
+    getAutoDisplayRelations(): EffectiveSemanticGraph["relations"] {
+        const settings = this.dependencies.getSettings();
+        return deepClone(this.projector.projectAutoDisplayRelations(this.state, {
+            enabled: settings.learningMapAutoRelationsEnabled,
+            modelMinConfidence: settings.learningMapAutoModelThreshold,
+            includeRuleRelations: settings.learningMapAutoIncludeRuleRelations,
+            includeSimilarityRelations: settings.learningMapAutoIncludeSimilarityRelations,
+        }));
+    }
+
+    /**
+     * A cheap cache revision for presentation projections.  `updatedAt` alone
+     * is insufficient because multiple decisions may happen in one clock tick.
+     * The policy portion also makes setting changes visible immediately, even
+     * when a caller only refreshes the view and does not explicitly invalidate
+     * the LearningGraphQueryService cache.
+     */
+    getLearningMapRevision(): string {
+        const settings = this.dependencies.getSettings();
+        return [
+            this.state.updatedAt,
+            this.state.concepts.length,
+            this.state.candidates.length,
+            this.state.decisions.length,
+            settings.learningMapAutoRelationsEnabled ? "auto" : "manual",
+            settings.learningMapAutoModelThreshold,
+            settings.learningMapAutoIncludeRuleRelations ? "rule" : "no-rule",
+            settings.learningMapAutoIncludeSimilarityRelations ? "similarity" : "no-similarity",
+        ].join(":");
+    }
+
     /** A local-only policy result; it never scans the Vault or calls a model. */
     getCapacityAssessment(): GraphCapacityAssessment {
         const snapshot = this.dependencies.graphService.getSnapshot();

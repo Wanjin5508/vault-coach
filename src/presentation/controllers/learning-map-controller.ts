@@ -1,10 +1,21 @@
 import type { LearningGraphApplicationApi } from "../../app/application-api";
-import type { LearningGraphProjection, LearningGraphQuery } from "../../domain/learning-graph/learning-graph-types";
+import {
+    LEARNING_GRAPH_DEFAULT_MAX_EDGES,
+    LEARNING_GRAPH_DEFAULT_MAX_NODES,
+    LEARNING_GRAPH_MAX_EDGES,
+    LEARNING_GRAPH_MAX_NODES,
+    type LearningGraphProjection,
+    type LearningGraphQuery,
+} from "../../domain/learning-graph/learning-graph-types";
 import type { SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
 
 /** Presentation state for the bounded, read-only Learning Map explorer. */
 export class LearningMapController {
-    private query: LearningGraphQuery = { depth: 1 };
+    private query: LearningGraphQuery = {
+        depth: 1,
+        maxNodes: LEARNING_GRAPH_DEFAULT_MAX_NODES,
+        maxEdges: LEARNING_GRAPH_DEFAULT_MAX_EDGES,
+    };
     /**
      * Focus is exploration state, not a destructive filter. Keep a small
      * in-memory history so a user can return to the exact previous bounded
@@ -47,6 +58,22 @@ export class LearningMapController {
 
     hasStructuralContext(): boolean { return this.query.includeStructuralContext === true; }
 
+    setAutomaticRelationsVisible(includeAutomaticRelations: boolean): void {
+        this.query = { ...this.query, includeAutomaticRelations };
+    }
+
+    hasAutomaticRelationsVisible(): boolean { return this.query.includeAutomaticRelations !== false; }
+
+    setFullGraph(full: boolean): void {
+        this.query = {
+            ...this.query,
+            maxNodes: full ? LEARNING_GRAPH_MAX_NODES : LEARNING_GRAPH_DEFAULT_MAX_NODES,
+            maxEdges: full ? LEARNING_GRAPH_MAX_EDGES : LEARNING_GRAPH_DEFAULT_MAX_EDGES,
+        };
+    }
+
+    isFullGraph(): boolean { return this.query.maxNodes === LEARNING_GRAPH_MAX_NODES; }
+
     setRelationTypes(relationTypes: readonly SemanticRelationType[]): void {
         this.query = { ...this.query, relationTypes: relationTypes.length > 0 ? [...relationTypes] : undefined };
     }
@@ -55,7 +82,13 @@ export class LearningMapController {
 
     reset(): void {
         this.focusHistory.length = 0;
-        this.query = { depth: 1, includeStructuralContext: this.query.includeStructuralContext };
+        this.query = {
+            depth: 1,
+            includeStructuralContext: this.query.includeStructuralContext,
+            includeAutomaticRelations: this.query.includeAutomaticRelations,
+            maxNodes: this.query.maxNodes,
+            maxEdges: this.query.maxEdges,
+        };
     }
 }
 

@@ -2,12 +2,18 @@ import type { DocumentLocator } from "../documents/document-types";
 import type { DeterministicKnowledgeEdgeType, GraphSourceLocation } from "../graph/graph-types";
 import type { SemanticRelationType } from "../semantic-graph/semantic-graph-types";
 
-export const LEARNING_GRAPH_MAX_NODES = 150;
-export const LEARNING_GRAPH_MAX_EDGES = 300;
+/** Default overview remains light; users can request the bounded full view. */
+export const LEARNING_GRAPH_DEFAULT_MAX_NODES = 150;
+export const LEARNING_GRAPH_DEFAULT_MAX_EDGES = 300;
+/** Hard local Canvas ceiling. Larger vaults remain a Knowledge Engine concern. */
+export const LEARNING_GRAPH_MAX_NODES = 500;
+export const LEARNING_GRAPH_MAX_EDGES = 2_000;
 
 export type LearningGraphNodeKind = "concept" | "document" | "section" | "tag";
 export type LearningGraphRelationType = SemanticRelationType | DeterministicKnowledgeEdgeType;
 export type LearningGraphEdgeOrigin = "semantic" | "structural" | "user";
+/** Visual provenance only; it must not be used as a learning-fact decision. */
+export type LearningGraphEdgeTrust = "confirmed" | "automatic" | "structural";
 
 export interface LearningGraphConceptEvidence {
     kind: "concept-evidence";
@@ -47,6 +53,7 @@ export interface LearningGraphEdge {
     targetNodeId: string;
     directed: boolean;
     origin: LearningGraphEdgeOrigin;
+    trust: LearningGraphEdgeTrust;
     confidence: number;
     evidence: LearningGraphEvidence[];
 }
@@ -57,6 +64,8 @@ export interface LearningGraphQuery {
     filePath?: string;
     folderPath?: string;
     relationTypes?: SemanticRelationType[];
+    /** Hides display-only high-confidence candidates without changing facts. */
+    includeAutomaticRelations?: boolean;
     includeStructuralContext?: boolean;
     depth?: 0 | 1 | 2;
     maxNodes?: number;

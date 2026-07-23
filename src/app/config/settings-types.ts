@@ -57,4 +57,9 @@ export interface VaultCoachSettings {
     semanticGraphMaxSectionCharacters: number;
     semanticGraphSimilarityTopK: number;
     semanticGraphSimilarityThreshold: number;
+    /** Shows high-confidence proposals in Learning Map without turning them into confirmed facts. */
+    learningMapAutoRelationsEnabled: boolean;
+    learningMapAutoModelThreshold: number;
+    learningMapAutoIncludeRuleRelations: boolean;
+    learningMapAutoIncludeSimilarityRelations: boolean;
 }

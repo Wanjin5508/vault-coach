@@ -1,8 +1,16 @@
-import { ItemView, Notice, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Menu, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
 import type { VaultCoachApplicationApi } from "../../app/application-api";
 import { VIEW_TYPE_LEARNING_MAP } from "../../constants";
-import type { LearningGraphEdge, LearningGraphEvidence, LearningGraphNode, LearningGraphProjection, LearningGraphRelationType } from "../../domain/learning-graph/learning-graph-types";
-import type { SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
+import {
+    LEARNING_GRAPH_MAX_EDGES,
+    LEARNING_GRAPH_MAX_NODES,
+    type LearningGraphEdge,
+    type LearningGraphEvidence,
+    type LearningGraphNode,
+    type LearningGraphProjection,
+    type LearningGraphRelationType,
+} from "../../domain/learning-graph/learning-graph-types";
+import type { SemanticGraphStateView, SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
 import { translate, type TranslationKey } from "../../i18n";
 import { LearningGraphRenderer } from "../components/learning-graph-renderer";
 import { LearningMapController } from "../controllers/learning-map-controller";
@@ -13,7 +21,13 @@ const RELATION_TYPES: readonly SemanticRelationType[] = [
     "same_as", "part_of", "prerequisite_of", "used_for", "contrasts_with", "related_to",
 ];
 
-/** Main-workspace explorer for confirmed learning facts; it does not edit M3 decisions. */
+interface EvidenceSource {
+    filePath: string;
+    heading?: string;
+    label: string;
+}
+
+/** Main-workspace explorer for confirmed facts and clearly marked display-only candidates. */
 export class LearningMapView extends ItemView {
     private readonly controller: LearningMapController;
     private projection: LearningGraphProjection | null = null;
@@ -66,26 +80,6 @@ export class LearningMapView extends ItemView {
         const projection = this.projection;
         if (!projection) return;
         const semanticState = this.application.semanticGraph.getState();
-        const header = this.contentEl.createDiv({ cls: "vault-coach-learning-map-header" });
-        header.createEl("h2", { text: this.t("learningMap.title") });
-        header.createDiv({
-            cls: "vault-coach-learning-map-summary",
-            text: this.t("learningMap.summary", {
-                nodes: projection.stats.visibleNodeCount,
-                relationships: projection.stats.visibleEdgeCount,
-            }),
-        });
-        if (semanticState.busy) this.renderSemanticBuildStatus(header, semanticState.progress);
-        const capacity = semanticState.capacity;
-        if (capacity.level !== "local") {
-            header.createDiv({
-                cls: "vault-coach-learning-map-capacity",
-                text: capacity.level === "warning"
-                    ? this.t("learningMap.capacityWarning")
-                    : this.t("learningMap.capacityPaused"),
-            });
-        }
-        this.renderToolbar(this.contentEl);
         if (!projection.sourceReady || projection.nodes.length === 0) {
             this.contentEl.createDiv({
                 cls: "vault-coach-learning-map-empty",
@@ -96,15 +90,8 @@ export class LearningMapView extends ItemView {
             return;
         }
         this.retainSelection(projection);
-        if (projection.stats.truncated) {
-            this.contentEl.createDiv({
-                cls: "vault-coach-learning-map-budget",
-                text: this.t("learningMap.budget", {
-                    nodes: projection.stats.hiddenNodeCount,
-                    relationships: projection.stats.hiddenEdgeCount,
-                }),
-            });
-        }
+        const confirmedCount = projection.edges.filter((edge) => edge.trust === "confirmed").length;
+        const automaticCount = projection.edges.filter((edge) => edge.trust === "automatic").length;
         const body = this.contentEl.createDiv({ cls: "vault-coach-learning-map-body" });
         const graph = body.createDiv({ cls: "vault-coach-learning-map-graph" });
         this.renderer = new LearningGraphRenderer(graph, {
@@ -114,6 +101,13 @@ export class LearningMapView extends ItemView {
             selectedNodeId: this.selectedNodeId,
             selectedEdgeId: this.selectedEdgeId,
             onSelectNode: (nodeId) => {
+                if (this.selectedNodeId === nodeId) {
+                    this.selectedNodeId = null;
+                    this.selectedEdgeId = null;
+                    this.renderer?.setSelection(null, null);
+                    this.refreshInspector();
+                    return;
+                }
                 this.selectedNodeId = nodeId;
                 this.selectedEdgeId = null;
                 this.renderer?.setSelection(nodeId, null);
@@ -126,25 +120,99 @@ export class LearningMapView extends ItemView {
                 this.refreshInspector();
             },
         });
-        graph.createDiv({ cls: "vault-coach-learning-map-legend", text: this.t("learningMap.legend") });
-        this.inspectorEl = body.createDiv({ cls: "vault-coach-learning-map-inspector" });
+        this.renderGraphControls(graph, projection, semanticState, confirmedCount, automaticCount);
+        this.renderLegend(
+            graph,
+            automaticCount > 0,
+            projection.nodes.some((node) => node.kind !== "concept"),
+            projection.edges.some((edge) => edge.trust === "structural"),
+        );
+        this.inspectorEl = this.contentEl.createDiv({ cls: "vault-coach-learning-map-inspector" });
         this.renderInspectorContent(this.inspectorEl, projection);
     }
 
-    private renderToolbar(root: HTMLElement): void {
-        const toolbar = root.createDiv({ cls: "vault-coach-learning-map-toolbar" });
-        const search = toolbar.createEl("input", { attr: { type: "search", placeholder: this.t("learningMap.search") } });
+    private renderGraphControls(
+        graph: HTMLElement,
+        projection: LearningGraphProjection,
+        semanticState: SemanticGraphStateView,
+        confirmedCount: number,
+        automaticCount: number,
+    ): void {
+        const controls = graph.createDiv({ cls: "vault-coach-learning-map-controls" });
+        const panels: HTMLElement[] = [];
+        const closePanels = () => panels.forEach((panel) => panel.removeClass("is-open"));
+        const togglePanel = (panel: HTMLElement) => {
+            const shouldOpen = !panel.hasClass("is-open");
+            closePanels();
+            if (shouldOpen) panel.addClass("is-open");
+        };
+
+        const info = graph.createDiv({ cls: "vault-coach-learning-map-info-popover" });
+        panels.push(info);
+        info.createDiv({ text: this.t("learningMap.summary", {
+            nodes: projection.stats.visibleNodeCount,
+            relationships: projection.stats.visibleEdgeCount,
+        }) });
+        info.createDiv({ text: this.t("learningMap.relationshipSummary", { confirmed: confirmedCount, automatic: automaticCount }) });
+        if (projection.stats.truncated) {
+            info.createDiv({ text: this.t("learningMap.budget", {
+                nodes: projection.stats.hiddenNodeCount,
+                relationships: projection.stats.hiddenEdgeCount,
+            }) });
+        }
+        if (semanticState.busy) this.renderSemanticBuildStatus(info, semanticState.progress);
+        if (semanticState.capacity.level !== "local") {
+            info.createDiv({ text: semanticState.capacity.level === "warning"
+                ? this.t("learningMap.capacityWarning")
+                : this.t("learningMap.capacityPaused") });
+        }
+        const infoButton = this.createGraphControlButton(controls, "info", this.t("learningMap.info"));
+        infoButton.addEventListener("click", () => togglePanel(info));
+
+        const searchPanel = graph.createDiv({ cls: "vault-coach-learning-map-search-popover" });
+        panels.push(searchPanel);
+        const search = searchPanel.createEl("input", {
+            attr: { type: "search", placeholder: this.t("learningMap.search") },
+        });
         search.value = this.controller.getSearch();
-        search.addEventListener("change", () => { this.controller.setSearch(search.value); void this.refresh(); });
-        const structureLabel = toolbar.createEl("label", { cls: "vault-coach-learning-map-toggle" });
-        const structure = structureLabel.createEl("input", { attr: { type: "checkbox" } });
-        structure.checked = this.controller.hasStructuralContext();
-        structureLabel.createSpan({ text: this.t("learningMap.showSource") });
-        structure.addEventListener("change", () => { this.controller.setStructuralContext(structure.checked); void this.refresh(); });
-        const fit = toolbar.createEl("button", { text: this.t("learningMap.fit") });
+        const submitSearch = () => {
+            this.controller.setSearch(search.value);
+            void this.refresh();
+        };
+        search.addEventListener("change", submitSearch);
+        search.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            submitSearch();
+        });
+        const searchButton = this.createGraphControlButton(controls, "search", this.t("learningMap.search"));
+        searchButton.addEventListener("click", () => {
+            togglePanel(searchPanel);
+            if (searchPanel.hasClass("is-open")) window.setTimeout(() => search.focus(), 0);
+        });
+
+        const displayButton = this.createGraphControlButton(controls, "eye", this.t("learningMap.displaySettings"));
+        displayButton.addEventListener("click", (event) => this.showDisplaySettingsMenu(event));
+        const filterButton = this.createGraphControlButton(controls, "filter", this.t("learningMap.filterRelationships"));
+        filterButton.addEventListener("click", (event) => this.showRelationshipFilterMenu(event));
+
+        const fit = this.createGraphControlButton(controls, "scan", this.t("learningMap.fit"));
         fit.addEventListener("click", () => this.renderer?.fit());
+        const canShowFull = projection.stats.sourceNodeCount <= LEARNING_GRAPH_MAX_NODES
+            && projection.stats.sourceEdgeCount <= LEARNING_GRAPH_MAX_EDGES;
+        if ((canShowFull && projection.stats.truncated) || this.controller.isFullGraph()) {
+            const full = this.createGraphControlButton(
+                controls,
+                this.controller.isFullGraph() ? "shrink" : "expand",
+                this.controller.isFullGraph() ? this.t("learningMap.showOverview") : this.t("learningMap.showFull"),
+            );
+            full.addEventListener("click", () => {
+                this.controller.setFullGraph(!this.controller.isFullGraph());
+                void this.refresh();
+            });
+        }
         if (this.controller.canGoBack()) {
-            const back = toolbar.createEl("button", { text: this.t("learningMap.back") });
+            const back = this.createGraphControlButton(controls, "undo-2", this.t("learningMap.back"));
             back.addEventListener("click", () => {
                 if (!this.controller.goBack()) return;
                 this.selectedNodeId = null;
@@ -152,30 +220,64 @@ export class LearningMapView extends ItemView {
                 void this.refresh();
             });
         }
-        const reset = toolbar.createEl("button", { text: this.t("learningMap.reset") });
+        const reset = this.createGraphControlButton(controls, "rotate-ccw", this.t("learningMap.reset"));
         reset.addEventListener("click", () => {
             this.controller.reset();
             this.selectedNodeId = null;
             this.selectedEdgeId = null;
             void this.refresh();
         });
-        const filter = root.createDiv({ cls: "vault-coach-learning-map-filter" });
-        filter.createSpan({ text: this.t("learningMap.relationshipTypes") });
+        if (!canShowFull && projection.stats.truncated) {
+            info.createDiv({ text: this.t("learningMap.fullUnavailable") });
+        }
+    }
+
+    private showDisplaySettingsMenu(event: MouseEvent): void {
+        const menu = new Menu();
+        menu.addItem((item) => item
+            .setTitle(this.t("learningMap.showSource"))
+            .setChecked(this.controller.hasStructuralContext())
+            .onClick(() => {
+                this.controller.setStructuralContext(!this.controller.hasStructuralContext());
+                void this.refresh();
+            }));
+        menu.addItem((item) => item
+            .setTitle(this.t("learningMap.showAutomatic"))
+            .setChecked(this.controller.hasAutomaticRelationsVisible())
+            .onClick(() => {
+                this.controller.setAutomaticRelationsVisible(!this.controller.hasAutomaticRelationsVisible());
+                void this.refresh();
+            }));
+        menu.showAtMouseEvent(event);
+    }
+
+    private showRelationshipFilterMenu(event: MouseEvent): void {
+        const menu = new Menu();
         const selected = new Set(this.controller.getRelationTypes());
         for (const type of RELATION_TYPES) {
-            const label = filter.createEl("label", { cls: "vault-coach-learning-map-toggle" });
-            const checkbox = label.createEl("input", { attr: { type: "checkbox" } });
-            checkbox.checked = selected.size === 0 || selected.has(type);
-            label.createSpan({ text: this.relationLabel(type) });
-            checkbox.addEventListener("change", () => {
+            const checked = selected.size === 0 || selected.has(type);
+            menu.addItem((item) => item
+                .setTitle(this.relationLabel(type))
+                .setChecked(checked)
+                .onClick(() => {
                 const next = new Set(this.controller.getRelationTypes());
                 if (next.size === 0) RELATION_TYPES.forEach((item) => next.add(item));
-                if (checkbox.checked) next.add(type);
-                else next.delete(type);
+                if (checked) next.delete(type);
+                else next.add(type);
                 this.controller.setRelationTypes(Array.from(next));
                 void this.refresh();
-            });
+            }));
         }
+        menu.showAtMouseEvent(event);
+    }
+
+    private createGraphControlButton(container: HTMLElement, icon: string, label: string): HTMLButtonElement {
+        const button = container.createEl("button", {
+            cls: "vault-coach-learning-map-control-button",
+            attr: { "aria-label": label, title: label },
+        });
+        setIcon(button, icon);
+        return button;
     }
 
     private refreshInspector(): void {
@@ -200,63 +302,99 @@ export class LearningMapView extends ItemView {
     }
 
     private renderNodeInspector(inspector: HTMLElement, node: LearningGraphNode, projection: LearningGraphProjection): void {
-        inspector.createEl("h3", { text: node.label });
-        inspector.createDiv({ cls: "vault-coach-learning-map-muted", text: `${this.nodeKindLabel(node.kind)} · ${node.id}` });
-        if (node.description) inspector.createDiv({ text: node.description });
-        if (node.aliases.length > 0) inspector.createDiv({ cls: "vault-coach-learning-map-muted", text: this.t("learningMap.aliases", { aliases: node.aliases.join(", ") }) });
+        const content = inspector.createDiv({ cls: "vault-coach-learning-map-inspector-content" });
+        const details = content.createDiv({ cls: "vault-coach-learning-map-inspector-details" });
+        const title = details.createDiv({ cls: "vault-coach-learning-map-inspector-title" });
+        title.createEl("strong", { text: node.label });
+        title.createSpan({ cls: "vault-coach-learning-map-concept-id", text: this.t("learningMap.conceptId", { id: node.id }) });
+        if (node.description) details.createDiv({ cls: "vault-coach-learning-map-description", text: node.description });
         const outgoing = projection.edges.filter((edge) => edge.sourceNodeId === node.id);
         const incoming = projection.edges.filter((edge) => edge.targetNodeId === node.id);
-        inspector.createDiv({
+        details.createDiv({
             cls: "vault-coach-learning-map-muted",
             text: this.t("learningMap.relationshipCount", { outgoing: outgoing.length, incoming: incoming.length }),
         });
-        const actions = inspector.createDiv({ cls: "vault-coach-learning-map-actions" });
+        const actions = content.createDiv({ cls: "vault-coach-learning-map-inspector-actions" });
         const focus = actions.createEl("button", { text: this.t("learningMap.focus"), cls: "mod-cta" });
         focus.addEventListener("click", () => { this.controller.setFocus(node.id); this.selectedEdgeId = null; void this.refresh(); });
-        this.renderEvidence(inspector, node.evidence);
+        this.renderEvidenceSourceButton(actions, node.evidence);
     }
 
     private renderEdgeInspector(inspector: HTMLElement, edge: LearningGraphEdge, projection: LearningGraphProjection): void {
         const source = projection.nodes.find((node) => node.id === edge.sourceNodeId)?.label ?? edge.sourceNodeId;
         const target = projection.nodes.find((node) => node.id === edge.targetNodeId)?.label ?? edge.targetNodeId;
-        inspector.createEl("h3", { text: this.relationLabel(edge.type) });
-        inspector.createDiv({ text: `${source} ${edge.directed ? "→" : "—"} ${target}` });
-        inspector.createDiv({
+        const content = inspector.createDiv({ cls: "vault-coach-learning-map-inspector-content" });
+        const details = content.createDiv({ cls: "vault-coach-learning-map-inspector-details" });
+        details.createEl("h3", { text: this.relationLabel(edge.type) });
+        details.createDiv({ text: `${source} ${edge.directed ? "→" : "—"} ${target}` });
+        details.createDiv({
             cls: "vault-coach-learning-map-muted",
             text: this.t("learningMap.confidence", {
+                trust: this.trustLabel(edge.trust),
                 origin: this.originLabel(edge.origin),
                 confidence: Math.round(edge.confidence * 100),
             }),
         });
-        this.renderEvidence(inspector, edge.evidence);
+        const actions = content.createDiv({ cls: "vault-coach-learning-map-inspector-actions" });
+        this.renderEvidenceSourceButton(actions, edge.evidence);
     }
 
-    private renderEvidence(container: HTMLElement, evidence: readonly LearningGraphEvidence[]): void {
-        container.createEl("h4", { text: this.t("learningMap.evidence") });
-        if (evidence.length === 0) {
-            container.createDiv({ cls: "vault-coach-learning-map-muted", text: this.t("learningMap.noEvidence") });
-            return;
-        }
-        const list = container.createDiv({ cls: "vault-coach-learning-map-evidence" });
-        for (const item of evidence) {
-            if (item.kind === "user-decision") {
-                list.createDiv({ text: this.t("learningMap.userDecision", { id: item.decisionId }) });
-                continue;
+    private renderLegend(
+        container: HTMLElement,
+        includeAutomatic: boolean,
+        includeStructuralNodes: boolean,
+        includeStructuralRelations: boolean,
+    ): void {
+        const legend = container.createDiv({ cls: "vault-coach-learning-map-legend" });
+        this.addLegendEntry(legend, "concept-node", this.t("learningMap.legend.conceptNode"));
+        if (includeStructuralNodes) this.addLegendEntry(legend, "structural-node", this.t("learningMap.legend.structuralNode"));
+        this.addLegendEntry(legend, "confirmed", this.t("learningMap.legend.confirmed"));
+        this.addLegendEntry(legend, "user", this.t("learningMap.legend.user"));
+        if (includeAutomatic) this.addLegendEntry(legend, "automatic", this.t("learningMap.legend.automatic"));
+        if (includeStructuralRelations) this.addLegendEntry(legend, "structural", this.t("learningMap.legend.structural"));
+    }
+
+    private addLegendEntry(
+        container: HTMLElement,
+        kind: "confirmed" | "user" | "automatic" | "structural" | "concept-node" | "structural-node",
+        label: string,
+    ): void {
+        const entry = container.createSpan({ cls: "vault-coach-learning-map-legend-entry" });
+        entry.createSpan({ cls: `vault-coach-learning-map-legend-mark is-${kind}`, attr: { "aria-hidden": "true" } });
+        entry.createSpan({ text: label });
+    }
+
+    private renderEvidenceSourceButton(container: HTMLElement, evidence: readonly LearningGraphEvidence[]): void {
+        const sources = this.getEvidenceSources(evidence);
+        const button = container.createEl("button", {
+            text: this.t("learningMap.evidenceSources", { count: sources.length }),
+            attr: sources.length === 0 ? { disabled: "true" } : {},
+        });
+        if (sources.length === 0) return;
+        button.addEventListener("click", (event) => {
+            const menu = new Menu();
+            for (const source of sources) {
+                menu.addItem((item) => item
+                    .setTitle(source.label)
+                    .onClick(() => void this.openEvidence(source.filePath, source.heading)));
             }
+            menu.showAtMouseEvent(event);
+        });
+    }
+
+    private getEvidenceSources(evidence: readonly LearningGraphEvidence[]): EvidenceSource[] {
+        const sources = new Map<string, EvidenceSource>();
+        for (const item of evidence) {
+            if (item.kind === "user-decision") continue;
             const filePath = item.kind === "concept-evidence"
                 ? item.locator.type === "zotero" ? "" : item.locator.filePath
                 : item.source.sourceFilePath;
+            if (!filePath) continue;
             const heading = item.kind === "concept-evidence" && item.locator.type === "markdown" ? item.locator.heading : undefined;
-            const summary = item.kind === "concept-evidence"
-                ? `${filePath}${heading ? ` › ${heading}` : ""}: ${item.textPreview}`
-                : `${filePath} · ${item.source.sourceKind}`;
-            const row = list.createDiv({ cls: "vault-coach-learning-map-evidence-row" });
-            row.createDiv({ text: summary });
-            if (filePath) {
-                const open = row.createEl("button", { text: this.t("learningMap.openSource") });
-                open.addEventListener("click", () => void this.openEvidence(filePath, heading));
-            }
+            const key = `${filePath}\u0000${heading ?? ""}`;
+            sources.set(key, { filePath, heading, label: `${filePath}${heading ? ` › ${heading}` : ""}` });
         }
+        return Array.from(sources.values()).sort((left, right) => left.label.localeCompare(right.label));
     }
 
     private async openEvidence(filePath: string, heading?: string): Promise<void> {
@@ -297,6 +435,10 @@ export class LearningMapView extends ItemView {
 
     private originLabel(origin: LearningGraphEdge["origin"]): string {
         return this.t(`learningMap.origin.${origin}` as TranslationKey);
+    }
+
+    private trustLabel(trust: LearningGraphEdge["trust"]): string {
+        return this.t(`learningMap.trust.${trust}` as TranslationKey);
     }
 
     private t(key: TranslationKey, replacements?: Record<string, string | number>): string {

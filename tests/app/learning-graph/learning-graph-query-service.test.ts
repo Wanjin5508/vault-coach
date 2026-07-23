@@ -46,9 +46,44 @@ describe("LearningGraphQueryService", () => {
         const queries = new LearningGraphQueryService({
             getStructuralSnapshot: () => null,
             getEffectiveSemanticGraph: () => ({ concepts: [], relations: [], redirects: {}, rejectedCandidateFingerprints: [] }),
+            getAutoDisplayRelations: () => [],
+            getLearningMapRevision: () => "empty",
         });
         expect(queries.getProjection()).toMatchObject({ sourceReady: false, nodes: [], edges: [] });
         expect(queries.getConceptCatalog()).toMatchObject({ sourceReady: false, concepts: [] });
+    });
+
+    it("shows automatic candidates only when requested and re-reads the source when its revision changes", () => {
+        const graph = source();
+        let revision = "semantic:before";
+        let showAutomatic = true;
+        graph.getLearningMapRevision = () => revision;
+        graph.getAutoDisplayRelations = () => showAutomatic ? [{
+            id: "relation:auto",
+            type: "used_for",
+            sourceConceptId: "concept:alpha",
+            targetConceptId: "concept:gamma",
+            confidence: 0.96,
+            origin: "model",
+            evidence: [evidence("section:a", "notes/a.md")],
+            candidateFingerprint: "candidate:auto",
+        }] : [];
+        const queries = new LearningGraphQueryService(graph);
+
+        const before = queries.getProjection();
+        expect(before.edges).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: "learning:semantic:relation:auto", trust: "automatic" }),
+            expect.objectContaining({ id: "learning:semantic:relation:confirmed", trust: "confirmed" }),
+        ]));
+        expect(queries.getProjection({ includeAutomaticRelations: false }).edges.some((edge) => edge.trust === "automatic")).toBe(false);
+
+        showAutomatic = false;
+        revision = "semantic:after-confirm";
+        const after = queries.getProjection();
+        expect(after.edges.some((edge) => edge.trust === "automatic")).toBe(false);
+        expect(after.edges).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: "learning:semantic:relation:confirmed", trust: "confirmed" }),
+        ]));
     });
 
     it("exposes an unbounded effective-concept catalog for domain computation, not renderer candidates", () => {
@@ -100,6 +135,8 @@ function source(): LearningGraphSource {
             redirects: { "concept:merged": "concept:alpha" },
             rejectedCandidateFingerprints: ["candidate:rejected"],
         }),
+        getAutoDisplayRelations: () => [],
+        getLearningMapRevision: () => "fixture:v1",
     };
 }
 

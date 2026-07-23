@@ -46,6 +46,30 @@ describe("SemanticGraphProjector", () => {
         state.decisions.push({ id: "decision-undo-remove-manual", kind: "undo-manual-relation-removal", supersedesDecisionId: "decision-remove-manual", createdAt: 4 });
         expect(projector.project(state).relations).toEqual([expect.objectContaining({ id: "relation:user:one", origin: "user" })]);
     });
+
+    it("projects high-confidence candidates only for display, while confirmation and rejection take precedence", () => {
+        const state = createState();
+        const projector = new SemanticGraphProjector();
+        const policy = {
+            enabled: true,
+            modelMinConfidence: 0.85,
+            includeRuleRelations: true,
+            includeSimilarityRelations: false,
+        };
+
+        expect(projector.project(state).relations).toEqual([]);
+        expect(projector.projectAutoDisplayRelations(state, policy)).toEqual([
+            expect.objectContaining({ id: "relation:candidate:relation:one", type: "related_to", origin: "model" }),
+        ]);
+
+        state.decisions.push({ id: "decision-confirm", kind: "confirm-candidate", candidateFingerprint: "candidate:relation:one", createdAt: 2 });
+        expect(projector.project(state).relations).toEqual([expect.objectContaining({ type: "related_to" })]);
+        expect(projector.projectAutoDisplayRelations(state, policy)).toEqual([]);
+
+        state.decisions.push({ id: "decision-reject", kind: "reject-candidate", candidateFingerprint: "candidate:relation:one", createdAt: 3 });
+        expect(projector.project(state).relations).toEqual([]);
+        expect(projector.projectAutoDisplayRelations(state, policy)).toEqual([]);
+    });
 });
 
 function createState(): SemanticGraphState {

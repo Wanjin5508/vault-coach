@@ -3,6 +3,7 @@ import { normalizeConceptAlias, normalizeConceptAliases } from "./concept-normal
 import type {
     EffectiveSemanticGraph,
     EffectiveSemanticRelation,
+    SemanticAutoRelationPolicy,
     SemanticConcept,
     SemanticGraphState,
     UserSemanticDecision,
@@ -67,6 +68,32 @@ export class SemanticGraphProjector {
             redirects: Object.fromEntries(Array.from(redirects.entries()).sort(([left], [right]) => left.localeCompare(right))),
             rejectedCandidateFingerprints: Array.from(rejected).sort((left, right) => left.localeCompare(right)),
         };
+    }
+
+    /**
+     * Selects display-only relations from pending candidates. These records do
+     * not become part of the effective graph and never write a user decision.
+     * A rejection or a manual confirmation always takes precedence.
+     */
+    projectAutoDisplayRelations(
+        state: SemanticGraphState,
+        policy: SemanticAutoRelationPolicy,
+    ): EffectiveSemanticRelation[] {
+        if (!policy.enabled) return [];
+        const effective = this.project(state);
+        const confirmed = new Set(effective.relations
+            .map((relation) => relation.candidateFingerprint)
+            .filter((fingerprint): fingerprint is string => fingerprint !== undefined));
+        const rejected = new Set(effective.rejectedCandidateFingerprints);
+        const conceptIds = new Set(effective.concepts.map((concept) => concept.id));
+        const redirects = new Map(Object.entries(effective.redirects));
+        return state.candidates
+            .filter((candidate) => !confirmed.has(candidate.fingerprint) && !rejected.has(candidate.fingerprint))
+            .filter((candidate) => shouldAutoDisplay(candidate.origin, candidate.confidence, policy))
+            .map((candidate) => this.toCandidateRelation(candidate, (conceptId) => this.resolveRedirect(conceptId, redirects)))
+            .filter((relation): relation is EffectiveSemanticRelation => relation !== null)
+            .filter((relation) => conceptIds.has(relation.sourceConceptId) && conceptIds.has(relation.targetConceptId))
+            .sort((left, right) => left.id.localeCompare(right.id));
     }
 
     private getActiveDecisions(decisions: readonly UserSemanticDecision[]): UserSemanticDecision[] {
@@ -158,4 +185,14 @@ export class SemanticGraphProjector {
             candidateFingerprint: candidate.fingerprint,
         };
     }
+}
+
+function shouldAutoDisplay(
+    origin: "model" | "rule" | "similarity",
+    confidence: number,
+    policy: SemanticAutoRelationPolicy,
+): boolean {
+    if (origin === "rule") return policy.includeRuleRelations;
+    if (origin === "similarity") return policy.includeSimilarityRelations && confidence >= policy.modelMinConfidence;
+    return confidence >= policy.modelMinConfidence;
 }
