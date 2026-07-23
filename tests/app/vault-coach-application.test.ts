@@ -8,6 +8,7 @@ import type { GraphSnapshotV1, GraphSourceDocument } from "../../src/domain/grap
 import type { AssessmentExamHistoryItem, AssessmentSessionDocumentV1 } from "../../src/domain/assessment/assessment-types";
 import type { ExamEvaluation, ExamSession } from "../../src/domain/exam/exam-types";
 import type { MarkdownExamHistoryRecord } from "../../src/exam/exam-session-store";
+import type { ProgressService } from "../../src/app/progress/progress-service";
 
 describe("VaultCoachApplication", () => {
     it("publishes grouped chat use-case events without a presentation dependency", async () => {
@@ -30,6 +31,24 @@ describe("VaultCoachApplication", () => {
         expect(appendUserMessage).toHaveBeenCalledWith("问题");
         expect(events).toEqual(["conversation-changed", "conversation-changed"]);
         expect(application.progress.isAvailable()).toBe(false);
+    });
+
+    it("exposes the Progress read model only through the application facade", async () => {
+        const progressSnapshot = { marker: "progress-read-model" };
+        const getSnapshot = vi.fn(async () => progressSnapshot);
+        const application = new VaultCoachApplication({
+            chatService: {
+                getMessages: () => [],
+                appendUserMessage: async () => undefined,
+                streamAssistantTurn: async () => ({ text: "", sources: [], retrievalModeUsed: "keyword", rewriteResult: { originalQuery: "", rewrittenQuery: "", useRewrite: false } }),
+                resetConversation: () => undefined,
+            },
+            progressService: { getSnapshot } as unknown as ProgressService,
+        } as unknown as VaultCoachApplicationDependencies);
+
+        expect(application.progress.isAvailable()).toBe(true);
+        await expect(application.progress.getSnapshot()).resolves.toBe(progressSnapshot);
+        expect(getSnapshot).toHaveBeenCalledOnce();
     });
 
     it("exposes graph rebuild and read APIs without leaking mutable snapshot state", async () => {

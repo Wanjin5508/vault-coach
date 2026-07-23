@@ -21,6 +21,8 @@ import type { ConceptEvidenceRef, SemanticRelationType } from "../domain/semanti
 import type { LearningGraphQuery } from "../domain/learning-graph/learning-graph-types";
 import type { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
 import type { MasteryService } from "./mastery/mastery-service";
+import type { ProgressService } from "./progress/progress-service";
+import { PROGRESS_SNAPSHOT_SCHEMA_VERSION, type ProgressSnapshot } from "./progress/progress-types";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
@@ -47,6 +49,7 @@ export interface VaultCoachApplicationDependencies {
     semanticGraphService: SemanticGraphService;
     learningGraphQueryService?: LearningGraphQueryService;
     masteryService?: MasteryService;
+    progressService?: ProgressService;
 }
 
 /** Application facade with grouped use-case APIs and no Obsidian UI dependency. */
@@ -58,7 +61,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
     readonly semanticGraph: SemanticGraphApplicationApi;
     readonly learningGraph: LearningGraphApplicationApi;
     readonly mastery: MasteryApplicationApi;
-    readonly progress: ProgressApplicationApi = { isAvailable: () => false };
+    readonly progress: ProgressApplicationApi;
     private readonly listeners: Set<ApplicationEventListener> = new Set();
 
     constructor(private readonly dependencies: VaultCoachApplicationDependencies) {
@@ -98,6 +101,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         this.semanticGraph = this.createSemanticGraphApi();
         this.learningGraph = this.createLearningGraphApi();
         this.mastery = this.createMasteryApi();
+        this.progress = this.createProgressApi();
     }
 
     subscribe(listener: ApplicationEventListener): () => void {
@@ -254,6 +258,19 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         };
     }
 
+    private createProgressApi(): ProgressApplicationApi {
+        const service = this.dependencies.progressService;
+        return {
+            isAvailable: () => service !== undefined,
+            getSnapshot: async (): Promise<ProgressSnapshot> => {
+                if (!service) {
+                    return createUnavailableProgressSnapshot();
+                }
+                return service.getSnapshot();
+            },
+        };
+    }
+
     /**
      * Persists structured facts before their disposable Markdown projection.
      * Draft saving retains the legacy report-only behaviour for compatibility.
@@ -374,6 +391,44 @@ function unavailableMasteryState() {
         sourceEventCount: 0,
         unboundIssueCount: 0,
     } as const;
+}
+
+function createUnavailableProgressSnapshot(): ProgressSnapshot {
+    return {
+        schemaVersion: PROGRESS_SNAPSHOT_SCHEMA_VERSION,
+        generatedAt: Date.now(),
+        graph: {
+            status: "unavailable",
+            conceptCount: 0,
+            message: "Progress service is unavailable.",
+        },
+        mastery: {
+            status: "unavailable",
+            message: "Progress service is unavailable.",
+            conceptCount: 0,
+            assessedConceptCount: 0,
+            coverageRatio: null,
+            levelCounts: {
+                unknown: 0,
+                weak: 0,
+                developing: 0,
+                proficient: 0,
+                mastered: 0,
+            },
+            snapshotCalculatedAt: null,
+            algorithmVersion: null,
+            sourceEventCount: 0,
+            unboundIssueCount: 0,
+        },
+        assessments: {
+            status: "unavailable",
+            message: "Progress service is unavailable.",
+            sessionCount: 0,
+            scoredSessionCount: 0,
+            latestSessionAt: null,
+        },
+        recommendations: [],
+    };
 }
 
 function mergeConceptBindings(

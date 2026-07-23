@@ -23,6 +23,7 @@ import type {
 } from "../domain/semantic-graph/semantic-graph-types";
 import type { LearningGraphConceptCatalog, LearningGraphProjection, LearningGraphQuery } from "../domain/learning-graph/learning-graph-types";
 import type { ConceptMasteryState, MasterySnapshotV1, MasteryStateView } from "../domain/mastery/mastery-types";
+import type { ProgressSnapshot } from "./progress/progress-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -107,7 +108,14 @@ export interface MasteryApplicationApi {
     clear(): Promise<void>;
 }
 
-export interface ProgressApplicationApi { isAvailable(): false; }
+/**
+ * Read-only dashboard contract. L5.1 supplies aggregated facts only; M5 UI
+ * work remains in presentation and M7 owns recommendations.
+ */
+export interface ProgressApplicationApi {
+    isAvailable(): boolean;
+    getSnapshot(): Promise<ProgressSnapshot>;
+}
 
 export interface VaultCoachApplicationApi {
     chat: ChatApplicationApi;

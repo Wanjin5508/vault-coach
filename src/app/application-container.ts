@@ -28,6 +28,7 @@ import { SemanticGraphService } from "./semantic-graph/semantic-graph-service";
 import { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
 import { ServiceLearningGraphSource } from "./learning-graph/learning-graph-source";
 import { MasteryService } from "./mastery/mastery-service";
+import { ProgressService } from "./progress/progress-service";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
@@ -76,6 +77,7 @@ export interface ApplicationContainerServices {
     semanticGraphService: SemanticGraphService;
     learningGraphQueryService: LearningGraphQueryService;
     masteryService: MasteryService;
+    progressService: ProgressService;
 }
 
 /**
@@ -153,6 +155,11 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         store: new JsonMasteryStore(dependencies.app.vault.adapter),
         getCapacityAssessment: () => semanticGraphService.getCapacityAssessment(),
     });
+    const progressService = new ProgressService({
+        catalogReader: learningGraphQueryService,
+        masteryReader: masteryService,
+        assessmentSessionStore,
+    });
     let assessmentEventSequence = 0;
     const assessmentEventFactory = new AssessmentEventFactory({
         createEventId: () => createAssessmentEventId(assessmentEventSequence++),
@@ -205,6 +212,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         semanticGraphService,
         learningGraphQueryService,
         masteryService,
+        progressService,
     });
     application = applicationInstance;
 
@@ -227,6 +235,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             semanticGraphService,
             learningGraphQueryService,
             masteryService,
+            progressService,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();

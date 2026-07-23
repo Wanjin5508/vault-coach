@@ -8,13 +8,13 @@ import type { ProgressApplicationApi } from "../../app/application-api";
  * leaking into the Chat or Exam controllers.
  */
 export interface ProgressViewState {
-    available: false;
+    available: boolean;
 }
 
 export class ProgressController {
     constructor(private readonly api: ProgressApplicationApi) {}
 
-    isAvailable(): false {
+    isAvailable(): boolean {
         return this.api.isAvailable();
     }
 

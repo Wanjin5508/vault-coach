@@ -3,7 +3,12 @@ import { ProgressController } from "../../src/presentation/controllers/progress-
 
 describe("ProgressController", () => {
     it("keeps Progress unavailable without fabricating a dashboard state", () => {
-        const controller = new ProgressController({ isAvailable: () => false });
+        const controller = new ProgressController({
+            isAvailable: () => false,
+            getSnapshot: async () => {
+                throw new Error("Progress service is unavailable.");
+            },
+        });
 
         expect(controller.isAvailable()).toBe(false);
         expect(controller.getState()).toEqual({ available: false });
