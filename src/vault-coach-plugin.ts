@@ -1,5 +1,10 @@
 import { Notice, Plugin, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
-import { VIEW_TYPE_CONCEPT_REVIEW, VIEW_TYPE_LEARNING_MAP, VIEW_TYPE_VAULT_COACH } from "./constants";
+import {
+    VIEW_TYPE_CONCEPT_REVIEW,
+    VIEW_TYPE_LEARNING_MAP,
+    VIEW_TYPE_PROGRESS,
+    VIEW_TYPE_VAULT_COACH,
+} from "./constants";
 import { VaultCoachRuntime } from "./app/vault-coach-runtime";
 import type { VaultCoachSettings } from "./app/config/settings-types";
 import type { KnowledgeIndexBusyState } from "./app/index/index-types";
@@ -7,11 +12,13 @@ import type { KnowledgeBaseStats } from "./domain/documents/document-types";
 import type { AnswerSource, RetrievalMode, VectorIndexStats } from "./domain/retrieval/retrieval-types";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { registerVaultCoachCommands, registerVaultCoachRibbon } from "./plugin/command-registry";
+import { activateMainWorkspaceView } from "./plugin/main-workspace-view";
 import { LegacyPluginApiAdapter, type LegacyPluginApiHost } from "./presentation/legacy-plugin-api-adapter";
 import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
 import { VaultCoachView } from "./presentation/vault-coach-view";
 import { ConceptReviewView } from "./presentation/views/concept-review-view";
 import { LearningMapView } from "./presentation/views/learning-map-view";
+import { ProgressWorkspaceView } from "./presentation/views/progress-workspace-view";
 
 /** Obsidian composition root: lifecycle, UI registration, and thin host adapters only. */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
@@ -33,15 +40,26 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         await this.runtime.initialize();
         this.legacyApi = new LegacyPluginApiAdapter(this.runtime.application, this);
 
-        this.registerView(VIEW_TYPE_VAULT_COACH, (leaf: WorkspaceLeaf) => new VaultCoachView(leaf, this.runtime.application, this.legacyApi));
+        this.registerView(VIEW_TYPE_VAULT_COACH, (leaf: WorkspaceLeaf) => new VaultCoachView(
+            leaf,
+            this.runtime.application,
+            this.legacyApi,
+            () => this.activateProgressView(),
+        ));
         this.registerView(VIEW_TYPE_CONCEPT_REVIEW, (leaf: WorkspaceLeaf) => new ConceptReviewView(leaf, this.runtime.application));
         this.registerView(VIEW_TYPE_LEARNING_MAP, (leaf: WorkspaceLeaf) => new LearningMapView(
             leaf,
             this.runtime.application,
             (filePath, heading) => this.openLearningMapSource(filePath, heading),
         ));
+        this.registerView(VIEW_TYPE_PROGRESS, (leaf: WorkspaceLeaf) => new ProgressWorkspaceView(
+            leaf,
+            this.runtime.application,
+            () => this.activateLearningMapView(),
+        ));
         registerVaultCoachCommands(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
         this.registerSemanticGraphCommands();
+        this.registerLearningDashboardEntry();
         registerVaultCoachRibbon(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
         this.addSettingTab(new VaultCoachSettingTab(this.app, this, this.legacyApi));
         this.registerVaultEvents();
@@ -81,24 +99,17 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
 
     /** Opens Concept review in a normal workspace tab, never in the Ask/Exam sidebar. */
     async activateConceptReviewView(): Promise<void> {
-        const { workspace } = this.app;
-        let leaf = workspace.getLeavesOfType(VIEW_TYPE_CONCEPT_REVIEW)[0] ?? null;
-        if (!leaf) {
-            leaf = workspace.getLeaf(true);
-            await leaf.setViewState({ type: VIEW_TYPE_CONCEPT_REVIEW, active: true });
-        }
-        workspace.setActiveLeaf(leaf, { focus: true });
+        await activateMainWorkspaceView(this.app.workspace, VIEW_TYPE_CONCEPT_REVIEW);
     }
 
     /** Opens the read-only Learning Map in a normal workspace tab. */
     async activateLearningMapView(): Promise<void> {
-        const { workspace } = this.app;
-        let leaf = workspace.getLeavesOfType(VIEW_TYPE_LEARNING_MAP)[0] ?? null;
-        if (!leaf) {
-            leaf = workspace.getLeaf(true);
-            await leaf.setViewState({ type: VIEW_TYPE_LEARNING_MAP, active: true });
-        }
-        workspace.setActiveLeaf(leaf, { focus: true });
+        await activateMainWorkspaceView(this.app.workspace, VIEW_TYPE_LEARNING_MAP);
+    }
+
+    /** Opens the Progress dashboard in a normal workspace tab. */
+    async activateProgressView(): Promise<void> {
+        await activateMainWorkspaceView(this.app.workspace, VIEW_TYPE_PROGRESS);
     }
 
     refreshAllViews(): void {
@@ -110,6 +121,9 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         }
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_LEARNING_MAP)) {
             if (leaf.view instanceof LearningMapView) void leaf.view.refresh();
+        }
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_PROGRESS)) {
+            if (leaf.view instanceof ProgressWorkspaceView) leaf.view.refresh();
         }
     }
 
@@ -239,6 +253,17 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
                     new Notice(error instanceof Error ? error.message : String(error));
                 }
             },
+        });
+    }
+
+    private registerLearningDashboardEntry(): void {
+        this.addCommand({
+            id: "open-learning-dashboard",
+            name: "Open learning dashboard",
+            callback: async () => this.activateProgressView(),
+        });
+        this.addRibbonIcon("chart-line", "Open learning dashboard", () => {
+            void this.activateProgressView();
         });
     }
 

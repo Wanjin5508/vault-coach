@@ -161,6 +161,68 @@
     margin-top: 10px;
 }
 
+/* M5: sidebar routing only; the Dashboard itself remains a main-workspace View. */
+.vault-coach-progress-entry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-progress-entry-title {
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vault-coach-progress-entry-button {
+    flex: 0 0 auto;
+}
+
+.vault-coach-progress-workspace {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-3);
+    height: 100%;
+    padding: var(--size-4-3);
+    box-sizing: border-box;
+}
+
+.vault-coach-progress-workspace-header h2 {
+    margin: 0;
+}
+
+.vault-coach-progress-workspace-summary,
+.vault-coach-progress-workspace-muted {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-progress-workspace-message {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--size-4-2);
+    max-width: 640px;
+    padding: var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-secondary);
+}
+
+.vault-coach-progress-workspace-message.is-error {
+    color: var(--text-error);
+    border-color: var(--background-modifier-error);
+}
+
 .vault-coach-retrieval-group {
     display: inline-flex;
     align-items: center;

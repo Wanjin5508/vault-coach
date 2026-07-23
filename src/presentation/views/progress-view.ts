@@ -1,17 +1,28 @@
 import type { ProgressViewState } from "../controllers/progress-controller";
 
 /**
- * Rendering seam for the future Progress feature.
+ * Compact sidebar launcher for the main-workspace Learning dashboard.
  *
- * It intentionally renders nothing while Progress is unavailable, so M0 does
- * not introduce an empty dashboard or alter the existing mode switch.
+ * The sidebar remains a focused Ask/Practice surface: it contains no dashboard
+ * metrics or graph renderer, only a lightweight route to the workspace View.
  */
 export class ProgressView {
-    render(_rootEl: HTMLDivElement, _state: Readonly<ProgressViewState>): void {
-        // The Progress UI is introduced only when ProgressController reports availability.
+    constructor(private readonly openWorkspace: () => Promise<void>) {}
+
+    render(rootEl: HTMLDivElement, _state: Readonly<ProgressViewState>): void {
+        const entry = rootEl.createDiv({ cls: "vault-coach-progress-entry" });
+        entry.createSpan({ cls: "vault-coach-progress-entry-title", text: "Learning dashboard" });
+        const openButton = entry.createEl("button", {
+            cls: "vault-coach-progress-entry-button",
+            text: "Open",
+            attr: { type: "button", "aria-label": "Open learning dashboard" },
+        });
+        openButton.addEventListener("click", () => {
+            void this.openWorkspace();
+        });
     }
 
     dispose(): void {
-        // Reserved for Progress DOM resources introduced in milestone 5.
+        // The launcher owns no subscription or DOM outside the parent View.
     }
 }

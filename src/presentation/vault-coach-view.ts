@@ -37,6 +37,7 @@ export class VaultCoachView extends ItemView {
         leaf: WorkspaceLeaf,
         private readonly application: VaultCoachApplicationApi,
         private readonly plugin: VaultCoachPluginApi,
+        openProgressWorkspace: () => Promise<void>,
     ) {
         super(leaf);
         this.chatController = new ChatController(plugin, () => this.contentEl.win);
@@ -46,7 +47,7 @@ export class VaultCoachView extends ItemView {
         this.examView = new ExamView(this.app, this, this.examController);
         this.unsubscribeExamController = this.examController.subscribe((event) => this.handleExamControllerEvent(event));
         this.progressController = new ProgressController(application.progress);
-        this.progressView = new ProgressView();
+        this.progressView = new ProgressView(openProgressWorkspace);
         this.header = new VaultCoachHeader(plugin, this.chatController);
     }
 

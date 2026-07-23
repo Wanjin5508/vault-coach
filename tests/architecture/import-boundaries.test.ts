@@ -93,11 +93,14 @@ describe("architecture import boundaries", () => {
         const shellSource = sourceOf(join(sourceRoot, "presentation", "vault-coach-view.ts"));
         const progressControllerSource = sourceOf(join(sourceRoot, "presentation", "controllers", "progress-controller.ts"));
         const progressViewSource = sourceOf(join(sourceRoot, "presentation", "views", "progress-view.ts"));
+        const progressWorkspaceViewSource = sourceOf(join(sourceRoot, "presentation", "views", "progress-workspace-view.ts"));
 
         expect(legacyViewSource).toContain('export { VaultCoachView } from "./presentation/vault-coach-view";');
         expect(shellSource.split("\n").length).toBeLessThanOrEqual(350);
         expect(shellSource).not.toMatch(/domain\/exam|ExamGenerationProgress|ExamSession/);
         expect(progressControllerSource).toContain("isAvailable(): boolean");
-        expect(progressViewSource).toContain("render(_rootEl");
+        expect(progressViewSource).toContain("openWorkspace");
+        expect(progressWorkspaceViewSource).toContain("class ProgressWorkspaceView extends ItemView");
+        expect(progressWorkspaceViewSource).not.toMatch(/progress-service|assessment-session-store|learning-graph-service/);
     });
 });
