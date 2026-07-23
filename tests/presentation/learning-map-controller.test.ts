@@ -43,4 +43,43 @@ describe("LearningMapController", () => {
         expect(controller.getFocus()).toBeUndefined();
         expect(controller.getSearch()).toBe("docker");
     });
+
+    it("round-trips bounded filters and focus history as leaf-local explorer state", () => {
+        const api = {
+            getProjection: async () => { throw new Error("not used by this state test"); },
+            getConceptCatalog: async () => { throw new Error("not used by this state test"); },
+        };
+        const controller = new LearningMapController(api);
+        controller.setSearch("docker");
+        controller.setStructuralContext(true);
+        controller.setAutomaticRelationsVisible(false);
+        controller.setRelationTypes(["used_for", "prerequisite_of"]);
+        controller.setFullGraph(false);
+        controller.setFocus("concept:docker");
+
+        const restored = new LearningMapController(api);
+        restored.restoreViewState(controller.getViewState());
+
+        expect(restored.getFocus()).toBe("concept:docker");
+        expect(restored.getRelationTypes()).toEqual(["used_for", "prerequisite_of"]);
+        expect(restored.hasStructuralContext()).toBe(true);
+        expect(restored.hasAutomaticRelationsVisible()).toBe(false);
+        expect(restored.isFullGraph()).toBe(false);
+        expect(restored.canGoBack()).toBe(true);
+        expect(restored.goBack()).toBe(true);
+        expect(restored.getSearch()).toBe("docker");
+    });
+
+    it("ignores malformed persisted state and retains a safe default", () => {
+        const controller = new LearningMapController({
+            getProjection: async () => { throw new Error("not used by this state test"); },
+            getConceptCatalog: async () => { throw new Error("not used by this state test"); },
+        });
+
+        controller.restoreViewState({ version: 1, query: { maxNodes: "all" }, focusHistory: "not-an-array" });
+
+        expect(controller.isFullGraph()).toBe(true);
+        expect(controller.getSearch()).toBe("");
+        expect(controller.canGoBack()).toBe(false);
+    });
 });

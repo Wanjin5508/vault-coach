@@ -9,6 +9,17 @@ import {
 } from "../../domain/learning-graph/learning-graph-types";
 import type { SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
 
+const LEARNING_MAP_VIEW_STATE_VERSION = 1 as const;
+const SEMANTIC_RELATION_TYPES: readonly SemanticRelationType[] = [
+    "same_as", "part_of", "prerequisite_of", "used_for", "contrasts_with", "related_to",
+];
+
+export interface LearningMapControllerState {
+    version: typeof LEARNING_MAP_VIEW_STATE_VERSION;
+    query: LearningGraphQuery;
+    focusHistory: LearningGraphQuery[];
+}
+
 /** Presentation state for the bounded, read-only Learning Map explorer. */
 export class LearningMapController {
     private query: LearningGraphQuery = {
@@ -83,6 +94,28 @@ export class LearningMapController {
 
     getRelationTypes(): readonly SemanticRelationType[] { return this.query.relationTypes ?? []; }
 
+    /** Serializable leaf-local explorer state; it never contains graph facts. */
+    getViewState(): LearningMapControllerState {
+        return {
+            version: LEARNING_MAP_VIEW_STATE_VERSION,
+            query: cloneQuery(this.query),
+            focusHistory: this.focusHistory.map(cloneQuery),
+        };
+    }
+
+    /** Ignores malformed or obsolete workspace state rather than breaking a leaf. */
+    restoreViewState(value: unknown): void {
+        if (!isRecord(value) || value.version !== LEARNING_MAP_VIEW_STATE_VERSION) return;
+        const query = sanitizeQuery(value.query);
+        if (!query) return;
+        const history = Array.isArray(value.focusHistory)
+            ? value.focusHistory.map(sanitizeQuery).filter((item): item is LearningGraphQuery => item !== null).slice(-8)
+            : [];
+        this.query = query;
+        this.focusHistory.length = 0;
+        this.focusHistory.push(...history);
+    }
+
     reset(): void {
         this.focusHistory.length = 0;
         this.query = {
@@ -100,4 +133,31 @@ function cloneQuery(query: LearningGraphQuery): LearningGraphQuery {
         ...query,
         relationTypes: query.relationTypes ? [...query.relationTypes] : undefined,
     };
+}
+
+function sanitizeQuery(value: unknown): LearningGraphQuery | null {
+    if (!isRecord(value)) return null;
+    const depth = value.depth === 0 || value.depth === 1 || value.depth === 2 ? value.depth : 1;
+    const relationTypes = Array.isArray(value.relationTypes)
+        ? value.relationTypes.filter((type): type is SemanticRelationType => typeof type === "string" && SEMANTIC_RELATION_TYPES.includes(type as SemanticRelationType))
+        : [];
+    const full = value.maxNodes !== LEARNING_GRAPH_DEFAULT_MAX_NODES || value.maxEdges !== LEARNING_GRAPH_DEFAULT_MAX_EDGES;
+    return {
+        depth,
+        search: optionalText(value.search),
+        focusNodeId: optionalText(value.focusNodeId),
+        includeStructuralContext: value.includeStructuralContext === true || undefined,
+        includeAutomaticRelations: value.includeAutomaticRelations === false ? false : undefined,
+        relationTypes: relationTypes.length > 0 ? relationTypes : undefined,
+        maxNodes: full ? LEARNING_GRAPH_MAX_NODES : LEARNING_GRAPH_DEFAULT_MAX_NODES,
+        maxEdges: full ? LEARNING_GRAPH_MAX_EDGES : LEARNING_GRAPH_DEFAULT_MAX_EDGES,
+    };
+}
+
+function optionalText(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

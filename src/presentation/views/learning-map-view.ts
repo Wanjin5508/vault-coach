@@ -1,4 +1,4 @@
-import { ItemView, Menu, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Menu, Notice, setIcon, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type { VaultCoachApplicationApi } from "../../app/application-api";
 import { VIEW_TYPE_LEARNING_MAP } from "../../constants";
 import {
@@ -13,8 +13,12 @@ import {
 import type { SemanticGraphStateView, SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
 import type { ConceptMasteryState } from "../../domain/mastery/mastery-types";
 import { translate, type TranslationKey } from "../../i18n";
-import { LearningGraphRenderer } from "../components/learning-graph-renderer";
-import { LearningMapController } from "../controllers/learning-map-controller";
+import {
+    LearningGraphRenderer,
+    normalizeLearningGraphPinnedPositions,
+    type LearningGraphPinnedPosition,
+} from "../components/learning-graph-renderer";
+import { LearningMapController, type LearningMapControllerState } from "../controllers/learning-map-controller";
 
 export type LearningMapSourceOpener = (filePath: string, heading?: string) => Promise<void>;
 /** Opens the existing Exam setup with a transparent, source-file-bound scope. */
@@ -30,6 +34,16 @@ interface EvidenceSource {
     label: string;
 }
 
+const LEARNING_MAP_LEAF_STATE_VERSION = 1 as const;
+
+interface LearningMapLeafState {
+    version: typeof LEARNING_MAP_LEAF_STATE_VERSION;
+    explorer: LearningMapControllerState;
+    selectedNodeId: string | null;
+    selectedEdgeId: string | null;
+    pinnedPositions: Record<string, LearningGraphPinnedPosition>;
+}
+
 /** Main-workspace explorer for confirmed facts and clearly marked display-only candidates. */
 export class LearningMapView extends ItemView {
     private readonly controller: LearningMapController;
@@ -38,6 +52,9 @@ export class LearningMapView extends ItemView {
     private inspectorEl: HTMLElement | null = null;
     private selectedNodeId: string | null = null;
     private selectedEdgeId: string | null = null;
+    private pinnedPositions: Record<string, LearningGraphPinnedPosition> = {};
+    private refreshRevision = 0;
+    private searchFocusTimer: number | null = null;
     private disposed = false;
 
     constructor(
@@ -54,28 +71,73 @@ export class LearningMapView extends ItemView {
     getDisplayText(): string { return this.t("learningMap.title"); }
     getIcon(): string { return "waypoints"; }
 
-    async onOpen(): Promise<void> { await this.refresh(); }
+    async onOpen(): Promise<void> {
+        this.disposed = false;
+        await this.refresh();
+    }
 
     async onClose(): Promise<void> {
         this.disposed = true;
+        this.refreshRevision += 1;
+        this.clearSearchFocusTimer();
+        this.captureRendererLayout();
         this.renderer?.destroy();
         this.renderer = null;
         this.inspectorEl = null;
         this.contentEl.empty();
+        this.contentEl.removeClass("vault-coach-learning-map");
+    }
+
+    getState(): Record<string, unknown> {
+        this.captureRendererLayout();
+        const state: LearningMapLeafState = {
+            version: LEARNING_MAP_LEAF_STATE_VERSION,
+            explorer: this.controller.getViewState(),
+            selectedNodeId: this.selectedNodeId,
+            selectedEdgeId: this.selectedEdgeId,
+            pinnedPositions: { ...this.pinnedPositions },
+        };
+        return {
+            version: state.version,
+            explorer: state.explorer,
+            selectedNodeId: state.selectedNodeId,
+            selectedEdgeId: state.selectedEdgeId,
+            pinnedPositions: state.pinnedPositions,
+        };
+    }
+
+    async setState(state: unknown, result: ViewStateResult): Promise<void> {
+        await super.setState(state, result);
+        if (!isLearningMapLeafState(state)) return;
+        this.controller.restoreViewState(state.explorer);
+        this.selectedNodeId = state.selectedNodeId;
+        this.selectedEdgeId = state.selectedEdgeId;
+        this.pinnedPositions = normalizeLearningGraphPinnedPositions(state.pinnedPositions);
     }
 
     async refresh(): Promise<void> {
         if (this.disposed) return;
+        const revision = ++this.refreshRevision;
         try {
-            this.projection = await this.controller.getProjection();
-            if (!this.disposed) this.render();
+            const projection = await this.controller.getProjection();
+            if (!this.isCurrentRefresh(revision)) return;
+            this.projection = projection;
+            this.render();
         } catch {
+            if (!this.isCurrentRefresh(revision)) return;
+            this.captureRendererLayout();
+            this.renderer?.destroy();
+            this.renderer = null;
+            this.inspectorEl = null;
+            this.clearSearchFocusTimer();
             this.contentEl.empty();
             this.contentEl.createDiv({ cls: "vault-coach-learning-map-error", text: this.t("learningMap.unavailable") });
         }
     }
 
     private render(): void {
+        this.clearSearchFocusTimer();
+        this.captureRendererLayout();
         this.renderer?.destroy();
         this.renderer = null;
         this.inspectorEl = null;
@@ -94,6 +156,7 @@ export class LearningMapView extends ItemView {
             return;
         }
         this.retainSelection(projection);
+        this.pinnedPositions = normalizeLearningGraphPinnedPositions(this.pinnedPositions, projection.nodes.map((node) => node.id));
         const confirmedCount = projection.edges.filter((edge) => edge.trust === "confirmed").length;
         const automaticCount = projection.edges.filter((edge) => edge.trust === "automatic").length;
         const body = this.contentEl.createDiv({ cls: "vault-coach-learning-map-body" });
@@ -101,6 +164,7 @@ export class LearningMapView extends ItemView {
         this.renderer = new LearningGraphRenderer(graph, {
             nodes: projection.nodes,
             edges: projection.edges,
+            initialPinnedPositions: this.pinnedPositions,
             accessibleTitle: this.t("learningMap.a11yTitle"),
             selectedNodeId: this.selectedNodeId,
             selectedEdgeId: this.selectedEdgeId,
@@ -123,12 +187,16 @@ export class LearningMapView extends ItemView {
                 this.renderer?.setSelection(null, edgeId);
                 this.refreshInspector();
             },
+            onLayoutChanged: (pinnedPositions) => {
+                this.pinnedPositions = { ...pinnedPositions };
+            },
         });
         this.renderGraphControls(graph, projection, semanticState, confirmedCount, automaticCount);
         this.renderLegend(
             graph,
             automaticCount > 0,
-            projection.nodes.some((node) => node.kind !== "concept"),
+            projection.nodes.some((node) => node.kind === "document" || node.kind === "section"),
+            projection.nodes.some((node) => node.kind === "tag"),
             projection.edges.some((edge) => edge.trust === "structural"),
         );
         this.inspectorEl = this.contentEl.createDiv({ cls: "vault-coach-learning-map-inspector" });
@@ -192,7 +260,12 @@ export class LearningMapView extends ItemView {
         const searchButton = this.createGraphControlButton(controls, "search", this.t("learningMap.search"));
         searchButton.addEventListener("click", () => {
             togglePanel(searchPanel);
-            if (searchPanel.hasClass("is-open")) window.setTimeout(() => search.focus(), 0);
+            if (!searchPanel.hasClass("is-open")) return;
+            this.clearSearchFocusTimer();
+            this.searchFocusTimer = window.setTimeout(() => {
+                this.searchFocusTimer = null;
+                if (!this.disposed && searchPanel.isConnected) search.focus();
+            }, 0);
         });
 
         const displayButton = this.createGraphControlButton(controls, "eye", this.t("learningMap.displaySettings"));
@@ -361,11 +434,13 @@ export class LearningMapView extends ItemView {
         container: HTMLElement,
         includeAutomatic: boolean,
         includeStructuralNodes: boolean,
+        includeTagNodes: boolean,
         includeStructuralRelations: boolean,
     ): void {
         const legend = container.createDiv({ cls: "vault-coach-learning-map-legend" });
         this.addLegendEntry(legend, "concept-node", this.t("learningMap.legend.conceptNode"));
         if (includeStructuralNodes) this.addLegendEntry(legend, "structural-node", this.t("learningMap.legend.structuralNode"));
+        if (includeTagNodes) this.addLegendEntry(legend, "tag-node", this.t("learningMap.legend.tagNode"));
         this.addLegendEntry(legend, "confirmed", this.t("learningMap.legend.confirmed"));
         this.addLegendEntry(legend, "user", this.t("learningMap.legend.user"));
         if (includeAutomatic) this.addLegendEntry(legend, "automatic", this.t("learningMap.legend.automatic"));
@@ -374,7 +449,7 @@ export class LearningMapView extends ItemView {
 
     private addLegendEntry(
         container: HTMLElement,
-        kind: "confirmed" | "user" | "automatic" | "structural" | "concept-node" | "structural-node",
+        kind: "confirmed" | "user" | "automatic" | "structural" | "concept-node" | "structural-node" | "tag-node",
         label: string,
     ): void {
         const entry = container.createSpan({ cls: "vault-coach-learning-map-legend-entry" });
@@ -470,6 +545,20 @@ export class LearningMapView extends ItemView {
         if (this.selectedEdgeId && !projection.edges.some((edge) => edge.id === this.selectedEdgeId)) this.selectedEdgeId = null;
     }
 
+    private captureRendererLayout(): void {
+        if (this.renderer) this.pinnedPositions = this.renderer.getPinnedPositions();
+    }
+
+    private clearSearchFocusTimer(): void {
+        if (this.searchFocusTimer === null) return;
+        window.clearTimeout(this.searchFocusTimer);
+        this.searchFocusTimer = null;
+    }
+
+    private isCurrentRefresh(revision: number): boolean {
+        return !this.disposed && revision === this.refreshRevision;
+    }
+
     private renderSemanticBuildStatus(container: HTMLElement, progress: { processedSections: number; queuedSections: number }): void {
         const status = container.createDiv({
             cls: "vault-coach-semantic-build-status",
@@ -504,4 +593,16 @@ export class LearningMapView extends ItemView {
     private t(key: TranslationKey, replacements?: Record<string, string | number>): string {
         return translate(key, replacements);
     }
+}
+
+function isLearningMapLeafState(value: unknown): value is LearningMapLeafState {
+    if (!isRecord(value) || value.version !== LEARNING_MAP_LEAF_STATE_VERSION) return false;
+    return isRecord(value.explorer)
+        && (typeof value.selectedNodeId === "string" || value.selectedNodeId === null)
+        && (typeof value.selectedEdgeId === "string" || value.selectedEdgeId === null)
+        && isRecord(value.pinnedPositions);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -28,11 +28,19 @@ const COLORS = {
 export interface LearningGraphRendererOptions {
     nodes: readonly LearningGraphNode[];
     edges: readonly LearningGraphEdge[];
+    initialPinnedPositions?: Readonly<Record<string, LearningGraphPinnedPosition>>;
     accessibleTitle: string;
     selectedNodeId: string | null;
     selectedEdgeId: string | null;
     onSelectNode(nodeId: string): void;
     onSelectEdge(edgeId: string): void;
+    onLayoutChanged?(pinnedPositions: Readonly<Record<string, LearningGraphPinnedPosition>>): void;
+}
+
+/** Only user-pinned coordinates are persisted; the rest remains deterministic. */
+export interface LearningGraphPinnedPosition {
+    x: number;
+    y: number;
 }
 
 export interface LearningGraphPosition {
@@ -88,6 +96,7 @@ export class LearningGraphRenderer {
         this.layoutContext = layout.context;
         this.degrees = layout.context.degrees;
         this.positions = layout.positions;
+        this.restorePinnedPositions(options.initialPinnedPositions);
         this.selectedNodeId = options.selectedNodeId;
         this.selectedEdgeId = options.selectedEdgeId;
         this.canvas = document.createElement("canvas");
@@ -143,6 +152,13 @@ export class LearningGraphRenderer {
         this.selectedNodeId = nodeId;
         this.selectedEdgeId = edgeId;
         this.draw();
+    }
+
+    getPinnedPositions(): Record<string, LearningGraphPinnedPosition> {
+        return Object.fromEntries(Array.from(this.positions.entries())
+            .filter(([, position]) => position.pinned)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([nodeId, position]) => [nodeId, { x: position.x, y: position.y }]));
     }
 
     destroy(): void {
@@ -222,6 +238,10 @@ export class LearningGraphRenderer {
         if (!drag) return;
         this.drag = null;
         if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId);
+        if (drag.kind === "node" && drag.moved) {
+            this.options.onLayoutChanged?.(this.getPinnedPositions());
+            return;
+        }
         if (drag.kind === "node" && !drag.moved) {
             this.options.onSelectNode(drag.nodeId);
             return;
@@ -404,6 +424,19 @@ export class LearningGraphRenderer {
         return true;
     }
 
+    private restorePinnedPositions(value: Readonly<Record<string, LearningGraphPinnedPosition>> | undefined): void {
+        const positions = normalizeLearningGraphPinnedPositions(value, Array.from(this.positions.keys()));
+        for (const [nodeId, pinned] of Object.entries(positions)) {
+            const position = this.positions.get(nodeId);
+            if (!position) continue;
+            position.x = pinned.x;
+            position.y = pinned.y;
+            position.vx = 0;
+            position.vy = 0;
+            position.pinned = true;
+        }
+    }
+
     private getNeighbourIds(activeNodeId: string | null): Set<string> {
         const neighbours = new Set<string>();
         if (!activeNodeId) return neighbours;
@@ -471,6 +504,24 @@ export function learningGraphNodeRadiusForDegree(degree: number): number {
     // A hub should read as a hub at overview zoom.  The previous 18px cap was
     // too subtle once the graph contained many automatic candidate edges.
     return NODE_RADIUS + Math.min(32, Math.sqrt(Math.max(0, degree)) * 6.4);
+}
+
+/** Validates persisted UI coordinates without trusting workspace state blindly. */
+export function normalizeLearningGraphPinnedPositions(
+    value: unknown,
+    availableNodeIds?: readonly string[],
+): Record<string, LearningGraphPinnedPosition> {
+    if (!isPlainRecord(value)) return {};
+    const available = availableNodeIds ? new Set(availableNodeIds) : null;
+    const positions: Record<string, LearningGraphPinnedPosition> = {};
+    for (const [nodeId, position] of Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) {
+        if (available && !available.has(nodeId)) continue;
+        if (!isPlainRecord(position) || typeof position.x !== "number" || typeof position.y !== "number") continue;
+        if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) continue;
+        positions[nodeId] = { x: position.x, y: position.y };
+        if (Object.keys(positions).length >= 500) break;
+    }
+    return positions;
 }
 
 /**
@@ -889,6 +940,10 @@ function truncate(value: string, limit: number): string {
 
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function smoothStep(start: number, end: number, value: number): number {

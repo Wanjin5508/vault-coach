@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createLearningGraphForceLayout, learningGraphNodeRadiusForDegree, learningGraphZoomMultiplier } from "../../src/presentation/components/learning-graph-renderer";
+import {
+    createLearningGraphForceLayout,
+    learningGraphNodeRadiusForDegree,
+    learningGraphZoomMultiplier,
+    normalizeLearningGraphPinnedPositions,
+} from "../../src/presentation/components/learning-graph-renderer";
 import type { LearningGraphEdge, LearningGraphNode } from "../../src/domain/learning-graph/learning-graph-types";
 
 describe("createLearningGraphForceLayout", () => {
@@ -67,6 +72,16 @@ describe("createLearningGraphForceLayout", () => {
         expect(learningGraphZoomMultiplier(40)).toBeLessThan(0.97);
         expect(learningGraphZoomMultiplier(-40)).toBeGreaterThan(1);
         expect(learningGraphZoomMultiplier(3, 1)).toBeLessThan(1);
+    });
+
+    it("keeps only finite pinned coordinates for nodes that remain in the projection", () => {
+        expect(normalizeLearningGraphPinnedPositions({
+            "concept:001": { x: 12, y: -4 },
+            "concept:gone": { x: 1, y: 2 },
+            "concept:bad": { x: Number.NaN, y: 4 },
+        }, ["concept:001", "concept:bad"])).toEqual({
+            "concept:001": { x: 12, y: -4 },
+        });
     });
 });
 

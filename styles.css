@@ -1054,7 +1054,8 @@
 }
 
 .vault-coach-learning-map-legend-mark.is-concept-node::before,
-.vault-coach-learning-map-legend-mark.is-structural-node::before {
+.vault-coach-learning-map-legend-mark.is-structural-node::before,
+.vault-coach-learning-map-legend-mark.is-tag-node::before {
     top: 50%;
     left: 50%;
     width: 0.7rem;
@@ -1068,6 +1069,11 @@
 .vault-coach-learning-map-legend-mark.is-structural-node::before {
     border-color: #a1a9b9;
     background: #a1a9b9;
+}
+
+.vault-coach-learning-map-legend-mark.is-tag-node::before {
+    border-color: #d8a55b;
+    background: #d8a55b;
 }
 
 .vault-coach-learning-map-legend-mark.is-structural::before {
