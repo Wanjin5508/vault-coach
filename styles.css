@@ -853,10 +853,11 @@
 
 .vault-coach-learning-map-edge {
     stroke: var(--text-muted);
-    stroke-width: 1.8;
-    opacity: 0.62;
+    stroke-width: 1.5;
+    opacity: 0.5;
     vector-effect: non-scaling-stroke;
     cursor: pointer;
+    transition: opacity 120ms ease, stroke-width 120ms ease, stroke 120ms ease;
 }
 
 .vault-coach-learning-map-edge.is-user {
@@ -870,12 +871,23 @@
     opacity: 1;
 }
 
+.vault-coach-learning-map-edge.is-adjacent {
+    stroke: var(--interactive-accent);
+    stroke-width: 2.3;
+    opacity: 1;
+}
+
+.vault-coach-learning-map-edge.is-muted {
+    opacity: 0.12;
+}
+
 .vault-coach-learning-map-arrow {
     fill: var(--text-muted);
 }
 
 .vault-coach-learning-map-node {
     cursor: pointer;
+    transition: opacity 120ms ease;
 }
 
 .vault-coach-learning-map-node circle {
@@ -898,6 +910,16 @@
     fill: var(--interactive-accent);
 }
 
+.vault-coach-learning-map-node.is-hovered circle,
+.vault-coach-learning-map-node.is-neighbour circle {
+    stroke-width: 3.3;
+    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--interactive-accent) 55%, transparent));
+}
+
+.vault-coach-learning-map-node.is-muted {
+    opacity: 0.3;
+}
+
 .vault-coach-learning-map-node text {
     fill: var(--text-normal);
     font-size: 13px;
@@ -906,10 +928,27 @@
     paint-order: stroke;
     stroke: var(--background-primary-alt);
     stroke-width: 3px;
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+
+.vault-coach-learning-map-node.is-connected text,
+.vault-coach-learning-map-node.is-selected text,
+.vault-coach-learning-map-node.is-hovered text,
+.vault-coach-learning-map-node.is-neighbour text {
+    opacity: 1;
 }
 
 .vault-coach-learning-map-node.is-selected text {
     fill: var(--text-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vault-coach-learning-map-edge,
+    .vault-coach-learning-map-node,
+    .vault-coach-learning-map-node text {
+        transition: none;
+    }
 }
 
 .vault-coach-learning-map-evidence {

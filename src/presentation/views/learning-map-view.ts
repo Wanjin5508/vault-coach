@@ -110,6 +110,7 @@ export class LearningMapView extends ItemView {
         this.renderer = new LearningGraphRenderer(graph, {
             nodes: projection.nodes,
             edges: projection.edges,
+            accessibleTitle: this.t("learningMap.a11yTitle"),
             selectedNodeId: this.selectedNodeId,
             selectedEdgeId: this.selectedEdgeId,
             onSelectNode: (nodeId) => {
@@ -142,6 +143,15 @@ export class LearningMapView extends ItemView {
         structure.addEventListener("change", () => { this.controller.setStructuralContext(structure.checked); void this.refresh(); });
         const fit = toolbar.createEl("button", { text: this.t("learningMap.fit") });
         fit.addEventListener("click", () => this.renderer?.fit());
+        if (this.controller.canGoBack()) {
+            const back = toolbar.createEl("button", { text: this.t("learningMap.back") });
+            back.addEventListener("click", () => {
+                if (!this.controller.goBack()) return;
+                this.selectedNodeId = null;
+                this.selectedEdgeId = null;
+                void this.refresh();
+            });
+        }
         const reset = toolbar.createEl("button", { text: this.t("learningMap.reset") });
         reset.addEventListener("click", () => {
             this.controller.reset();
