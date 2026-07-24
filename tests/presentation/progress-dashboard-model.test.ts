@@ -6,7 +6,7 @@ import { translate } from "../../src/i18n";
 
 describe("createProgressDashboardModel", () => {
     it("turns current local Progress facts into bounded display cards", () => {
-        const model = createProgressDashboardModel(createSnapshot(), createState(), createCapacity());
+        const model = createProgressDashboardModel(createSnapshot(), createState(), createCapacity(), english);
 
         expect(model.cards).toEqual(expect.arrayContaining([
             expect.objectContaining({ id: "concepts", value: "3", tone: "neutral" }),
@@ -39,7 +39,12 @@ describe("createProgressDashboardModel", () => {
             },
             assessments: { status: "unavailable", message: "History unavailable.", sessionCount: 0, scoredSessionCount: 0, latestSessionAt: null },
         });
-        const model = createProgressDashboardModel(snapshot, createState({ dirty: true }), createCapacity("service-preferred"));
+        const model = createProgressDashboardModel(
+            snapshot,
+            createState({ dirty: true }),
+            createCapacity("service-preferred"),
+            english,
+        );
 
         expect(model.cards.find((card) => card.id === "coverage")).toMatchObject({ value: "Not calculated", tone: "warning" });
         expect(model.cards.find((card) => card.id === "concepts")).toMatchObject({ value: "Unavailable", tone: "error" });
@@ -78,6 +83,10 @@ describe("createProgressDashboardModel", () => {
         expect(model.cards.map((card) => card.detail).join(" ")).not.toContain("Mastery data is unavailable.");
     });
 });
+
+const english = (key: Parameters<typeof translate>[0], replacements?: Record<string, string | number>) => (
+    translate(key, replacements, "en")
+);
 
 function createSnapshot(overrides: Partial<ProgressSnapshot> = {}): ProgressSnapshot {
     return {
