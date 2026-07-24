@@ -1,5 +1,6 @@
 import type { App } from "obsidian";
 import { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
+import { DeterministicGraphBuilder } from "../domain/graph/deterministic-graph-builder";
 import { ExamEngine } from "../exam/exam-engine";
 import { ExamSessionStore } from "../exam/exam-session-store";
 import { EXAM_EVALUATION_PROMPT_VERSION, ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
@@ -11,12 +12,24 @@ import {
 import { VaultKnowledgeBase } from "../knowledge-base";
 import { LocalModelClient } from "../model-client";
 import { ObsidianDocumentFileMetadataReader } from "../infrastructure/obsidian/obsidian-document-file-metadata-reader";
+import { ObsidianGraphSourceReader } from "../infrastructure/obsidian/obsidian-graph-source-reader";
+import { JsonGraphStore } from "../infrastructure/storage/json-graph-store";
+import { JsonSemanticGraphStore } from "../infrastructure/storage/json-semantic-graph-store";
+import { JsonMasteryStore } from "../infrastructure/storage/json-mastery-store";
+import { StorageFootprintReporter } from "../infrastructure/storage/storage-footprint-reporter";
 import { LongTermMemoryService } from "../memory/memory-service";
 import { VaultCoachPersistentStore } from "../persistent-store";
 import { AdvancedRagEngine } from "../rag-engine";
 import { EmbeddedExactVectorStore } from "../vector-store";
 import { ChatService } from "./chat/chat-service";
 import { KnowledgeIndexCoordinator } from "./index/knowledge-index-coordinator";
+import { KnowledgeGraphService } from "./graph/knowledge-graph-service";
+import { ConceptExtractionService } from "./semantic-graph/concept-extraction-service";
+import { SemanticGraphService } from "./semantic-graph/semantic-graph-service";
+import { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
+import { ServiceLearningGraphSource } from "./learning-graph/learning-graph-source";
+import { MasteryService } from "./mastery/mastery-service";
+import { ProgressService } from "./progress/progress-service";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
@@ -24,6 +37,7 @@ import type { VaultCoachSettings } from "./config/settings-types";
 import type { ExamEvaluationMetadata, ExamScopeSelection } from "../domain/exam/exam-types";
 import type { AssessmentSessionStore } from "../domain/assessment/assessment-types";
 import type { VectorStore } from "../domain/retrieval/retrieval-types";
+import type { StorageFootprint } from "../domain/index-lifecycle/storage-footprint";
 
 /** Host callbacks needed to connect application services to the Obsidian plugin lifecycle. */
 export interface ApplicationContainerDependencies {
@@ -45,6 +59,7 @@ export interface ApplicationContainerDependencies {
     rebuildIndex(signal?: AbortSignal): Promise<void>;
     clearIndex(): Promise<void>;
     abortIndex(): void;
+    getStorageFootprint(): Promise<StorageFootprint>;
 }
 
 /** Concrete services retained for the legacy plugin adapter during incremental migration. */
@@ -60,7 +75,13 @@ export interface ApplicationContainerServices {
     assessmentEventFactory: AssessmentEventFactory;
     memoryService: LongTermMemoryService;
     persistentStore: VaultCoachPersistentStore;
+    storageFootprintReporter: StorageFootprintReporter;
     indexCoordinator: KnowledgeIndexCoordinator;
+    knowledgeGraphService: KnowledgeGraphService;
+    semanticGraphService: SemanticGraphService;
+    learningGraphQueryService: LearningGraphQueryService;
+    masteryService: MasteryService;
+    progressService: ProgressService;
 }
 
 /**
@@ -78,6 +99,7 @@ export interface ApplicationContainer {
 
 export function createApplicationContainer(dependencies: ApplicationContainerDependencies): ApplicationContainer {
     const persistentStore = new VaultCoachPersistentStore(dependencies.app, dependencies.pluginId);
+    const storageFootprintReporter = new StorageFootprintReporter(dependencies.app.vault.adapter, persistentStore);
     const knowledgeBase = new VaultKnowledgeBase(dependencies.app, () => dependencies.getSettings());
     const vectorStore = new EmbeddedExactVectorStore(persistentStore);
     const chatService = new ChatService(() => dependencies.getSettings());
@@ -93,13 +115,6 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         () => chatService.getMessagesForMemory(),
         ragEngine,
     );
-    const examEngine = new ExamEngine(
-        dependencies.app,
-        knowledgeBase,
-        new ObsidianDocumentFileMetadataReader(dependencies.app),
-        () => dependencies.getSettings(),
-        () => dependencies.getCloudApiKey(),
-    );
     const examEvaluationService = new ExamEvaluationService(
         new LocalModelClient(
             () => dependencies.getSettings(),
@@ -111,6 +126,46 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         (key, replacements) => dependencies.translate(key, replacements),
     );
     const assessmentSessionStore = new JsonAssessmentSessionStore(dependencies.app.vault.adapter);
+    const knowledgeGraphService = new KnowledgeGraphService(
+        new ObsidianGraphSourceReader(dependencies.app, knowledgeBase),
+        new DeterministicGraphBuilder(),
+        new JsonGraphStore(dependencies.app.vault.adapter),
+    );
+    const semanticModelClient = new LocalModelClient(
+        () => dependencies.getSettings(),
+        () => dependencies.getCloudApiKey(),
+    );
+    const semanticGraphService = new SemanticGraphService({
+        graphService: knowledgeGraphService,
+        documentIndex: knowledgeBase,
+        store: new JsonSemanticGraphStore(dependencies.app.vault.adapter),
+        extractionService: new ConceptExtractionService(semanticModelClient),
+        embeddingGateway: semanticModelClient,
+        getSettings: () => dependencies.getSettings(),
+        getVectorIndexStats: () => ragEngine.getVectorIndexStats(),
+    });
+    const learningGraphQueryService = new LearningGraphQueryService(
+        new ServiceLearningGraphSource(knowledgeGraphService, semanticGraphService),
+    );
+    const examEngine = new ExamEngine(
+        dependencies.app,
+        knowledgeBase,
+        new ObsidianDocumentFileMetadataReader(dependencies.app),
+        () => dependencies.getSettings(),
+        () => dependencies.getCloudApiKey(),
+        () => learningGraphQueryService.getConceptIdsByChunk(),
+    );
+    const masteryService = new MasteryService({
+        assessmentSessionStore,
+        catalogReader: learningGraphQueryService,
+        store: new JsonMasteryStore(dependencies.app.vault.adapter),
+        getCapacityAssessment: () => semanticGraphService.getCapacityAssessment(),
+    });
+    const progressService = new ProgressService({
+        catalogReader: learningGraphQueryService,
+        masteryReader: masteryService,
+        assessmentSessionStore,
+    });
     let assessmentEventSequence = 0;
     const assessmentEventFactory = new AssessmentEventFactory({
         createEventId: () => createAssessmentEventId(assessmentEventSequence++),
@@ -159,6 +214,12 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         rebuildIndex: (signal) => dependencies.rebuildIndex(signal),
         clearIndex: () => dependencies.clearIndex(),
         abortIndex: () => dependencies.abortIndex(),
+        getStorageFootprint: () => dependencies.getStorageFootprint(),
+        knowledgeGraphService,
+        semanticGraphService,
+        learningGraphQueryService,
+        masteryService,
+        progressService,
     });
     application = applicationInstance;
 
@@ -176,7 +237,13 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             assessmentEventFactory,
             memoryService,
             persistentStore,
+            storageFootprintReporter,
             indexCoordinator,
+            knowledgeGraphService,
+            semanticGraphService,
+            learningGraphQueryService,
+            masteryService,
+            progressService,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();

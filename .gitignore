@@ -18,7 +18,7 @@ main.js
 # obsidian
 data.json
 
-# Vault-local exam facts, reports, and recovery files
+# Vault-local generated facts, reports, graph snapshots, and recovery files
 .vault-coach/
 
 # Exclude macOS Finder (System Explorer) View States

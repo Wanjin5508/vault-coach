@@ -1,0 +1,44 @@
+[
+  {
+    "documentId": "markdown:notes/details.md",
+    "filePath": "notes/details.md",
+    "documentType": "markdown",
+    "title": "details",
+    "contentHash": "fixture-details",
+    "modifiedAt": 1704164645000,
+    "sections": [],
+    "links": [],
+    "embeds": [],
+    "tags": []
+  },
+  {
+    "documentId": "markdown:notes/overview.md",
+    "filePath": "notes/overview.md",
+    "documentType": "markdown",
+    "title": "overview",
+    "contentHash": "fixture-overview",
+    "modifiedAt": 1704164645000,
+    "sections": [],
+    "links": [
+      {
+        "targetFilePath": "notes/details.md",
+        "chunkIds": [],
+        "startLine": 3,
+        "startColumn": 0,
+        "endLine": 3,
+        "endColumn": 19
+      }
+    ],
+    "embeds": [],
+    "tags": [
+      {
+        "rawName": "#retrieval",
+        "chunkIds": [],
+        "startLine": 4,
+        "startColumn": 0,
+        "endLine": 4,
+        "endColumn": 10
+      }
+    ]
+  }
+]

@@ -18,7 +18,7 @@ import type { DocumentIndexReader } from "../domain/documents/document-index-rea
 import type { VaultCoachSettings } from "../app/config/settings-types";
 import { ExamBlueprintService } from "./exam-blueprint-service";
 import { ExamContentProfiler, EXAM_CONTENT_PROFILE_PROMPT_VERSION } from "./exam-content-profiler";
-import { ExamQuestionGenerator, ExamQuestionGenerationResult } from "./exam-question-generator";
+import { ExamQuestionGenerator, type ExamConceptIdsByChunk, ExamQuestionGenerationResult } from "./exam-question-generator";
 import { ExamQuestionValidator } from "./exam-question-validator";
 import { ExamProfileStore } from "./exam-profile-store";
 import { ExamResolvedScope, ExamScopeService } from "./exam-scope-service";
@@ -46,6 +46,7 @@ export class ExamEngine {
         fileMetadataReader: DocumentFileMetadataReader,
         getSettings: () => VaultCoachSettings,
         getCloudApiKey: () => string | null,
+        private readonly getConceptIdsByChunk: () => ExamConceptIdsByChunk = () => new Map(),
     ) {
         this.documentIndex = documentIndex;
         this.getSettings = getSettings;
@@ -240,6 +241,7 @@ export class ExamEngine {
                     total,
                 });
             },
+            this.getConceptIdsByChunk(),
         );
         durations.generationMs = Date.now() - generationStart;
         durations.validationMs = durations.generationMs;

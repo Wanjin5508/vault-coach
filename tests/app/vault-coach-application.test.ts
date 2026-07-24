@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { VaultCoachApplication, type VaultCoachApplicationDependencies } from "../../src/app/vault-coach-application";
 import { AssessmentEventFactory } from "../../src/domain/assessment/assessment-event-factory";
+import { DeterministicGraphBuilder } from "../../src/domain/graph/deterministic-graph-builder";
+import { KnowledgeGraphService, type GraphSourceReader } from "../../src/app/graph/knowledge-graph-service";
+import type { GraphStore } from "../../src/domain/graph/graph-store";
+import type { GraphSnapshotV1, GraphSourceDocument } from "../../src/domain/graph/graph-types";
 import type { AssessmentExamHistoryItem, AssessmentSessionDocumentV1 } from "../../src/domain/assessment/assessment-types";
 import type { ExamEvaluation, ExamSession } from "../../src/domain/exam/exam-types";
 import type { MarkdownExamHistoryRecord } from "../../src/exam/exam-session-store";
+import type { MasteryService } from "../../src/app/mastery/mastery-service";
+import type { ProgressService } from "../../src/app/progress/progress-service";
 
 describe("VaultCoachApplication", () => {
     it("publishes grouped chat use-case events without a presentation dependency", async () => {
@@ -26,6 +32,134 @@ describe("VaultCoachApplication", () => {
         expect(appendUserMessage).toHaveBeenCalledWith("问题");
         expect(events).toEqual(["conversation-changed", "conversation-changed"]);
         expect(application.progress.isAvailable()).toBe(false);
+    });
+
+    it("exposes the Progress read model only through the application facade", async () => {
+        const progressSnapshot = { marker: "progress-read-model" };
+        const getSnapshot = vi.fn(async () => progressSnapshot);
+        const application = new VaultCoachApplication({
+            chatService: {
+                getMessages: () => [],
+                appendUserMessage: async () => undefined,
+                streamAssistantTurn: async () => ({ text: "", sources: [], retrievalModeUsed: "keyword", rewriteResult: { originalQuery: "", rewrittenQuery: "", useRewrite: false } }),
+                resetConversation: () => undefined,
+            },
+            progressService: { getSnapshot } as unknown as ProgressService,
+        } as unknown as VaultCoachApplicationDependencies);
+
+        expect(application.progress.isAvailable()).toBe(true);
+        await expect(application.progress.getSnapshot()).resolves.toBe(progressSnapshot);
+        expect(getSnapshot).toHaveBeenCalledOnce();
+    });
+
+    it("publishes semantic graph state immediately when a rebuild starts and again when it finishes", async () => {
+        let busy = false;
+        let completeRebuild: (() => void) | undefined;
+        const rebuildAll = vi.fn(async () => {
+            busy = true;
+            await new Promise<void>((resolve) => { completeRebuild = resolve; });
+            busy = false;
+        });
+        const application = new VaultCoachApplication({
+            chatService: {
+                getMessages: () => [],
+                appendUserMessage: async () => undefined,
+                streamAssistantTurn: async () => ({ text: "", sources: [], retrievalModeUsed: "keyword", rewriteResult: { originalQuery: "", rewrittenQuery: "", useRewrite: false } }),
+                resetConversation: () => undefined,
+            },
+            semanticGraphService: {
+                rebuildAll,
+                getState: () => ({ busy }),
+            },
+        } as unknown as VaultCoachApplicationDependencies);
+        const events: string[] = [];
+        application.subscribe((event) => events.push(event.type));
+
+        const rebuilding = application.semanticGraph.rebuild();
+
+        expect(application.semanticGraph.getState().busy).toBe(true);
+        expect(events).toEqual(["semantic-graph-state-changed"]);
+        completeRebuild?.();
+        await rebuilding;
+
+        expect(events).toEqual([
+            "semantic-graph-state-changed",
+            "semantic-graph-state-changed",
+        ]);
+    });
+
+    it("exposes graph rebuild and read APIs without leaking mutable snapshot state", async () => {
+        const store = new ApplicationGraphStore();
+        const graphService = new KnowledgeGraphService(createApplicationGraphReader(), new DeterministicGraphBuilder(), store);
+        const application = new VaultCoachApplication({
+            chatService: {
+                getMessages: () => [],
+                appendUserMessage: async () => undefined,
+                streamAssistantTurn: async () => ({ text: "", sources: [], retrievalModeUsed: "keyword", rewriteResult: { originalQuery: "", rewrittenQuery: "", useRewrite: false } }),
+                resetConversation: () => undefined,
+            },
+            knowledgeGraphService: graphService,
+        } as unknown as VaultCoachApplicationDependencies);
+        const events: string[] = [];
+        application.subscribe((event) => events.push(event.type));
+
+        const rebuilt = await application.graph.rebuild();
+        rebuilt.nodes.pop();
+        const snapshot = await application.graph.getSnapshot();
+        const edge = (await application.graph.findEdgesForNode("markdown:notes/overview.md"))
+            .find((candidate) => candidate.type === "links_to");
+        const nodesByPath = await application.graph.findNodesByDocumentPath("notes/overview.md");
+        const edgesBySource = await application.graph.findEdgesBySourceFile("notes/overview.md");
+        if (!snapshot || !edge) throw new Error("Expected graph API facts.");
+        edge.sources[0]?.chunkIds.push("mutated");
+
+        expect(snapshot.nodes).toHaveLength(3);
+        expect(await application.graph.getNode("markdown:notes/details.md")).toMatchObject({ type: "document" });
+        expect(nodesByPath).toEqual([expect.objectContaining({ id: "markdown:notes/overview.md", type: "document" })]);
+        expect(edgesBySource).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: "links_to", sourceNodeId: "markdown:notes/overview.md" }),
+        ]));
+        expect((await application.graph.findEdgesForNode("markdown:notes/overview.md"))
+            .find((candidate) => candidate.type === "links_to")?.sources[0]?.chunkIds).toEqual(["link-chunk"]);
+        expect(await application.graph.checkIntegrity()).toEqual({ valid: true, issues: [] });
+        expect(events).toEqual(["graph-state-changed"]);
+    });
+
+    it("invalidates cached Progress for index, effective graph, and Mastery source changes", async () => {
+        const progressInvalidate = vi.fn();
+        const store = new ApplicationGraphStore();
+        const graphService = new KnowledgeGraphService(createApplicationGraphReader(), new DeterministicGraphBuilder(), store);
+        const application = new VaultCoachApplication({
+            chatService: {
+                getMessages: () => [],
+                appendUserMessage: async () => undefined,
+                streamAssistantTurn: async () => ({ text: "", sources: [], retrievalModeUsed: "keyword", rewriteResult: { originalQuery: "", rewrittenQuery: "", useRewrite: false } }),
+                resetConversation: () => undefined,
+            },
+            knowledgeGraphService: graphService,
+            masteryService: {
+                rebuildAll: vi.fn(async () => ({ states: [] })),
+                clear: vi.fn(async () => undefined),
+                markDirty: vi.fn(),
+            } as unknown as MasteryService,
+            progressService: {
+                invalidate: progressInvalidate,
+            } as unknown as ProgressService,
+        } as unknown as VaultCoachApplicationDependencies);
+        const events: string[] = [];
+        application.subscribe((event) => events.push(event.type));
+
+        application.notifyIndexStateChanged();
+        await application.graph.rebuild();
+        await application.mastery.rebuild();
+
+        expect(progressInvalidate).toHaveBeenCalledTimes(3);
+        expect(events).toEqual([
+            "index-state-changed",
+            "graph-state-changed",
+            "mastery-state-changed",
+            "mastery-state-changed",
+        ]);
     });
 
     it("persists assessment facts before the Markdown projection and then notifies history", async () => {
@@ -72,6 +206,24 @@ describe("VaultCoachApplication", () => {
         expect(harness.callOrder).toEqual(["facts", "report"]);
     });
 
+    it("keeps the saved exam and report when derived mastery synchronization fails", async () => {
+        const masteryError = new Error("mastery cache unavailable");
+        const harness = createExamSaveHarness({ masterySyncError: masteryError });
+        const events: string[] = [];
+        const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        harness.application.subscribe((event) => events.push(event.type));
+
+        const saved = await harness.application.exam.saveSession(createScoredSession());
+
+        expect(saved.status).toBe("saved");
+        expect(harness.documents.get("session-1")?.assessmentEvents).toHaveLength(1);
+        expect(harness.writeAssessmentProjection).toHaveBeenCalledOnce();
+        expect(harness.syncMastery).toHaveBeenCalledOnce();
+        expect(harness.markMasteryDirty).toHaveBeenCalledOnce();
+        expect(events).toEqual(["mastery-state-changed", "exam-history-changed"]);
+        errorSpy.mockRestore();
+    });
+
     it("keeps automatic repeated saving idempotent and appends only a real re-evaluation", async () => {
         const harness = createExamSaveHarness();
         const first = createScoredSession();
@@ -90,6 +242,18 @@ describe("VaultCoachApplication", () => {
         expect(events[1]).toMatchObject({ id: "event-2", rawScore: 92, supersedesEventId: "event-1" });
         expect(harness.saveAssessmentDocument).toHaveBeenCalledTimes(2);
         expect(harness.writeAssessmentProjection).toHaveBeenCalledTimes(3);
+    });
+
+    it("invalidates cached Progress only when persisted Assessment facts change", async () => {
+        const progressInvalidate = vi.fn();
+        const harness = createExamSaveHarness({ progressInvalidate });
+        const first = createScoredSession();
+
+        await harness.application.exam.saveSession(first);
+        await harness.application.exam.saveSession(first);
+        await harness.application.exam.saveSession(createScoredSession({ score: 92, evaluatedAt: 200 }));
+
+        expect(progressInvalidate).toHaveBeenCalledTimes(2);
     });
 
     it("keeps submitSession report-free until the existing caller performs its automatic save", async () => {
@@ -158,6 +322,8 @@ interface ExamSaveHarnessOptions {
     saveFactsError?: Error;
     writeReportError?: Error;
     evaluate?: ReturnType<typeof vi.fn>;
+    masterySyncError?: Error;
+    progressInvalidate?: ReturnType<typeof vi.fn>;
 }
 
 function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
@@ -183,6 +349,11 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
     const deleteSession = vi.fn(async () => undefined);
     const deleteHistory = vi.fn(async () => undefined);
     const eventIds = ["event-1", "event-2", "event-3"];
+    const syncMastery = vi.fn(async () => {
+        if (options.masterySyncError) throw options.masterySyncError;
+        return { updated: true, recalculatedConceptIds: ["concept:rag"] };
+    });
+    const markMasteryDirty = vi.fn(() => undefined);
     const application = new VaultCoachApplication({
         chatService: {
             getMessages: () => [],
@@ -238,6 +409,17 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
             promptVersion: "evaluation/v2",
             evaluatedAt: 100,
         }),
+        ...(options.masterySyncError ? {
+            masteryService: {
+                syncForSession: syncMastery,
+                markDirty: markMasteryDirty,
+            },
+        } : {}),
+        ...(options.progressInvalidate ? {
+            progressService: {
+                invalidate: options.progressInvalidate,
+            },
+        } : {}),
     } as unknown as VaultCoachApplicationDependencies);
 
     return {
@@ -251,6 +433,8 @@ function createExamSaveHarness(options: ExamSaveHarnessOptions = {}) {
         deleteSession,
         deleteHistory,
         markdownHistoryRecords,
+        syncMastery,
+        markMasteryDirty,
     };
 }
 
@@ -313,5 +497,54 @@ function createEvaluation(overrides: { score?: number; evaluatedAt?: number } = 
                 evaluatedAt: overrides.evaluatedAt ?? 100,
             },
         }],
+    };
+}
+
+class ApplicationGraphStore implements GraphStore {
+    private snapshot: GraphSnapshotV1 | null = null;
+
+    async load(): Promise<GraphSnapshotV1 | null> {
+        return this.snapshot;
+    }
+
+    async save(snapshot: GraphSnapshotV1): Promise<void> {
+        this.snapshot = snapshot;
+    }
+
+    async clear(): Promise<void> {
+        this.snapshot = null;
+    }
+}
+
+function createApplicationGraphReader(): GraphSourceReader {
+    const documents: GraphSourceDocument[] = [{
+        documentId: "markdown:notes/details.md",
+        filePath: "notes/details.md",
+        documentType: "markdown",
+        title: "details",
+        contentHash: "details-hash",
+        modifiedAt: 1,
+        sections: [],
+        links: [],
+        embeds: [],
+        tags: [],
+    }, {
+        documentId: "markdown:notes/overview.md",
+        filePath: "notes/overview.md",
+        documentType: "markdown",
+        title: "overview",
+        contentHash: "overview-hash",
+        modifiedAt: 2,
+        sections: [],
+        links: [{ targetFilePath: "notes/details.md", chunkIds: ["link-chunk"] }],
+        embeds: [],
+        tags: [{ rawName: "#tag", chunkIds: [] }],
+    }];
+    return {
+        readAll: () => ({ documents, diagnostics: [] }),
+        readPaths: (filePaths) => ({
+            documents: documents.filter((document) => filePaths.includes(document.filePath)),
+            diagnostics: [],
+        }),
     };
 }

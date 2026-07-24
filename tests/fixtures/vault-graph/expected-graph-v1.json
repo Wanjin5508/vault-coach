@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "markdown:notes/details.md",
+      "type": "document",
+      "documentId": "markdown:notes/details.md",
+      "filePath": "notes/details.md",
+      "documentType": "markdown",
+      "title": "details",
+      "contentHash": "fixture-details",
+      "modifiedAt": 1704164645000
+    },
+    {
+      "id": "markdown:notes/overview.md",
+      "type": "document",
+      "documentId": "markdown:notes/overview.md",
+      "filePath": "notes/overview.md",
+      "documentType": "markdown",
+      "title": "overview",
+      "contentHash": "fixture-overview",
+      "modifiedAt": 1704164645000
+    },
+    {
+      "id": "tag:retrieval",
+      "type": "tag",
+      "normalizedName": "retrieval",
+      "displayName": "retrieval"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge:links_to:markdown:notes/overview.md:markdown:notes/details.md",
+      "sourceNodeId": "markdown:notes/overview.md",
+      "targetNodeId": "markdown:notes/details.md",
+      "type": "links_to",
+      "confidence": 0.95,
+      "origin": "obsidian-link",
+      "sources": [
+        {
+          "sourceFilePath": "notes/overview.md",
+          "sourceDocumentId": "markdown:notes/overview.md",
+          "sourceKind": "obsidian-link",
+          "targetFilePath": "notes/details.md",
+          "chunkIds": [],
+          "startLine": 3,
+          "startColumn": 0,
+          "endLine": 3,
+          "endColumn": 19
+        }
+      ]
+    },
+    {
+      "id": "edge:tagged_with:markdown:notes/overview.md:tag:retrieval",
+      "sourceNodeId": "markdown:notes/overview.md",
+      "targetNodeId": "tag:retrieval",
+      "type": "tagged_with",
+      "confidence": 0.8,
+      "origin": "obsidian-tag",
+      "sources": [
+        {
+          "sourceFilePath": "notes/overview.md",
+          "sourceDocumentId": "markdown:notes/overview.md",
+          "sourceKind": "obsidian-tag",
+          "chunkIds": [],
+          "startLine": 4,
+          "startColumn": 0,
+          "endLine": 4,
+          "endColumn": 10
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "documentCount": 2,
+    "sectionCount": 0,
+    "tagCount": 1,
+    "edgeCount": 2
+  }
+}
