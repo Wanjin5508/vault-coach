@@ -47,3 +47,5 @@ export function normalizePath(path: string): string {
         .replace(/^\//, "")
         .replace(/\/$/, "");
 }
+
+export function setIcon(_parent: HTMLElement, _iconId: string): void {}

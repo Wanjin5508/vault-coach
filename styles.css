@@ -21,23 +21,33 @@
 }
 
 .vault-coach-header {
+    position: relative;
+    z-index: 2;
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-m);
-    padding: 10px;
+    padding: 8px 10px;
     background: var(--background-secondary);
 }
 
 .vault-coach-header-top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 10px;
+    min-width: 0;
+    gap: 8px;
+}
+
+.vault-coach-header-title-and-mode {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    flex: 0 1 auto;
 }
 
 .vault-coach-header h3 {
     margin: 0;
     min-width: 0;
+    max-width: 8.5rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -77,9 +87,99 @@
     background: var(--interactive-accent);
 }
 
+.vault-coach-header-scope {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 5rem;
+    align-items: baseline;
+    gap: 4px;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+}
+
+.vault-coach-header-scope-label {
+    flex: 0 0 auto;
+}
+
+.vault-coach-header-scope-value {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-normal);
+    font-weight: 600;
+    text-overflow: ellipsis;
+}
+
+.vault-coach-header-icon-actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+}
+
+.vault-coach-header-icon-button {
+    position: relative;
+    display: inline-grid;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    place-items: center;
+    border-color: var(--background-modifier-border);
+    background: var(--background-primary-alt);
+    color: var(--text-muted);
+}
+
+.vault-coach-header-icon-button:hover,
+.vault-coach-header-icon-button:focus-visible,
+.vault-coach-header-icon-button[aria-expanded="true"] {
+    color: var(--text-normal);
+    border-color: var(--interactive-accent);
+    background: var(--background-modifier-hover);
+}
+
+.vault-coach-header-icon-button.is-attention::after {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 6px;
+    height: 6px;
+    border: 1px solid var(--background-secondary);
+    border-radius: 50%;
+    background: var(--text-warning);
+    content: "";
+}
+
+.vault-coach-header-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 8px;
+    z-index: 5;
+    display: none;
+    width: min(20rem, calc(100% - 16px));
+    box-sizing: border-box;
+    padding: 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-primary);
+    box-shadow: var(--shadow-s);
+}
+
+.vault-coach-header-popover.is-open {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vault-coach-header-popover-title {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-weight: 600;
+}
+
 .vault-coach-header-info-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
 }
 
@@ -153,12 +253,19 @@
     flex: 0 0 auto;
 }
 
-.vault-coach-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+.vault-coach-header-options-popover .vault-coach-retrieval-group {
+    width: 100%;
+    justify-content: space-between;
+}
+
+.vault-coach-header-options-popover > button {
+    align-self: flex-start;
+}
+
+.vault-coach-header-index-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
-    margin-top: 10px;
 }
 
 /* M5: sidebar routing only; the Dashboard itself remains a main-workspace View. */
