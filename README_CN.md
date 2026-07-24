@@ -7,7 +7,7 @@
 Vault Coach 是面向学习者、研究者和知识型团队的 Obsidian 插件。它支持 Markdown 与文本型 PDF、带引用的问答、限定范围的练习考试、可审核的概念图谱，以及基于考试证据的掌握度追踪。
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.3.4-1E90FF)
+![Version](https://img.shields.io/badge/version-1.4.0-1E90FF)
 ![Knowledge training](https://img.shields.io/badge/Knowledge-training-10b981)
 ![Privacy controls](https://img.shields.io/badge/Privacy-user--controlled-334155)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)

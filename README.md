@@ -7,7 +7,7 @@
 Vault Coach is an Obsidian plugin for learners, researchers, and teams who want to study from the notes they already maintain. It supports Markdown and text-based PDFs, cited Q&A, scoped practice exams, reviewable concept graphs, and evidence-based mastery tracking.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.3.4-1E90FF)
+![Version](https://img.shields.io/badge/version-1.4.0-1E90FF)
 ![Knowledge training](https://img.shields.io/badge/Knowledge-training-10b981)
 ![Privacy controls](https://img.shields.io/badge/Privacy-user--controlled-334155)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
