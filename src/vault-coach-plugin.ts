@@ -22,6 +22,7 @@ import { ProgressWorkspaceView } from "./presentation/views/progress-workspace-v
 import type { SourceInventoryStatus } from "./domain/index-lifecycle/source-inventory";
 import { ConfirmActionModal } from "./presentation/modals/confirm-action-modal";
 import { StorageFootprintModal } from "./presentation/modals/storage-footprint-modal";
+import { requestSemanticGraphCapacityDecision } from "./presentation/modals/semantic-graph-capacity-modal";
 
 /** Obsidian composition root: lifecycle, UI registration, and thin host adapters only. */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
@@ -255,12 +256,19 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
                     new Notice(this.t("semantic.building"));
                     return;
                 }
+                const capacity = this.runtime.application.semanticGraph.getState().capacity;
+                if (!await requestSemanticGraphCapacityDecision(this.app, capacity, (key, replacements) => this.t(key, replacements))) {
+                    return;
+                }
                 try {
                     await this.runtime.application.semanticGraph.rebuild();
                     new Notice(this.t("notice.semanticGraphUpdated"));
                     this.refreshAllViews();
-                } catch {
-                    new Notice(this.t("notice.semanticGraphBuildFailed"));
+                } catch (error: unknown) {
+                    const message = error instanceof Error && error.message.trim().length > 0
+                        ? error.message
+                        : this.t("notice.semanticGraphBuildFailed");
+                    new Notice(message, 10_000);
                 }
             },
         });

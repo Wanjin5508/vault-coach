@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ConceptExtractionService } from "../../../src/app/semantic-graph/concept-extraction-service";
 import { SemanticGraphService } from "../../../src/app/semantic-graph/semantic-graph-service";
 import { createSectionConceptCandidateId } from "../../../src/domain/semantic-graph/concept-candidate-fingerprint";
@@ -6,10 +6,49 @@ import type { DocumentIndexReader } from "../../../src/domain/documents/document
 import type { IndexedChunk } from "../../../src/domain/documents/document-types";
 import type { GraphSnapshotV1 } from "../../../src/domain/graph/graph-types";
 import type { SemanticGraphStore } from "../../../src/domain/semantic-graph/semantic-graph-store";
-import { createEmptySemanticGraphState, type SemanticGraphState } from "../../../src/domain/semantic-graph/semantic-graph-types";
+import { createEmptySemanticGraphState, type SectionExtractionRecord, type SemanticGraphState, type SemanticModelMetadata } from "../../../src/domain/semantic-graph/semantic-graph-types";
 import { createDefaultSettings } from "../../../src/settings";
+import type { SectionExtractionInput } from "../../../src/app/semantic-graph/section-extraction-input";
 
 describe("SemanticGraphService", () => {
+    it("exhausts every pending Section in fair document rounds and persists each checkpoint", async () => {
+        const store = new MemorySemanticStore();
+        const extracted: string[] = [];
+        const service = new SemanticGraphService({
+            graphService: { getSnapshot: () => multiSectionSnapshot() } as never,
+            documentIndex: multiSectionReader() as DocumentIndexReader,
+            store,
+            extractionService: {
+                extract: async (input: SectionExtractionInput, model: SemanticModelMetadata): Promise<SectionExtractionRecord> => {
+                    extracted.push(`${input.documentPath}:${input.headingPath.join(" > ")}`);
+                    return emptyExtraction(input, model);
+                },
+            } as never,
+            embeddingGateway: { embedTexts: async () => [] },
+            getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true, semanticGraphMaxSectionsPerRun: 1 }),
+            getNow: () => 10,
+        });
+        await service.load();
+
+        await service.rebuildAll();
+
+        // A second section in 00 must not prevent the first Section of 01 from
+        // entering the first two durable batches.
+        expect(extracted).toEqual([
+            "00-overview.md:Overview one",
+            "01-topic.md:Topic",
+            "00-overview.md:Overview two",
+        ]);
+        expect(store.state?.extractions).toHaveLength(3);
+        expect(store.saveCount).toBeGreaterThanOrEqual(4);
+        expect(service.getState().progress).toEqual({
+            totalSections: 3,
+            processedSections: 3,
+            queuedSections: 0,
+            failedSections: 0,
+        });
+    });
+
     it("builds evidence-backed candidates on explicit rebuild and promotes only confirmed relations", async () => {
         const store = new MemorySemanticStore();
         const sectionId = "section:doc:one";
@@ -142,6 +181,63 @@ describe("SemanticGraphService", () => {
         expect(service.getReviewProjection()).toMatchObject({ concepts: [], relations: [], candidates: [] });
     });
 
+    it("refuses a manual rebuild above the 500 semantic-window Lite limit", async () => {
+        const extract = vi.fn();
+        const service = new SemanticGraphService({
+            graphService: { getSnapshot: () => capacitySnapshot(501) } as never,
+            documentIndex: capacityReader() as DocumentIndexReader,
+            store: new MemorySemanticStore(),
+            extractionService: { extract } as never,
+            embeddingGateway: { embedTexts: async () => [] },
+            getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true }),
+        });
+        await service.load();
+
+        await expect(service.rebuildAll()).rejects.toThrow("semantic-input-count=501");
+        expect(extract).not.toHaveBeenCalled();
+    });
+
+    it("skips Lite-large sources by default and processes them only after an explicit opt-in", async () => {
+        let includeLargeFiles = false;
+        const extracted: string[] = [];
+        const stateChanged = vi.fn();
+        const service = new SemanticGraphService({
+            graphService: { getSnapshot: () => largeFileSnapshot() } as never,
+            documentIndex: largeFileReader() as DocumentIndexReader,
+            store: new MemorySemanticStore(),
+            extractionService: {
+                extract: async (input: SectionExtractionInput, model: SemanticModelMetadata): Promise<SectionExtractionRecord> => {
+                    extracted.push(input.documentPath);
+                    return emptyExtraction(input, model);
+                },
+            } as never,
+            embeddingGateway: { embedTexts: async () => [] },
+            getSettings: () => ({
+                ...createDefaultSettings(),
+                enableSemanticGraph: true,
+                semanticGraphMaxSectionsPerRun: 1,
+                semanticGraphIncludeLargeFiles: includeLargeFiles,
+            }),
+            onStateChanged: stateChanged,
+            getNow: () => 10,
+        });
+        await service.load();
+
+        await service.rebuildAll();
+        expect(extracted).toEqual(["notes/normal.md"]);
+        expect(service.getState().sourceScope).toMatchObject({
+            includedFileCount: 1,
+            skippedFileCount: 2,
+            skippedFilePaths: ["notes/large.md", "notes/large.pdf"],
+        });
+        expect(stateChanged).toHaveBeenCalled();
+
+        includeLargeFiles = true;
+        await service.rebuildAll();
+        expect(extracted).toEqual(["notes/normal.md", "notes/large.md", "notes/large.pdf"]);
+        expect(service.getState().sourceScope).toMatchObject({ skippedFileCount: 0 });
+    });
+
     it("prunes stale source-derived semantic facts while retaining the user decision audit", async () => {
         const store = new MemorySemanticStore();
         let currentSnapshot = snapshot("section:doc:one");
@@ -213,6 +309,60 @@ function snapshot(sectionId: string): GraphSnapshotV1 {
     };
 }
 
+function multiSectionSnapshot(): GraphSnapshotV1 {
+    return {
+        schemaVersion: 1,
+        nodes: [
+            section("section:00:one", "doc:00", "00-overview.md", "Overview one", "chunk:00:one"),
+            section("section:00:two", "doc:00", "00-overview.md", "Overview two", "chunk:00:two"),
+            section("section:01:topic", "doc:01", "01-topic.md", "Topic", "chunk:01:topic"),
+        ],
+        edges: [],
+        stats: { documentCount: 0, sectionCount: 3, tagCount: 0, edgeCount: 0 },
+    };
+}
+
+function largeFileSnapshot(): GraphSnapshotV1 {
+    return {
+        schemaVersion: 1,
+        nodes: [
+            section("section:large", "doc:large", "notes/large.md", "Large", "chunk:large"),
+            section("section:pdf", "doc:pdf", "notes/large.pdf", "Large PDF", "chunk:pdf"),
+            section("section:normal", "doc:normal", "notes/normal.md", "Normal", "chunk:normal"),
+        ],
+        edges: [],
+        stats: { documentCount: 3, sectionCount: 3, tagCount: 0, edgeCount: 0 },
+    };
+}
+
+function capacitySnapshot(count: number): GraphSnapshotV1 {
+    return {
+        schemaVersion: 1,
+        nodes: Array.from({ length: count }, (_value, index) => section(
+            `section:capacity:${index}`,
+            "doc:capacity",
+            "notes/capacity.md",
+            `Capacity ${index}`,
+            `chunk:capacity:${index}`,
+        )),
+        edges: [],
+        stats: { documentCount: 1, sectionCount: count, tagCount: 0, edgeCount: 0 },
+    };
+}
+
+function section(id: string, documentId: string, filePath: string, heading: string, chunkId: string): GraphSnapshotV1["nodes"][number] {
+    return {
+        id,
+        type: "section",
+        documentId,
+        filePath,
+        headingPath: [heading],
+        occurrence: 0,
+        chunkIds: [chunkId],
+        locator: { type: "markdown", filePath, heading },
+    };
+}
+
 function reader(): Pick<DocumentIndexReader, "getChunkById"> {
     const chunk: IndexedChunk = {
         id: "chunk-1",
@@ -227,6 +377,82 @@ function reader(): Pick<DocumentIndexReader, "getChunkById"> {
         contentKind: "native-text",
     };
     return { getChunkById: (id) => id === chunk.id ? chunk : null };
+}
+
+function multiSectionReader(): Pick<DocumentIndexReader, "getChunkById"> {
+    const chunks = [
+        indexedChunk("chunk:00:one", "doc:00", "00-overview.md", "Overview one"),
+        indexedChunk("chunk:00:two", "doc:00", "00-overview.md", "Overview two"),
+        indexedChunk("chunk:01:topic", "doc:01", "01-topic.md", "Topic"),
+    ];
+    return { getChunkById: (id) => chunks.find((chunk) => chunk.id === id) ?? null };
+}
+
+function largeFileReader(): Pick<DocumentIndexReader, "getChunkById" | "getFileRecord" | "readDocumentText"> {
+    const chunks: IndexedChunk[] = [
+        indexedChunk("chunk:large", "doc:large", "notes/large.md", "Large"),
+        {
+            ...indexedChunk("chunk:pdf", "doc:pdf", "notes/large.pdf", "Large PDF"),
+            documentType: "pdf" as const,
+            locator: { type: "pdf" as const, filePath: "notes/large.pdf", pageStart: 1 },
+        },
+        indexedChunk("chunk:normal", "doc:normal", "notes/normal.md", "Normal"),
+    ];
+    return {
+        getChunkById: (id) => chunks.find((chunk) => chunk.id === id) ?? null,
+        getFileRecord: (path) => ({
+            filePath: path,
+            documentType: path.endsWith(".pdf") ? "pdf" : "markdown",
+            contentHash: path,
+            ...(path.endsWith(".pdf") ? { fileSize: 20 * 1024 * 1024 + 1 } : {}),
+            chunkIds: chunks.filter((chunk) => chunk.filePath === path).map((chunk) => chunk.id),
+            indexedAt: 1,
+        }),
+        readDocumentText: async (path) => path === "notes/large.md" ? "x".repeat(60_001) : "normal source",
+    };
+}
+
+function capacityReader(): Pick<DocumentIndexReader, "getChunkById"> {
+    return {
+        getChunkById: (id) => {
+            const match = /^chunk:capacity:(\d+)$/.exec(id);
+            if (!match) return null;
+            const index = Number.parseInt(match[1] ?? "0", 10);
+            return indexedChunk(id, "doc:capacity", "notes/capacity.md", `Capacity ${index}`);
+        },
+    };
+}
+
+function indexedChunk(id: string, documentId: string, filePath: string, heading: string): IndexedChunk {
+    return {
+        id,
+        documentId,
+        documentType: "markdown",
+        filePath,
+        fileName: filePath,
+        headingPath: [heading],
+        text: `${heading} content`,
+        searchableText: `${heading} content`,
+        locator: { type: "markdown", filePath, heading },
+        contentKind: "native-text",
+    };
+}
+
+function emptyExtraction(input: SectionExtractionInput, model: SemanticModelMetadata): SectionExtractionRecord {
+    return {
+        id: input.id,
+        documentId: input.documentId,
+        documentPath: input.documentPath,
+        sectionId: input.sectionId,
+        headingPath: [...input.headingPath],
+        inputHash: input.inputHash,
+        extractorSignature: `${model.provider}:${model.modelName}:${model.promptVersion}:${model.schemaVersion}`,
+        candidates: [],
+        relations: [],
+        updatedAt: model.generatedAt,
+        lastError: null,
+        model: { ...model },
+    };
 }
 
 function reviewConcept(index: number) {
@@ -252,8 +478,12 @@ function reviewConcept(index: number) {
 }
 
 class MemorySemanticStore implements SemanticGraphStore {
+    saveCount = 0;
     constructor(public state: SemanticGraphState | null = null) {}
     async load(): Promise<SemanticGraphState | null> { return this.state; }
-    async save(state: SemanticGraphState): Promise<void> { this.state = JSON.parse(JSON.stringify(state)) as SemanticGraphState; }
+    async save(state: SemanticGraphState): Promise<void> {
+        this.saveCount += 1;
+        this.state = JSON.parse(JSON.stringify(state)) as SemanticGraphState;
+    }
     async clear(): Promise<void> { this.state = createEmptySemanticGraphState(0); }
 }

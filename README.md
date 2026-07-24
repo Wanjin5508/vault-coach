@@ -79,6 +79,8 @@ Pending or rejected candidates remain out of the Learning Map, so a visual conne
 
 <!-- Screenshot recommendation: add a full-width Learning Map screenshot. Show clustered concept nodes, varied node size, directional relationship arrows, the compact upper-right controls, bottom inspector, and legend. Avoid screenshots where labels overlap. -->
 
+![alt text](assets/screenshots/rebuild-concept-pbar.png)
+
 ### Follow evidence-based mastery
 
 The **Learning dashboard** summarizes confirmed concepts, assessment coverage, mastery distribution, and local data health. Mastery is derived from saved structured exam events and confirmed Concept bindings—not from a guess that a note was merely opened.

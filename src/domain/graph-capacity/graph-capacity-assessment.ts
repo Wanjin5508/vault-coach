@@ -13,12 +13,22 @@ interface CapacityThresholds {
 }
 
 const THRESHOLDS: Record<GraphCapacityMetric, CapacityThresholds> = {
-    "chunk-count": { warning: 8_000, servicePreferred: 25_000, serviceRequired: 50_000 },
-    "section-count": { warning: 1_000, servicePreferred: 2_500, serviceRequired: 5_000 },
-    "indexed-text-bytes": { warning: 10 * 1024 * 1024, servicePreferred: 25 * 1024 * 1024, serviceRequired: 50 * 1024 * 1024 },
-    "concept-count": { warning: 2_000, servicePreferred: 5_000, serviceRequired: 10_000 },
-    "semantic-relation-count": { warning: 10_000, servicePreferred: 25_000, serviceRequired: 100_000 },
-    "raw-vector-bytes": { warning: Number.POSITIVE_INFINITY, servicePreferred: 128 * 1024 * 1024, serviceRequired: 256 * 1024 * 1024 },
+    // One semantic input window needs at least one serial model request and
+    // often a second relation request. This is the primary Lite workload
+    // metric; raw file count alone does not predict a rebuild's duration.
+    // Lite's explicit local-build contract is based on the number of semantic
+    // model windows: 301–500 needs an acknowledgement, while >500 is refused.
+    "semantic-input-count": { warning: 300, servicePreferred: 500, serviceRequired: 500 },
+    // The remaining metrics are warning-only diagnostics. The explicit
+    // product contract is that a Vault with <=500 semantic windows can still
+    // be built locally after the user acknowledges the cost.
+    "semantic-input-characters": { warning: 10 * 1024 * 1024, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
+    "chunk-count": { warning: 8_000, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
+    "section-count": { warning: 1_000, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
+    "indexed-text-bytes": { warning: 10 * 1024 * 1024, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
+    "concept-count": { warning: 2_000, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
+    "semantic-relation-count": { warning: 10_000, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
+    "raw-vector-bytes": { warning: 128 * 1024 * 1024, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
 };
 
 const LEVELS: readonly Exclude<GraphCapacityLevel, "local">[] = [
@@ -29,11 +39,13 @@ const LEVELS: readonly Exclude<GraphCapacityLevel, "local">[] = [
 
 /**
  * Pure capacity policy. It does no Vault IO, model call, embedding, or graph
- * traversal, so it is safe to run before a semantic rebuild or auto-sync.
+ * traversal; callers may feed it counts derived from their cached snapshot.
  */
 export function assessGraphCapacity(input: GraphCapacityInput): GraphCapacityAssessment {
     const rawVectorBytes = estimateRawVectorBytes(input.vectorCount, input.vectorDimension);
     const metricValues: ReadonlyArray<[GraphCapacityMetric, number | null]> = [
+        ["semantic-input-count", input.semanticInputCount],
+        ["semantic-input-characters", input.semanticInputCharacters],
         ["chunk-count", input.chunkCount],
         ["section-count", input.sectionCount],
         ["indexed-text-bytes", input.indexedTextBytes],

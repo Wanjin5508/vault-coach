@@ -103,7 +103,6 @@ export class LearningGraphRenderer {
         this.canvas.classList.add("vault-coach-learning-map-canvas");
         this.canvas.setAttribute("role", "img");
         this.canvas.setAttribute("aria-label", options.accessibleTitle);
-        this.canvas.title = options.accessibleTitle;
         const context = this.canvas.getContext("2d");
         if (!context) throw new Error("Canvas 2D context is unavailable.");
         this.context = context;
@@ -177,7 +176,7 @@ export class LearningGraphRenderer {
         this.canvas.addEventListener("pointerleave", () => {
             if (this.drag) return;
             this.hoveredNodeId = null;
-            this.canvas.title = this.options.accessibleTitle;
+            this.canvas.removeAttribute("title");
             this.draw();
         });
         this.canvas.addEventListener("wheel", (event) => this.zoom(event), { passive: false });
@@ -202,7 +201,8 @@ export class LearningGraphRenderer {
             if (nodeId !== this.hoveredNodeId) {
                 this.hoveredNodeId = nodeId;
                 const node = nodeId ? this.options.nodes.find((item) => item.id === nodeId) : null;
-                this.canvas.title = node?.label ?? this.options.accessibleTitle;
+                if (node?.label) this.canvas.title = node.label;
+                else this.canvas.removeAttribute("title");
                 this.draw();
             }
             return;

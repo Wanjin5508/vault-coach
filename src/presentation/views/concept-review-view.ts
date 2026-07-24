@@ -12,6 +12,7 @@ import type {
 import { translate, type TranslationKey } from "../../i18n";
 import { ConceptForceGraph } from "../components/concept-force-graph";
 import { ConceptReviewController } from "../controllers/concept-review-controller";
+import { requestSemanticGraphCapacityDecision } from "../modals/semantic-graph-capacity-modal";
 
 /**
  * Main-workspace review surface. It renders at most one local projection and
@@ -96,6 +97,12 @@ export class ConceptReviewView extends ItemView {
                 text: state.capacity.level === "warning"
                     ? this.t("conceptReview.capacityWarning")
                     : this.t("conceptReview.capacityPaused"),
+            });
+        }
+        if (state.sourceScope.skippedFileCount > 0) {
+            root.createDiv({
+                cls: "vault-coach-concept-review-notice",
+                text: this.t("semantic.largeFilesSkipped", { count: state.sourceScope.skippedFileCount }),
             });
         }
         if (state.lastError) root.createDiv({ cls: "vault-coach-concept-review-warning", text: this.t("conceptReview.lastBuildFailed") });
@@ -362,12 +369,19 @@ export class ConceptReviewView extends ItemView {
 
     private async rebuildSemanticGraph(): Promise<void> {
         if (this.semanticRebuildInFlight || this.controller.getState().busy) return;
+        const capacity = this.controller.getState().capacity;
+        if (!await requestSemanticGraphCapacityDecision(this.app, capacity, (key, replacements) => this.t(key, replacements))) {
+            return;
+        }
         this.semanticRebuildInFlight = true;
         this.render();
         try {
             await this.controller.rebuild();
-        } catch {
-            new Notice(this.t("conceptReview.actionFailed"));
+        } catch (error: unknown) {
+            const message = error instanceof Error && error.message.trim().length > 0
+                ? error.message
+                : this.t("conceptReview.actionFailed");
+            new Notice(message, 10_000);
         } finally {
             this.semanticRebuildInFlight = false;
             await this.refresh();
@@ -376,17 +390,27 @@ export class ConceptReviewView extends ItemView {
 
     private renderSemanticBuildStatus(
         container: HTMLElement,
-        progress: { processedSections: number; queuedSections: number },
+        progress: { totalSections: number; processedSections: number; queuedSections: number },
     ): void {
         const status = container.createDiv({
             cls: "vault-coach-semantic-build-status",
             attr: { role: "status", "aria-live": "polite" },
         });
         status.createSpan({ cls: "vault-coach-thinking-spinner", attr: { "aria-hidden": "true" } });
-        const text = progress.queuedSections > 0
-            ? this.t("semantic.buildingProgress", { processed: progress.processedSections, total: progress.queuedSections })
+        const text = progress.totalSections > 0
+            ? this.t("semantic.buildingProgress", { processed: progress.processedSections, total: progress.totalSections })
             : this.t("semantic.building");
         status.createSpan({ text });
+        if (progress.totalSections > 0) {
+            status.createEl("progress", {
+                cls: "vault-coach-semantic-build-progress",
+                attr: {
+                    max: String(progress.totalSections),
+                    value: String(Math.min(progress.totalSections, progress.processedSections)),
+                },
+            });
+        }
+        status.createSpan({ cls: "vault-coach-semantic-build-wait", text: this.t("semantic.buildingWait") });
     }
 
     private formatRelationship(source: string, type: SemanticRelationType, target: string): string {

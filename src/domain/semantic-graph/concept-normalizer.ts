@@ -1,4 +1,8 @@
-/** Normalization is intentionally conservative: it helps candidate matching but never auto-merges concepts. */
+/**
+ * Conservative normalization defines exact term equality for display-level
+ * provenance aggregation. Similarity and merely related aliases never imply a
+ * merge without an explicit user decision.
+ */
 export function normalizeConceptName(value: string): string {
     return value
         .normalize("NFC")

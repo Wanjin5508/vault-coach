@@ -252,9 +252,21 @@ export interface SemanticGovernanceImpact {
 
 /** In-memory progress only; never persisted with semantic graph facts. */
 export interface SemanticGraphBuildProgress {
+    /** Total Sections that required model work when the current build began. */
+    totalSections: number;
+    /** Sections whose every extraction window completed successfully. */
     processedSections: number;
+    /** Sections not yet attempted in the current build. */
     queuedSections: number;
+    /** Sections that failed and will be retried by a later rebuild. */
     failedSections: number;
+}
+
+/** In-memory report of Lite source filtering for the most recent graph run. */
+export interface SemanticGraphSourceScope {
+    includedFileCount: number;
+    skippedFileCount: number;
+    skippedFilePaths: string[];
 }
 
 export interface SemanticGraphStateView {
@@ -265,6 +277,7 @@ export interface SemanticGraphStateView {
     lastError: string | null;
     stats: SemanticGraphStats;
     progress: SemanticGraphBuildProgress;
+    sourceScope: SemanticGraphSourceScope;
     capacity: GraphCapacityAssessment;
 }
 

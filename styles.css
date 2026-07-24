@@ -719,6 +719,16 @@
     animation: vault-coach-semantic-build-pulse 1.8s ease-in-out infinite;
 }
 
+.vault-coach-semantic-build-progress {
+    inline-size: min(12rem, 32vw);
+    block-size: 0.55rem;
+    accent-color: var(--interactive-accent);
+}
+
+.vault-coach-semantic-build-wait {
+    color: var(--text-muted);
+}
+
 .vault-coach-semantic-build-button {
     display: inline-flex;
     align-items: center;

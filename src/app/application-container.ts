@@ -143,6 +143,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         embeddingGateway: semanticModelClient,
         getSettings: () => dependencies.getSettings(),
         getVectorIndexStats: () => ragEngine.getVectorIndexStats(),
+        onStateChanged: () => application?.notifySemanticGraphStateChanged(),
     });
     const learningGraphQueryService = new LearningGraphQueryService(
         new ServiceLearningGraphSource(knowledgeGraphService, semanticGraphService),

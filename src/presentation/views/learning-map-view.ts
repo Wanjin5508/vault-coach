@@ -248,6 +248,9 @@ export class LearningMapView extends ItemView {
                 ? this.t("learningMap.capacityWarning")
                 : this.t("learningMap.capacityPaused") });
         }
+        if (semanticState.sourceScope.skippedFileCount > 0) {
+            info.createDiv({ text: this.t("semantic.largeFilesSkipped", { count: semanticState.sourceScope.skippedFileCount }) });
+        }
         const infoButton = this.createGraphControlButton(controls, "info", this.t("learningMap.info"));
         infoButton.addEventListener("click", () => togglePanel(info));
 
@@ -569,16 +572,26 @@ export class LearningMapView extends ItemView {
         return !this.disposed && revision === this.refreshRevision;
     }
 
-    private renderSemanticBuildStatus(container: HTMLElement, progress: { processedSections: number; queuedSections: number }): void {
+    private renderSemanticBuildStatus(container: HTMLElement, progress: { totalSections: number; processedSections: number; queuedSections: number }): void {
         const status = container.createDiv({
             cls: "vault-coach-semantic-build-status",
             attr: { role: "status", "aria-live": "polite" },
         });
         status.createSpan({ cls: "vault-coach-thinking-spinner", attr: { "aria-hidden": "true" } });
-        const text = progress.queuedSections > 0
-            ? this.t("learningMap.buildingProgress", { processed: progress.processedSections, total: progress.queuedSections })
+        const text = progress.totalSections > 0
+            ? this.t("learningMap.buildingProgress", { processed: progress.processedSections, total: progress.totalSections })
             : this.t("learningMap.building");
         status.createSpan({ text });
+        if (progress.totalSections > 0) {
+            status.createEl("progress", {
+                cls: "vault-coach-semantic-build-progress",
+                attr: {
+                    max: String(progress.totalSections),
+                    value: String(Math.min(progress.totalSections, progress.processedSections)),
+                },
+            });
+        }
+        status.createSpan({ cls: "vault-coach-semantic-build-wait", text: this.t("semantic.buildingWait") });
     }
 
     private relationLabel(type: LearningGraphRelationType): string {
