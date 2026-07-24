@@ -1,20 +1,18 @@
-export interface SemanticIndexProgress {
-    processedSections: number;
-    queuedSections: number;
-    failedSections: number;
-}
+import type { SemanticGraphBuildProgress } from "../../domain/semantic-graph/semantic-graph-types";
+
+export type SemanticIndexProgress = SemanticGraphBuildProgress;
 
 /** Serialises optional model work without sharing the text/vector index controller. */
 export class SemanticIndexCoordinator {
     private controller: AbortController | null = null;
     private active = false;
-    private progress: SemanticIndexProgress = { processedSections: 0, queuedSections: 0, failedSections: 0 };
+    private progress: SemanticIndexProgress = { totalSections: 0, processedSections: 0, queuedSections: 0, failedSections: 0 };
 
     start(signal?: AbortSignal): AbortSignal | null {
         if (this.active) return null;
         this.controller = signal ? null : new AbortController();
         this.active = true;
-        this.progress = { processedSections: 0, queuedSections: 0, failedSections: 0 };
+        this.progress = { totalSections: 0, processedSections: 0, queuedSections: 0, failedSections: 0 };
         return signal ?? this.controller?.signal ?? null;
     }
 

@@ -4,38 +4,42 @@ import type { GraphCapacityInput } from "../../../src/domain/graph-capacity/grap
 
 describe("assessGraphCapacity", () => {
     it("keeps exact threshold values local and makes warning-level auto sync opt out", () => {
-        expect(assessGraphCapacity(input({ chunkCount: 8_000 }))).toMatchObject({
+        expect(assessGraphCapacity(input({ semanticInputCount: 300 }))).toMatchObject({
             level: "local",
             allowManualSemanticBuild: true,
             allowAutomaticSemanticSync: true,
         });
-        expect(assessGraphCapacity(input({ chunkCount: 8_001 }))).toMatchObject({
+        expect(assessGraphCapacity(input({ semanticInputCount: 301 }))).toMatchObject({
             level: "warning",
             allowManualSemanticBuild: true,
             allowAutomaticSemanticSync: false,
-            reasons: [expect.objectContaining({ metric: "chunk-count", threshold: 8_000 })],
+            reasons: [expect.objectContaining({ metric: "semantic-input-count", threshold: 300 })],
         });
     });
 
-    it("uses the highest triggered level across independent local metrics", () => {
-        expect(assessGraphCapacity(input({ sectionCount: 2_501 }))).toMatchObject({
-            level: "service-preferred",
+    it("uses semantic window count as the local-build gate", () => {
+        expect(assessGraphCapacity(input({ semanticInputCount: 500 }))).toMatchObject({
+            level: "warning",
+            allowManualSemanticBuild: true,
+        });
+        expect(assessGraphCapacity(input({ semanticInputCount: 501 }))).toMatchObject({
+            level: "service-required",
             allowManualSemanticBuild: false,
             allowAutomaticSemanticSync: false,
         });
-        const assessment = assessGraphCapacity(input({ conceptCount: 10_001, chunkCount: 8_001 }));
+        const assessment = assessGraphCapacity(input({ conceptCount: 10_001, semanticInputCount: 301 }));
         expect(assessment).toMatchObject({
-            level: "service-required",
-            allowManualSemanticBuild: false,
+            level: "warning",
+            allowManualSemanticBuild: true,
         });
-        expect(assessment.reasons.some((reason) => reason.metric === "concept-count" && reason.level === "service-required")).toBe(true);
-        expect(assessment.reasons.some((reason) => reason.metric === "chunk-count" && reason.level === "warning")).toBe(true);
+        expect(assessment.reasons.some((reason) => reason.metric === "concept-count" && reason.level === "warning")).toBe(true);
+        expect(assessment.reasons.some((reason) => reason.metric === "semantic-input-count" && reason.level === "warning")).toBe(true);
     });
 
     it("estimates Float32 vector memory only when both cardinality and dimension are known", () => {
         expect(assessGraphCapacity(input({ vectorCount: 40_000, vectorDimension: 1_024 }))).toMatchObject({
             rawVectorBytes: 163_840_000,
-            level: "service-preferred",
+            level: "warning",
         });
         expect(assessGraphCapacity(input({ vectorCount: 40_000, vectorDimension: null }))).toMatchObject({
             rawVectorBytes: null,
@@ -52,6 +56,8 @@ function input(overrides: Partial<GraphCapacityInput> = {}): GraphCapacityInput 
         sectionCount: 1,
         structuralEdgeCount: 0,
         indexedTextBytes: 1,
+        semanticInputCount: 1,
+        semanticInputCharacters: 1,
         extractionCount: 0,
         conceptCount: 0,
         candidateCount: 0,

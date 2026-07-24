@@ -53,6 +53,8 @@ export interface VaultCoachSettings {
     /** Explicit opt-in: semantic extraction may send Section excerpts to the selected model. */
     enableSemanticGraph: boolean;
     enableSemanticGraphAutoSync: boolean;
+    /** Opt in to model extraction from files beyond the Lite per-file safety limits. */
+    semanticGraphIncludeLargeFiles: boolean;
     semanticGraphMaxSectionsPerRun: number;
     semanticGraphMaxSectionCharacters: number;
     semanticGraphSimilarityTopK: number;

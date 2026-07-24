@@ -9,6 +9,10 @@ export interface GraphCapacityInput {
     sectionCount: number | null;
     structuralEdgeCount: number | null;
     indexedTextBytes: number | null;
+    /** Number of Section windows that would each require semantic model extraction. */
+    semanticInputCount: number | null;
+    /** Characters across the Section windows sent to semantic extraction. */
+    semanticInputCharacters: number | null;
     extractionCount: number | null;
     conceptCount: number | null;
     candidateCount: number | null;
@@ -25,6 +29,8 @@ export type GraphCapacityLevel =
     | "service-required";
 
 export type GraphCapacityMetric =
+    | "semantic-input-count"
+    | "semantic-input-characters"
     | "chunk-count"
     | "section-count"
     | "indexed-text-bytes"

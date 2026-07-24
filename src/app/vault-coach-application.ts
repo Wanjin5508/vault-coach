@@ -125,6 +125,11 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         this.emit({ type: "index-state-changed" });
     }
 
+    /** Publishes checkpoint progress from the semantic service to open views. */
+    notifySemanticGraphStateChanged(): void {
+        this.emit({ type: "semantic-graph-state-changed" });
+    }
+
     private createExamApi(): ExamApplicationApi {
         const dependencies = this.dependencies;
         return {

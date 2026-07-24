@@ -12,6 +12,8 @@ import {
     type SemanticEmbeddingRecord,
     type SemanticGraphState,
     type SemanticGraphStateView,
+    type SemanticGraphBuildProgress,
+    type SemanticGraphSourceScope,
     type SemanticGraphStats,
     type SemanticGovernanceImpact,
     type SemanticModelMetadata,
@@ -25,6 +27,7 @@ import type { KnowledgeBaseSyncResult } from "../../domain/documents/document-ty
 import type { DocumentIndexReader } from "../../domain/documents/document-index-reader";
 import type { VaultCoachSettings } from "../config/settings-types";
 import type { KnowledgeGraphService } from "../graph/knowledge-graph-service";
+import type { GraphSnapshotV1 } from "../../domain/graph/graph-types";
 import { ConceptExtractionService, CONCEPT_EXTRACTION_PROMPT_VERSION } from "./concept-extraction-service";
 import {
     BoundedLshConceptSimilarityIndex,
@@ -51,7 +54,14 @@ export interface SemanticGraphServiceDependencies {
     similarityIndex?: ConceptSimilarityIndex;
     getNow?(): number;
     getVectorIndexStats?(): Pick<VectorIndexStats, "vectorCount" | "dimension">;
+    /** Publishes in-memory progress without coupling this service to Obsidian UI. */
+    onStateChanged?(): void;
 }
+
+/** Lite defaults. Opting in to large sources keeps the global capacity gate. */
+export const SEMANTIC_GRAPH_LITE_MAX_MARKDOWN_CHARACTERS = 60_000;
+export const SEMANTIC_GRAPH_LITE_MAX_MARKDOWN_LINES = 1_500;
+export const SEMANTIC_GRAPH_LITE_MAX_PDF_BYTES = 20 * 1024 * 1024;
 
 /**
  * Coordinates optional model-backed semantic work while keeping M2 graph facts
@@ -66,6 +76,13 @@ export class SemanticGraphService {
     private dirty = false;
     private lastError: string | null = null;
     private similarityInitialized = false;
+    private sourceScope: SemanticGraphSourceScope = emptySourceScope();
+    private semanticInputCapacityCache: {
+        snapshot: GraphSnapshotV1;
+        maxCharactersPerWindow: number;
+        count: number;
+        characters: number;
+    } | null = null;
 
     constructor(private readonly dependencies: SemanticGraphServiceDependencies) {
         this.similarityIndex = dependencies.similarityIndex ?? new BoundedLshConceptSimilarityIndex();
@@ -124,10 +141,20 @@ export class SemanticGraphService {
             this.lastError = null;
             return;
         }
+        const targetPaths = new Set(snapshot.nodes
+            .filter((node) => node.type === "section")
+            .map((node) => node.filePath));
+        const sourcePlan = await this.createSourcePlan(
+            snapshot,
+            targetPaths,
+            this.dependencies.getSettings(),
+        );
+        this.sourceScope = sourcePlan.scope;
         const inputs = createSectionExtractionInputs(
             snapshot,
             this.dependencies.documentIndex,
             this.dependencies.getSettings().semanticGraphMaxSectionCharacters,
+            sourcePlan.includedPaths,
         );
         const validExtractionKeys = new Set(inputs.map((input) => `${input.sectionId}\u0000${input.inputHash}`));
         const extractions = persisted.extractions.filter((record) => validExtractionKeys.has(`${record.sectionId}\u0000${record.inputHash}`));
@@ -166,6 +193,8 @@ export class SemanticGraphService {
         this.state = createEmptySemanticGraphState(this.now());
         this.dirty = false;
         this.lastError = null;
+        this.sourceScope = emptySourceScope();
+        this.notifyStateChanged();
     }
 
     /**
@@ -234,6 +263,10 @@ export class SemanticGraphService {
             lastError: this.lastError,
             stats: this.getStats(),
             progress: this.coordinator.getProgress(),
+            sourceScope: {
+                ...this.sourceScope,
+                skippedFilePaths: [...this.sourceScope.skippedFilePaths],
+            },
             capacity: this.getCapacityAssessment(),
         };
     }
@@ -296,6 +329,10 @@ export class SemanticGraphService {
                 : knownFileSizes.every((size): size is number => typeof size === "number" && Number.isFinite(size) && size >= 0)
                     ? knownFileSizes.reduce((total, size) => total + (size ?? 0), 0)
                     : null;
+        const reader = this.dependencies.documentIndex as Partial<DocumentIndexReader>;
+        const semanticInputStats = snapshot && typeof reader.getChunkById === "function"
+            ? this.getSemanticInputCapacityStats(snapshot)
+            : null;
         const vectorStats = this.dependencies.getVectorIndexStats?.();
         const effective = this.projector.project(this.state);
         const indexStats = typeof this.dependencies.documentIndex.getStats === "function"
@@ -308,6 +345,8 @@ export class SemanticGraphService {
             sectionCount: snapshot?.stats.sectionCount ?? null,
             structuralEdgeCount: snapshot?.stats.edgeCount ?? null,
             indexedTextBytes,
+            semanticInputCount: semanticInputStats?.count ?? null,
+            semanticInputCharacters: semanticInputStats?.characters ?? null,
             extractionCount: this.state.extractions.length,
             conceptCount: this.state.concepts.length,
             candidateCount: this.state.candidates.length,
@@ -479,6 +518,7 @@ export class SemanticGraphService {
         }
         const signal = this.coordinator.start(providedSignal);
         if (!signal) throw new Error("语义概念图谱任务正在运行。");
+        this.notifyStateChanged();
         try {
             signal.throwIfAborted();
             const snapshot = this.dependencies.graphService.getSnapshot();
@@ -487,25 +527,28 @@ export class SemanticGraphService {
                 ...snapshot.nodes.filter((node) => node.type === "section").map((node) => node.filePath),
                 ...this.state.extractions.map((record) => record.documentPath),
             ]);
+            const sourcePlan = await this.createSourcePlan(snapshot, targetPaths, settings, signal);
+            this.sourceScope = sourcePlan.scope;
+            this.notifyStateChanged();
             const inputs = createSectionExtractionInputs(
                 snapshot,
                 this.dependencies.documentIndex,
                 settings.semanticGraphMaxSectionCharacters,
-                targetPaths,
+                sourcePlan.includedPaths,
             );
             const model = this.getModelMetadata();
-            const result = await this.refreshExtractions(inputs, targetPaths, model, signal);
-            this.coordinator.setProgress(result.progress);
             const previousConcepts = this.state.concepts;
-            this.state.extractions = result.extractions;
-            this.state.concepts = buildConcepts(result.extractions);
+            const result = await this.refreshExtractions(inputs, targetPaths, model, signal, mode === "manual", async (extractions, progress) => {
+                await this.persistExtractionCheckpoint(extractions);
+                this.coordinator.setProgress(progress);
+                this.notifyStateChanged();
+            }, (progress) => {
+                this.coordinator.setProgress(progress);
+                this.notifyStateChanged();
+            });
+            this.coordinator.setProgress(result.progress);
+            this.notifyStateChanged();
             const changedConceptIds = getChangedConceptIds(previousConcepts, this.state.concepts);
-            const priorNonModelCandidates = this.state.candidates.filter((candidate) => candidate.origin !== "model");
-            this.state.candidates = [
-                ...this.buildModelCandidates(result.extractions, this.state.concepts),
-                ...priorNonModelCandidates.filter((candidate) => this.state.concepts.some((concept) => concept.id === candidate.sourceConceptId)
-                    && this.state.concepts.some((concept) => concept.id === candidate.targetConceptId)),
-            ];
             await this.refreshEmbeddings(changedConceptIds, signal);
             await this.refreshSimilarityCandidates(changedConceptIds, model, signal);
             this.refreshRuleCandidates(changedConceptIds, model);
@@ -520,10 +563,88 @@ export class SemanticGraphService {
         } catch (error: unknown) {
             this.dirty = true;
             this.lastError = describeError(error);
+            this.notifyStateChanged();
             throw error;
         } finally {
             this.coordinator.finish();
+            this.notifyStateChanged();
         }
+    }
+
+    /**
+     * Applies the Lite per-file guard before creating semantic windows. It
+     * deliberately does not affect the global capacity assessment: a Vault
+     * that is huge overall should still be directed to the Docker service.
+     */
+    private async createSourcePlan(
+        snapshot: GraphSnapshotV1,
+        targetPaths: ReadonlySet<string>,
+        settings: VaultCoachSettings,
+        signal?: AbortSignal,
+    ): Promise<{ includedPaths: Set<string>; scope: SemanticGraphSourceScope }> {
+        const paths = Array.from(targetPaths).sort((left, right) => left.localeCompare(right));
+        if (settings.semanticGraphIncludeLargeFiles) {
+            return {
+                includedPaths: new Set(paths),
+                scope: { includedFileCount: paths.length, skippedFileCount: 0, skippedFilePaths: [] },
+            };
+        }
+        const reader = this.dependencies.documentIndex as Partial<DocumentIndexReader>;
+        const documentNodeByPath = new Map(snapshot.nodes
+            .filter((node): node is Extract<typeof node, { type: "document" }> => node.type === "document")
+            .map((node) => [node.filePath, node]));
+        const includedPaths = new Set<string>();
+        const skippedFilePaths: string[] = [];
+        for (const path of paths) {
+            signal?.throwIfAborted();
+            const record = reader.getFileRecord?.(path) ?? null;
+            const documentType = record?.documentType ?? documentNodeByPath.get(path)?.documentType ?? inferDocumentType(path);
+            if (documentType === "pdf" && typeof record?.fileSize === "number" && record.fileSize > SEMANTIC_GRAPH_LITE_MAX_PDF_BYTES) {
+                skippedFilePaths.push(path);
+                continue;
+            }
+            if (documentType === "markdown" && typeof reader.readDocumentText === "function") {
+                const text = await reader.readDocumentText(path);
+                if (text && (text.length > SEMANTIC_GRAPH_LITE_MAX_MARKDOWN_CHARACTERS
+                    || countLines(text) > SEMANTIC_GRAPH_LITE_MAX_MARKDOWN_LINES)) {
+                    skippedFilePaths.push(path);
+                    continue;
+                }
+            }
+            includedPaths.add(path);
+        }
+        return {
+            includedPaths,
+            scope: {
+                includedFileCount: includedPaths.size,
+                skippedFileCount: skippedFilePaths.length,
+                skippedFilePaths,
+            },
+        };
+    }
+
+    /** Avoid rebuilding every source window on each progress-driven UI refresh. */
+    private getSemanticInputCapacityStats(snapshot: GraphSnapshotV1): { count: number; characters: number } {
+        const maxCharactersPerWindow = this.dependencies.getSettings().semanticGraphMaxSectionCharacters;
+        const cached = this.semanticInputCapacityCache;
+        if (cached?.snapshot === snapshot && cached.maxCharactersPerWindow === maxCharactersPerWindow) {
+            return { count: cached.count, characters: cached.characters };
+        }
+        const inputs = createSectionExtractionInputs(
+            snapshot,
+            this.dependencies.documentIndex,
+            maxCharactersPerWindow,
+        );
+        const next = {
+            snapshot,
+            maxCharactersPerWindow,
+            count: inputs.length,
+            characters: inputs.reduce((total, input) => (
+                total + input.excerpts.reduce((excerptTotal, excerpt) => excerptTotal + excerpt.text.length, 0)
+            ), 0),
+        };
+        this.semanticInputCapacityCache = next;
+        return { count: next.count, characters: next.characters };
     }
 
     private async refreshExtractions(
@@ -531,9 +652,11 @@ export class SemanticGraphService {
         targetPaths: ReadonlySet<string>,
         model: SemanticModelMetadata,
         signal: AbortSignal,
+        exhaustively: boolean,
+        onCheckpoint: (extractions: SemanticGraphState["extractions"], progress: SemanticGraphBuildProgress) => Promise<void>,
+        onProgress: (progress: SemanticGraphBuildProgress) => void,
     ): Promise<{
-        extractions: SemanticGraphState["extractions"];
-        progress: { processedSections: number; queuedSections: number; failedSections: number };
+        progress: SemanticGraphBuildProgress;
         remainingSectionCount: number;
         failedSectionCount: number;
     }> {
@@ -541,51 +664,98 @@ export class SemanticGraphService {
         const inputsBySection = groupInputsBySection(inputs);
         const previousTargetBySection = groupRecordsBySection(this.state.extractions.filter((record) => targetPaths.has(record.documentPath)));
         const unchanged = this.state.extractions.filter((record) => !targetPaths.has(record.documentPath));
-        const sectionsNeedingWork = Array.from(inputsBySection.entries()).filter(([, sectionInputs]) => {
+        const sectionEntries = Array.from(inputsBySection.entries());
+        const sectionsNeedingWork = sectionEntries.filter(([, sectionInputs]) => {
             const cached = previousTargetBySection.get(sectionInputs[0]?.sectionId ?? "") ?? [];
             return sectionInputs.some((input) => !cached.some((record) => record.inputHash === input.inputHash && record.extractorSignature === signature && !record.lastError));
         });
-        const limit = Math.max(1, this.dependencies.getSettings().semanticGraphMaxSectionsPerRun);
-        const selectedSections = new Set(sectionsNeedingWork.slice(0, limit).map(([sectionId]) => sectionId));
-        const nextTarget: SemanticGraphState["extractions"] = [];
+        const recordsBySection = new Map<string, SemanticGraphState["extractions"]>(sectionEntries.map(([sectionId]) => [
+            sectionId,
+            previousTargetBySection.get(sectionId) ?? [],
+        ]));
+        const batchSize = Math.max(1, this.dependencies.getSettings().semanticGraphMaxSectionsPerRun);
+        const pendingSectionOrder = createFairSectionOrder(sectionsNeedingWork);
+        // Background sync remains bounded to avoid turning one large file edit
+        // into an unbounded automatic model job. An explicit rebuild exhausts
+        // the same queue in durable batches.
+        const sectionOrder = exhaustively
+            ? pendingSectionOrder
+            : pendingSectionOrder.slice(0, batchSize);
         let processedSections = 0;
         let failedSections = 0;
-        for (const [sectionId, sectionInputs] of inputsBySection) {
-            const existing = previousTargetBySection.get(sectionId) ?? [];
-            const needsWork = sectionsNeedingWork.some(([candidateSectionId]) => candidateSectionId === sectionId);
-            if (!needsWork) {
-                nextTarget.push(...existing);
-                continue;
-            }
-            if (!selectedSections.has(sectionId)) {
-                nextTarget.push(...existing);
-                continue;
-            }
-            try {
-                const extracted = [];
-                for (const input of sectionInputs) {
-                    signal.throwIfAborted();
-                    const cached = existing.find((record) => record.inputHash === input.inputHash && record.extractorSignature === signature && !record.lastError);
-                    extracted.push(cached ?? await this.dependencies.extractionService.extract(input, model, signal));
+        let attemptedSections = 0;
+        const buildExtractions = (): SemanticGraphState["extractions"] => [
+            ...unchanged,
+            ...Array.from(recordsBySection.values()).flat(),
+        ].sort((left, right) => left.id.localeCompare(right.id));
+        const buildProgress = (): SemanticGraphBuildProgress => ({
+            totalSections: pendingSectionOrder.length,
+            processedSections,
+            queuedSections: Math.max(0, pendingSectionOrder.length - attemptedSections),
+            failedSections,
+        });
+
+        // Publish the denominator before the first model request. This lets
+        // the UI distinguish a large, active queue from a stuck build.
+        onProgress(buildProgress());
+
+        // A manual rebuild is exhaustive. `semanticGraphMaxSectionsPerRun`
+        // bounds one durable checkpoint, rather than silently dropping every
+        // Section after the first batch. The fair order prevents a large file
+        // from delaying all other files.
+        if (sectionOrder.length === 0) {
+            await onCheckpoint(buildExtractions(), buildProgress());
+        }
+        for (let batchStart = 0; batchStart < sectionOrder.length; batchStart += batchSize) {
+            const batch = sectionOrder.slice(batchStart, batchStart + batchSize);
+            for (const sectionId of batch) {
+                const sectionInputs = inputsBySection.get(sectionId) ?? [];
+                const existing = recordsBySection.get(sectionId) ?? [];
+                try {
+                    const extracted: SemanticGraphState["extractions"] = [];
+                    for (const input of sectionInputs) {
+                        signal.throwIfAborted();
+                        const cached = existing.find((record) => record.inputHash === input.inputHash && record.extractorSignature === signature && !record.lastError);
+                        extracted.push(cached ?? await this.dependencies.extractionService.extract(input, model, signal));
+                    }
+                    recordsBySection.set(sectionId, extracted);
+                    processedSections += 1;
+                } catch (error: unknown) {
+                    failedSections += 1;
+                    console.warn("[VaultCoach] Section 概念抽取失败，保留上一次有效结果。", sectionId, error);
+                    recordsBySection.set(sectionId, existing.map((record) => ({ ...record, lastError: describeError(error) })));
                 }
-                nextTarget.push(...extracted);
-                processedSections += 1;
-            } catch (error: unknown) {
-                failedSections += 1;
-                console.warn("[VaultCoach] Section 概念抽取失败，保留上一次有效结果。", sectionId, error);
-                nextTarget.push(...existing.map((record) => ({ ...record, lastError: describeError(error) })));
+                attemptedSections += 1;
+                onProgress(buildProgress());
             }
+            await onCheckpoint(buildExtractions(), buildProgress());
         }
         return {
-            extractions: [...unchanged, ...nextTarget].sort((left, right) => left.id.localeCompare(right.id)),
-            progress: {
-                processedSections,
-                queuedSections: Math.max(0, sectionsNeedingWork.length - processedSections),
-                failedSections,
-            },
-            remainingSectionCount: Math.max(0, sectionsNeedingWork.length - selectedSections.size),
+            progress: buildProgress(),
+            remainingSectionCount: Math.max(0, pendingSectionOrder.length - sectionOrder.length),
             failedSectionCount: failedSections,
         };
+    }
+
+    /** Persists a coherent, resumable source-derived graph after every batch. */
+    private async persistExtractionCheckpoint(extractions: SemanticGraphState["extractions"]): Promise<void> {
+        const concepts = buildConcepts(extractions);
+        const conceptIds = new Set(concepts.map((concept) => concept.id));
+        const priorNonModelCandidates = this.state.candidates.filter((candidate) => candidate.origin !== "model");
+        const next: SemanticGraphState = {
+            ...this.state,
+            extractions,
+            concepts,
+            candidates: [
+                ...this.buildModelCandidates(extractions, concepts),
+                ...priorNonModelCandidates.filter((candidate) => conceptIds.has(candidate.sourceConceptId) && conceptIds.has(candidate.targetConceptId)),
+            ],
+            embeddings: this.state.embeddings.filter((embedding) => conceptIds.has(embedding.conceptId)),
+            updatedAt: this.now(),
+        };
+        this.assertIntegrity(next);
+        await this.dependencies.store.save(next);
+        this.state = next;
     }
 
     private buildModelCandidates(
@@ -887,6 +1057,10 @@ export class SemanticGraphService {
     private now(): number {
         return this.dependencies.getNow?.() ?? Date.now();
     }
+
+    private notifyStateChanged(): void {
+        this.dependencies.onStateChanged?.();
+    }
 }
 
 function groupInputsBySection(inputs: readonly SectionExtractionInput[]): Map<string, SectionExtractionInput[]> {
@@ -907,6 +1081,41 @@ function groupRecordsBySection(records: readonly SemanticGraphState["extractions
         grouped.set(record.sectionId, group);
     }
     return grouped;
+}
+
+/**
+ * Interleaves Section work across documents in a deterministic order. A single
+ * overview file can still have many Sections, but it cannot starve every other
+ * document from the first checkpoint batches.
+ */
+function createFairSectionOrder(entries: readonly [string, SectionExtractionInput[]][]): string[] {
+    const sectionIdsByDocument = new Map<string, string[]>();
+    for (const [sectionId, sectionInputs] of entries) {
+        const documentPath = sectionInputs[0]?.documentPath ?? "";
+        const sectionIds = sectionIdsByDocument.get(documentPath) ?? [];
+        sectionIds.push(sectionId);
+        sectionIdsByDocument.set(documentPath, sectionIds);
+    }
+    for (const sectionIds of sectionIdsByDocument.values()) {
+        sectionIds.sort((left, right) => left.localeCompare(right));
+    }
+    const documentPaths = Array.from(sectionIdsByDocument.keys()).sort((left, right) => left.localeCompare(right));
+    const nextIndexByDocument = new Map<string, number>();
+    const ordered: string[] = [];
+    let added = true;
+    while (added) {
+        added = false;
+        for (const documentPath of documentPaths) {
+            const sectionIds = sectionIdsByDocument.get(documentPath) ?? [];
+            const nextIndex = nextIndexByDocument.get(documentPath) ?? 0;
+            const sectionId = sectionIds[nextIndex];
+            if (!sectionId) continue;
+            ordered.push(sectionId);
+            nextIndexByDocument.set(documentPath, nextIndex + 1);
+            added = true;
+        }
+    }
+    return ordered;
 }
 
 function buildConcepts(extractions: readonly SemanticGraphState["extractions"][number][]): SemanticConcept[] {
@@ -1008,11 +1217,28 @@ function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+function emptySourceScope(): SemanticGraphSourceScope {
+    return { includedFileCount: 0, skippedFileCount: 0, skippedFilePaths: [] };
+}
+
+function inferDocumentType(filePath: string): "markdown" | "pdf" | "zotero" {
+    if (filePath.toLocaleLowerCase().endsWith(".pdf")) return "pdf";
+    if (filePath.toLocaleLowerCase().endsWith(".md")) return "markdown";
+    return "zotero";
+}
+
+function countLines(text: string): number {
+    if (text.length === 0) return 0;
+    let count = 1;
+    for (let index = 0; index < text.length; index += 1) if (text.charCodeAt(index) === 10) count += 1;
+    return count;
+}
+
 function createCapacityError(capacity: GraphCapacityAssessment, mode: "manual" | "automatic"): Error {
     const action = mode === "automatic" ? "自动语义同步" : "本地语义图重建";
-    const reason = capacity.reasons[0];
+    const reason = capacity.reasons.find((item) => item.metric === "semantic-input-count") ?? capacity.reasons[0];
     const detail = reason
         ? `${reason.metric}=${reason.actual}，超过 ${reason.level} 阈值 ${reason.threshold}`
         : "当前知识库规模超过本地处理预算";
-    return new Error(`${action}已停止：${detail}。现有图谱和问答/考试不受影响；请缩小知识范围，或在后续独立图谱服务可用时使用该服务。`);
+    return new Error(`${action}已停止：${detail}。现有图谱和问答/考试不受影响；请缩小知识范围，或改用 Docker 部署的 Knowledge Engine 图谱服务。`);
 }

@@ -3,6 +3,7 @@ import { normalizeConceptAlias, normalizeConceptAliases } from "./concept-normal
 import type {
     EffectiveSemanticGraph,
     EffectiveSemanticRelation,
+    ConceptEvidenceRef,
     SemanticAutoRelationPolicy,
     SemanticConcept,
     SemanticGraphState,
@@ -13,12 +14,29 @@ import type {
 export class SemanticGraphProjector {
     project(state: SemanticGraphState): EffectiveSemanticGraph {
         const activeDecisions = this.getActiveDecisions(state.decisions);
-        const redirects = this.buildRedirects(activeDecisions);
+        const redirects = this.buildDecisionRedirects(activeDecisions);
+        this.addExactNameRedirects(state.concepts, redirects);
         const resolve = (conceptId: string): string => this.resolveRedirect(conceptId, redirects);
         const aliasesByConcept = this.collectAliases(activeDecisions, resolve);
+        const conceptsById = new Map(state.concepts.map((concept) => [concept.id, concept]));
+        const membersByCanonicalId = new Map<string, SemanticConcept[]>();
+        for (const concept of state.concepts) {
+            const canonicalId = resolve(concept.id);
+            // A historical merge may reference a source concept that no longer
+            // exists. Preserve the existing inactive behaviour instead of
+            // inventing a new canonical node.
+            if (!conceptsById.has(canonicalId)) continue;
+            const members = membersByCanonicalId.get(canonicalId) ?? [];
+            members.push(concept);
+            membersByCanonicalId.set(canonicalId, members);
+        }
         const concepts = state.concepts
             .filter((concept) => resolve(concept.id) === concept.id)
-            .map((concept) => this.withDecisionAliases(concept, aliasesByConcept.get(concept.id) ?? []))
+            .map((concept) => this.withMergedEvidence(
+                concept,
+                membersByCanonicalId.get(concept.id) ?? [concept],
+                aliasesByConcept.get(concept.id) ?? [],
+            ))
             .sort((left, right) => left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id));
         const candidateDecisions = new Map<string, "confirm" | "reject">();
         for (const decision of activeDecisions) {
@@ -116,7 +134,8 @@ export class SemanticGraphProjector {
         });
     }
 
-    private buildRedirects(decisions: readonly UserSemanticDecision[]): Map<string, string> {
+    /** User governance always takes priority over automatic presentation grouping. */
+    private buildDecisionRedirects(decisions: readonly UserSemanticDecision[]): Map<string, string> {
         const redirects = new Map<string, string>();
         for (const decision of decisions) {
             if (decision.kind !== "merge-concepts") continue;
@@ -125,6 +144,40 @@ export class SemanticGraphProjector {
             }
         }
         return redirects;
+    }
+
+    /**
+     * Section-scoped extraction records are preserved in storage so their model
+     * output and provenance stay independently auditable. For the effective
+     * Learning Map, however, an exact normalized name is one display concept:
+     * all of its source-backed members contribute evidence to the same node.
+     *
+     * This is deliberately narrower than similarity/alias matching. Similar or
+     * differently named concepts remain distinct until the user explicitly
+     * merges them, while same-name concepts cannot make later files disappear
+     * behind the first file that happened to be processed.
+     */
+    private addExactNameRedirects(concepts: readonly SemanticConcept[], redirects: Map<string, string>): void {
+        const membersByName = new Map<string, SemanticConcept[]>();
+        for (const concept of concepts) {
+            const resolvedId = this.resolveRedirect(concept.id, redirects);
+            // A manual merge has already selected the semantic identity. Do not
+            // re-group a redirected member by its former source-local name.
+            if (resolvedId !== concept.id) continue;
+            const members = membersByName.get(concept.normalizedName) ?? [];
+            members.push(concept);
+            membersByName.set(concept.normalizedName, members);
+        }
+        for (const members of membersByName.values()) {
+            if (members.length < 2) continue;
+            const canonicalId = members
+                .map((concept) => concept.id)
+                .sort((left, right) => left.localeCompare(right))[0];
+            if (!canonicalId) continue;
+            for (const member of members) {
+                if (member.id !== canonicalId) redirects.set(member.id, canonicalId);
+            }
+        }
     }
 
     private resolveRedirect(conceptId: string, redirects: ReadonlyMap<string, string>): string {
@@ -152,12 +205,26 @@ export class SemanticGraphProjector {
         return new Map(Array.from(aliases.entries()).map(([conceptId, values]) => [conceptId, Array.from(values.values())]));
     }
 
-    private withDecisionAliases(concept: SemanticConcept, aliases: readonly string[]): SemanticConcept {
+    /**
+     * A user merge or an exact normalized-name match makes multiple
+     * source-backed concepts one effective display node. It retains every
+     * member's provenance. Similarity relations never call this path, so a
+     * candidate cannot manufacture evidence automatically.
+     */
+    private withMergedEvidence(
+        canonical: SemanticConcept,
+        members: readonly SemanticConcept[],
+        decisionAliases: readonly string[],
+    ): SemanticConcept {
         return {
-            ...concept,
-            aliases: normalizeConceptAliases([...concept.aliases, ...aliases], concept.displayName),
-            evidence: concept.evidence.map((evidence) => ({ ...evidence, locator: { ...evidence.locator } })),
-            sourceCandidateIds: [...concept.sourceCandidateIds],
+            ...canonical,
+            aliases: normalizeConceptAliases([
+                ...members.flatMap((concept) => concept.aliases),
+                ...decisionAliases,
+            ], canonical.displayName),
+            evidence: mergeEvidence(members.flatMap((concept) => concept.evidence)),
+            sourceCandidateIds: Array.from(new Set(members.flatMap((concept) => concept.sourceCandidateIds)))
+                .sort((left, right) => left.localeCompare(right)),
         };
     }
 
@@ -185,6 +252,24 @@ export class SemanticGraphProjector {
             candidateFingerprint: candidate.fingerprint,
         };
     }
+}
+
+function mergeEvidence(evidence: readonly ConceptEvidenceRef[]): ConceptEvidenceRef[] {
+    const byId = new Map<string, ConceptEvidenceRef>();
+    for (const item of evidence) {
+        const key = `${item.sectionId}\u0000${item.chunkId}\u0000${item.excerptId}`;
+        if (!byId.has(key)) byId.set(key, item);
+    }
+    return Array.from(byId.values())
+        .sort((left, right) => evidenceSortKey(left).localeCompare(evidenceSortKey(right)))
+        .map((item) => ({ ...item, locator: { ...item.locator } }));
+}
+
+function evidenceSortKey(evidence: ConceptEvidenceRef): string {
+    const locatorPath = evidence.locator.type === "zotero"
+        ? evidence.locator.itemKey
+        : evidence.locator.filePath;
+    return `${locatorPath}\u0000${evidence.sectionId}\u0000${evidence.chunkId}\u0000${evidence.excerptId}`;
 }
 
 function shouldAutoDisplay(

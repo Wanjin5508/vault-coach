@@ -3,7 +3,7 @@
 	"name": "Vault Coach",
 	"version": "1.4.0",
 	"minAppVersion": "1.11.4",
-	"description": "Build a reviewable knowledge graph from your Obsidian notes and PDFs. Explore concept relationships, ask cited questions, generate scoped exams, and track mastery through a Learning Map and dashboard.",
+	"description": "Local-first Q&A and exam practice across Markdown notes and PDFs, with cited answers, AI scoring, saved records, and Ollama or OpenAI-compatible models.",
 	"author": "Wanjin5508",
 	"authorUrl": "https://github.com/Wanjin5508",
 	"fundingUrl": "",

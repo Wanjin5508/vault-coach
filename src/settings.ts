@@ -95,6 +95,7 @@ export function createDefaultSettings(): VaultCoachSettings {
         enableExamSmartFiltering: true,
         enableSemanticGraph: false,
         enableSemanticGraphAutoSync: false,
+        semanticGraphIncludeLargeFiles: false,
         semanticGraphMaxSectionsPerRun: 30,
         semanticGraphMaxSectionCharacters: 9000,
         semanticGraphSimilarityTopK: 30,
@@ -222,7 +223,8 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             this.createRawHeadingDefinition("Semantic concept graph", "Optional concept extraction. Section excerpts and short Concept text are sent only to the model provider you selected."),
             this.createRawToggleDefinition("enableSemanticGraph", "Enable semantic concept graph", "Requires an explicit rebuild from the command palette; it is off by default."),
             this.createRawToggleDefinition("enableSemanticGraphAutoSync", "Update after index changes", "When enabled, only changed Sections are queued after a successful index sync."),
-            this.createRawNumericDefinition("semanticGraphMaxSectionsPerRun", "Maximum Sections per run", "Limits model work in one semantic graph task.", 30),
+            this.createRawToggleDefinition("semanticGraphIncludeLargeFiles", "Include large source files", "Off by default in Lite: Markdown over 60,000 characters or 1,500 lines and PDFs over 20 MB are skipped for semantic extraction."),
+            this.createRawNumericDefinition("semanticGraphMaxSectionsPerRun", "Semantic extraction batch size", "Number of Sections saved per checkpoint during an exhaustive manual rebuild.", 30),
             this.createRawNumericDefinition("semanticGraphMaxSectionCharacters", "Maximum characters per Section window", "Long Sections are split only at Chunk boundaries.", 9000),
             this.createRawNumericDefinition("semanticGraphSimilarityTopK", "Similarity candidates per Concept", "ANN lookups are bounded; the plugin never compares every Concept pair.", 30),
             this.createRawNumericDefinition("semanticGraphSimilarityThreshold", "Similarity threshold", "Only nearby Concept candidates above this cosine threshold are shown.", 0.86),
@@ -281,6 +283,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                 return this.updateExamSmartFiltering(value);
             case "enableSemanticGraph":
             case "enableSemanticGraphAutoSync":
+            case "semanticGraphIncludeLargeFiles":
                 return this.updateSemanticBooleanSetting(key, value);
             case "learningMapAutoRelationsEnabled":
             case "learningMapAutoIncludeRuleRelations":
@@ -547,7 +550,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
     }
 
     private async updateSemanticBooleanSetting(
-        key: "enableSemanticGraph" | "enableSemanticGraphAutoSync",
+        key: "enableSemanticGraph" | "enableSemanticGraphAutoSync" | "semanticGraphIncludeLargeFiles",
         value: unknown,
     ): Promise<void> {
         const enabled = this.getBooleanValue(value);
@@ -730,7 +733,14 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                 this.plugin.settings.enableSemanticGraphAutoSync = value;
                 await this.plugin.saveSettings();
             }));
-        this.addSemanticNumberSetting(containerEl, "Maximum Sections per run", "Limits model work in one task.", "semanticGraphMaxSectionsPerRun", 30);
+        new Setting(containerEl)
+            .setName("Include large source files")
+            .setDesc("Lite skips Markdown files over 60,000 characters or 1,500 lines, and PDF files over 20 megabytes by default. Turn this on only when you accept a longer model build.")
+            .addToggle((toggle) => toggle.setValue(this.plugin.settings.semanticGraphIncludeLargeFiles).onChange(async (value) => {
+                this.plugin.settings.semanticGraphIncludeLargeFiles = value;
+                await this.plugin.saveSettings();
+            }));
+        this.addSemanticNumberSetting(containerEl, "Semantic extraction batch size", "Number of Sections saved per checkpoint during an exhaustive manual rebuild.", "semanticGraphMaxSectionsPerRun", 30);
         this.addSemanticNumberSetting(containerEl, "Maximum characters per Section window", "Long Sections split at Chunk boundaries.", "semanticGraphMaxSectionCharacters", 9000);
         this.addSemanticNumberSetting(containerEl, "Similarity candidates per Concept", "Bounded ANN neighbours; there is no all-pairs comparison.", "semanticGraphSimilarityTopK", 30);
         new Setting(containerEl)
