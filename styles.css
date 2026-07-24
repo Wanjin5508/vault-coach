@@ -21,23 +21,33 @@
 }
 
 .vault-coach-header {
+    position: relative;
+    z-index: 2;
     border: 1px solid var(--background-modifier-border);
     border-radius: var(--radius-m);
-    padding: 10px;
+    padding: 8px 10px;
     background: var(--background-secondary);
 }
 
 .vault-coach-header-top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 10px;
+    min-width: 0;
+    gap: 8px;
+}
+
+.vault-coach-header-title-and-mode {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    flex: 0 1 auto;
 }
 
 .vault-coach-header h3 {
     margin: 0;
     min-width: 0;
+    max-width: 8.5rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -77,9 +87,99 @@
     background: var(--interactive-accent);
 }
 
+.vault-coach-header-scope {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 5rem;
+    align-items: baseline;
+    gap: 4px;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+}
+
+.vault-coach-header-scope-label {
+    flex: 0 0 auto;
+}
+
+.vault-coach-header-scope-value {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-normal);
+    font-weight: 600;
+    text-overflow: ellipsis;
+}
+
+.vault-coach-header-icon-actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+}
+
+.vault-coach-header-icon-button {
+    position: relative;
+    display: inline-grid;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    place-items: center;
+    border-color: var(--background-modifier-border);
+    background: var(--background-primary-alt);
+    color: var(--text-muted);
+}
+
+.vault-coach-header-icon-button:hover,
+.vault-coach-header-icon-button:focus-visible,
+.vault-coach-header-icon-button[aria-expanded="true"] {
+    color: var(--text-normal);
+    border-color: var(--interactive-accent);
+    background: var(--background-modifier-hover);
+}
+
+.vault-coach-header-icon-button.is-attention::after {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 6px;
+    height: 6px;
+    border: 1px solid var(--background-secondary);
+    border-radius: 50%;
+    background: var(--text-warning);
+    content: "";
+}
+
+.vault-coach-header-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 8px;
+    z-index: 5;
+    display: none;
+    width: min(20rem, calc(100% - 16px));
+    box-sizing: border-box;
+    padding: 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-primary);
+    box-shadow: var(--shadow-s);
+}
+
+.vault-coach-header-popover.is-open {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vault-coach-header-popover-title {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-weight: 600;
+}
+
 .vault-coach-header-info-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
 }
 
@@ -153,12 +253,211 @@
     flex: 0 0 auto;
 }
 
-.vault-coach-toolbar {
+.vault-coach-header-options-popover .vault-coach-retrieval-group {
+    width: 100%;
+    justify-content: space-between;
+}
+
+.vault-coach-header-options-popover > button {
+    align-self: flex-start;
+}
+
+.vault-coach-header-index-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+/* M5: sidebar routing only; the Dashboard itself remains a main-workspace View. */
+.vault-coach-progress-entry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-progress-entry-title {
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vault-coach-progress-entry-button {
+    flex: 0 0 auto;
+}
+
+.vault-coach-progress-workspace {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-3);
+    height: 100%;
+    padding: var(--size-4-3);
+    box-sizing: border-box;
+}
+
+.vault-coach-progress-workspace-header h2 {
+    margin: 0;
+}
+
+.vault-coach-progress-workspace-summary,
+.vault-coach-progress-workspace-muted {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-progress-workspace-message {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--size-4-2);
+    max-width: 640px;
+    padding: var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-secondary);
+}
+
+.vault-coach-progress-workspace-message.is-error {
+    color: var(--text-error);
+    border-color: var(--background-modifier-error);
+}
+
+.vault-coach-progress-freshness,
+.vault-coach-progress-status,
+.vault-coach-progress-dashboard-warning {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    margin-top: 10px;
+    gap: var(--size-2-2);
+    padding: var(--size-4-2);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-progress-freshness.is-positive,
+.vault-coach-progress-status.is-positive {
+    border-color: var(--color-green, var(--interactive-accent));
+}
+
+.vault-coach-progress-freshness.is-warning,
+.vault-coach-progress-status.is-warning,
+.vault-coach-progress-dashboard-warning {
+    border-color: var(--text-warning);
+}
+
+.vault-coach-progress-freshness.is-error,
+.vault-coach-progress-status.is-error,
+.vault-coach-progress-dashboard-warning {
+    border-color: var(--background-modifier-error);
+    color: var(--text-error);
+}
+
+.vault-coach-progress-dashboard-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: var(--size-4-2);
+}
+
+.vault-coach-progress-dashboard-card,
+.vault-coach-progress-dashboard-panel {
+    min-width: 0;
+    padding: var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-secondary);
+}
+
+.vault-coach-progress-dashboard-card.is-positive {
+    border-top: 3px solid var(--color-green, var(--interactive-accent));
+}
+
+.vault-coach-progress-dashboard-card.is-warning {
+    border-top: 3px solid var(--text-warning);
+}
+
+.vault-coach-progress-dashboard-card.is-error {
+    border-top: 3px solid var(--background-modifier-error);
+}
+
+.vault-coach-progress-dashboard-card-label,
+.vault-coach-progress-dashboard-card-detail {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    line-height: 1.45;
+}
+
+.vault-coach-progress-dashboard-card-value {
+    margin: var(--size-2-2) 0;
+    color: var(--text-normal);
+    font-size: var(--font-ui-large);
+    font-weight: var(--font-semibold, 600);
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-progress-dashboard-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+    gap: var(--size-4-3);
+}
+
+.vault-coach-progress-dashboard-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--size-4-2);
+}
+
+.vault-coach-progress-dashboard-panel h3 {
+    margin: 0;
+    font-size: var(--font-ui-medium);
+}
+
+.vault-coach-progress-levels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    gap: var(--size-2-2);
+}
+
+.vault-coach-progress-level {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--size-2-2);
+    padding: var(--size-2-2) var(--size-2-3);
+    border-radius: var(--radius-s);
+    background: var(--background-primary-alt);
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-progress-level.is-weak {
+    color: var(--text-error);
+}
+
+.vault-coach-progress-level.is-developing {
+    color: var(--text-warning);
+}
+
+.vault-coach-progress-level.is-proficient,
+.vault-coach-progress-level.is-mastered {
+    color: var(--color-green, var(--interactive-accent));
+}
+
+.vault-coach-progress-dashboard-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--size-2-3);
 }
 
 .vault-coach-retrieval-group {
@@ -356,6 +655,580 @@
 
 .vault-coach-source-excerpt > :last-child {
     margin-bottom: 0;
+}
+
+/* M3 Concept review lives in its own workspace tab; it never changes the sidebar shell. */
+.vault-coach-concept-review {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    padding: var(--size-4-4);
+    gap: var(--size-4-3);
+}
+
+.vault-coach-concept-review-header h2 {
+    margin: 0;
+}
+
+.vault-coach-concept-review-summary,
+.vault-coach-concept-review-muted,
+.vault-coach-concept-review-legend {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-concept-review-notice,
+.vault-coach-concept-review-warning,
+.vault-coach-concept-review-error,
+.vault-coach-concept-review-empty {
+    padding: var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+}
+
+.vault-coach-concept-review-warning,
+.vault-coach-concept-review-error {
+    color: var(--text-error);
+}
+
+.vault-coach-concept-review-toolbar,
+.vault-coach-concept-review-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--size-4-2);
+}
+
+.vault-coach-concept-review-toolbar input[type="search"] {
+    flex: 1 1 15rem;
+}
+
+/* Visible in both graph workspaces while a semantic rebuild is active. */
+.vault-coach-semantic-build-status {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: var(--size-2-2);
+    padding: var(--size-2-2) var(--size-4-2);
+    border: 1px solid var(--interactive-accent);
+    border-radius: var(--radius-s);
+    background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    line-height: 1.45;
+    animation: vault-coach-semantic-build-pulse 1.8s ease-in-out infinite;
+}
+
+.vault-coach-semantic-build-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-2-2);
+}
+
+.vault-coach-concept-review-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-2-2);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-concept-review-body {
+    display: grid;
+    grid-template-columns: minmax(20rem, 2fr) minmax(16rem, 1fr);
+    gap: var(--size-4-3);
+    min-height: 26rem;
+}
+
+.vault-coach-concept-review-graph,
+.vault-coach-concept-review-inspector {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+    padding: var(--size-4-3);
+    overflow: hidden;
+}
+
+.vault-coach-concept-review-graph {
+    min-height: 32rem;
+    background:
+        radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text-muted) 18%, transparent) 1px, transparent 0) 0 0 / 20px 20px,
+        var(--background-primary-alt);
+}
+
+.vault-coach-concept-force-graph {
+    width: 100%;
+    height: auto;
+    min-height: 30rem;
+    display: block;
+    touch-action: none;
+    cursor: grab;
+}
+
+.vault-coach-concept-force-graph:active {
+    cursor: grabbing;
+}
+
+.vault-coach-concept-graph-background {
+    fill: transparent;
+}
+
+.vault-coach-concept-edge {
+    vector-effect: non-scaling-stroke;
+    stroke-linecap: round;
+    pointer-events: stroke;
+}
+
+.vault-coach-concept-edge.is-pending {
+    stroke: var(--text-accent);
+    stroke-width: 2.5;
+    stroke-dasharray: 9 7;
+    opacity: 0.92;
+    cursor: pointer;
+}
+
+.vault-coach-concept-edge.is-confirmed {
+    stroke: var(--text-muted);
+    stroke-width: 2.2;
+    opacity: 0.75;
+}
+
+.vault-coach-concept-arrow.is-pending {
+    fill: var(--text-accent);
+}
+
+.vault-coach-concept-arrow.is-confirmed {
+    fill: var(--text-muted);
+}
+
+.vault-coach-concept-node {
+    cursor: pointer;
+}
+
+.vault-coach-concept-node circle {
+    fill: var(--background-primary);
+    stroke: var(--interactive-accent);
+    stroke-width: 2.5;
+    vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 2px 3px rgb(0 0 0 / 20%));
+}
+
+.vault-coach-concept-node.is-selected circle {
+    fill: var(--interactive-accent);
+}
+
+.vault-coach-concept-node text {
+    fill: var(--text-normal);
+    font-size: 16px;
+    font-weight: 500;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: var(--background-primary-alt);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+}
+
+.vault-coach-concept-node.is-selected text {
+    fill: var(--text-on-accent);
+}
+
+.vault-coach-concept-review-inspector input,
+.vault-coach-concept-review-inspector textarea,
+.vault-coach-concept-review-inspector select {
+    width: 100%;
+    margin: var(--size-2-2) 0;
+}
+
+.vault-coach-concept-review-alias,
+.vault-coach-concept-review-evidence {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-1);
+}
+
+.vault-coach-concept-review-history {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-2);
+}
+
+.vault-coach-concept-review-history-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--size-4-2);
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+/* M4A: main-workspace explorer for the confirmed learning graph. */
+.vault-coach-learning-map {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-3);
+    height: 100%;
+    padding: var(--size-2-3);
+    box-sizing: border-box;
+}
+
+.vault-coach-learning-map-header h2 {
+    margin: 0;
+}
+
+.vault-coach-learning-map-summary,
+.vault-coach-learning-map-muted,
+.vault-coach-learning-map-legend {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    line-height: 1.45;
+}
+
+.vault-coach-learning-map-capacity,
+.vault-coach-learning-map-budget,
+.vault-coach-learning-map-empty,
+.vault-coach-learning-map-error {
+    padding: var(--size-4-2);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+.vault-coach-learning-map-capacity,
+.vault-coach-learning-map-budget,
+.vault-coach-learning-map-error {
+    border-color: var(--text-warning);
+}
+
+.vault-coach-learning-map-toolbar,
+.vault-coach-learning-map-filter,
+.vault-coach-learning-map-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--size-2-3);
+}
+
+.vault-coach-learning-map-toolbar input[type="search"] {
+    flex: 1 1 16rem;
+}
+
+.vault-coach-learning-map-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-2-2);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-learning-map-body {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    min-height: 24rem;
+}
+
+.vault-coach-learning-map-graph,
+.vault-coach-learning-map-inspector {
+    min-width: 0;
+    overflow: auto;
+    padding: var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+}
+
+.vault-coach-learning-map-graph {
+    position: relative;
+    flex: 1 1 auto;
+    overflow: hidden;
+    padding: 0;
+    border-color: #303846;
+    border-radius: 10px;
+    background: #15171c;
+}
+
+.vault-coach-learning-map-controls {
+    position: absolute;
+    top: var(--size-2-3);
+    right: var(--size-2-3);
+    z-index: 3;
+    display: flex;
+    max-width: calc(100% - var(--size-4-3));
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--size-2-1);
+}
+
+.vault-coach-learning-map-control-button {
+    display: inline-grid;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    place-items: center;
+    border-color: rgba(131, 145, 171, 0.48);
+    background: rgba(21, 23, 28, 0.9);
+    color: #dce5f5;
+}
+
+.vault-coach-learning-map-control-button:hover,
+.vault-coach-learning-map-control-button:focus-visible {
+    border-color: #8ca8ff;
+    background: rgba(48, 59, 82, 0.96);
+    color: #ffffff;
+}
+
+.vault-coach-learning-map-info-popover,
+.vault-coach-learning-map-search-popover {
+    position: absolute;
+    top: calc(var(--size-2-3) + 2.4rem);
+    right: var(--size-2-3);
+    z-index: 4;
+    display: none;
+    width: min(24rem, calc(100% - var(--size-4-3)));
+    padding: var(--size-2-3);
+    border: 1px solid rgba(131, 145, 171, 0.55);
+    border-radius: var(--radius-s);
+    background: rgba(21, 23, 28, 0.97);
+    color: #dce5f5;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+}
+
+.vault-coach-learning-map-info-popover.is-open,
+.vault-coach-learning-map-search-popover.is-open {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-2);
+}
+
+.vault-coach-learning-map-search-popover input {
+    width: 100%;
+}
+
+.vault-coach-learning-map-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    touch-action: none;
+    cursor: grab;
+    background: #15171c;
+}
+
+.vault-coach-learning-map-canvas:active {
+    cursor: grabbing;
+}
+
+.vault-coach-learning-map-evidence {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-2);
+}
+
+.vault-coach-learning-map-inspector {
+    flex: 0 0 auto;
+    height: 7.4rem;
+    min-height: 7.4rem;
+    max-height: 7.4rem;
+    overflow: hidden;
+    padding: var(--size-2-3) var(--size-4-3);
+}
+
+.vault-coach-learning-map-inspector h3 {
+    margin: 0;
+}
+
+.vault-coach-learning-map-inspector-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(8.5rem, auto);
+    align-items: stretch;
+    height: 100%;
+    gap: var(--size-4-3);
+}
+
+.vault-coach-learning-map-inspector-details {
+    display: flex;
+    min-width: 0;
+    overflow: hidden;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--size-2-1);
+}
+
+.vault-coach-learning-map-inspector-title {
+    display: flex;
+    min-width: 0;
+    flex-wrap: nowrap;
+    align-items: baseline;
+    gap: var(--size-2-3);
+}
+
+.vault-coach-learning-map-inspector-title strong {
+    overflow: hidden;
+    min-width: 0;
+    color: var(--text-normal);
+    font-size: var(--font-ui-medium);
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vault-coach-learning-map-concept-id {
+    overflow: hidden;
+    min-width: 0;
+    flex: 0 1 58%;
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+    font-size: var(--font-ui-smaller);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vault-coach-learning-map-inspector-actions {
+    display: flex;
+    min-width: 8.5rem;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--size-2-2);
+}
+
+.vault-coach-learning-map-inspector-actions button {
+    width: 100%;
+    white-space: nowrap;
+}
+
+.vault-coach-learning-map-description {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    margin-top: var(--size-2-1);
+}
+
+.vault-coach-learning-map-inspector-line {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vault-coach-learning-map-legend {
+    position: absolute;
+    right: var(--size-2-3);
+    bottom: var(--size-2-3);
+    z-index: 1;
+    max-width: min(28rem, calc(100% - var(--size-4-3)));
+    padding: var(--size-2-1) var(--size-2-2);
+    border: 1px solid rgba(131, 145, 171, 0.36);
+    border-radius: var(--radius-s);
+    background: rgba(21, 23, 28, 0.86);
+    color: #b5c0d1;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    pointer-events: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--size-2-2) var(--size-2-3);
+}
+
+.vault-coach-learning-map-legend-entry {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    white-space: nowrap;
+}
+
+.vault-coach-learning-map-legend-mark {
+    position: relative;
+    display: inline-block;
+    width: 1.3rem;
+    height: 0.75rem;
+}
+
+.vault-coach-learning-map-legend-mark::before {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    left: 0;
+    content: "";
+    border-top: 2px solid #6fa7ff;
+    transform: translateY(-50%);
+}
+
+.vault-coach-learning-map-legend-mark.is-user::before {
+    border-color: #5eddb6;
+}
+
+.vault-coach-learning-map-legend-mark.is-automatic::before {
+    border-top: 2px dashed #b181ff;
+}
+
+.vault-coach-learning-map-legend-mark.is-concept-node::before,
+.vault-coach-learning-map-legend-mark.is-structural-node::before,
+.vault-coach-learning-map-legend-mark.is-tag-node::before {
+    top: 50%;
+    left: 50%;
+    width: 0.7rem;
+    height: 0.7rem;
+    border: 1.5px solid #7897ff;
+    border-radius: 50%;
+    background: #15171c;
+    transform: translate(-50%, -50%);
+}
+
+.vault-coach-learning-map-legend-mark.is-structural-node::before {
+    border-color: #a1a9b9;
+    background: #a1a9b9;
+}
+
+.vault-coach-learning-map-legend-mark.is-tag-node::before {
+    border-color: #d8a55b;
+    background: #d8a55b;
+}
+
+.vault-coach-learning-map-legend-mark.is-structural::before {
+    border-color: #8791a4;
+}
+
+.vault-coach-learning-map-legend-mark.is-structural::after {
+    position: absolute;
+    top: calc(50% - 0.24rem);
+    right: -0.05rem;
+    width: 0;
+    height: 0;
+    content: "";
+    border-top: 0.24rem solid transparent;
+    border-bottom: 0.24rem solid transparent;
+    border-left: 0.36rem solid #8791a4;
+}
+
+.vault-coach-learning-map-evidence-row {
+    overflow-wrap: anywhere;
+    padding: var(--size-2-2);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
+
+@media (max-width: 720px) {
+    .vault-coach-learning-map-body {
+        min-height: 22rem;
+    }
+
+    .vault-coach-learning-map-inspector-content {
+        grid-template-columns: minmax(0, 1fr) 7.5rem;
+        gap: var(--size-2-3);
+    }
+
+    .vault-coach-learning-map-inspector-actions {
+        min-width: 7.5rem;
+    }
+
+    .vault-coach-learning-map-controls {
+        max-width: calc(100% - var(--size-2-3));
+    }
+}
+
+@media (max-width: 720px) {
+    .vault-coach-concept-review-body {
+        grid-template-columns: 1fr;
+    }
 }
 
 .vault-coach-input-area {
@@ -1168,4 +2041,55 @@
         opacity: 1;
         transform: translateY(-2px);
     }
+}
+
+@keyframes vault-coach-semantic-build-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 0%, transparent);
+    }
+    50% {
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vault-coach-semantic-build-status,
+    .vault-coach-thinking-spinner {
+        animation: none;
+    }
+}
+
+.vault-coach-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.vault-coach-storage-footprint-summary {
+    margin-bottom: 12px;
+    color: var(--text-muted);
+}
+
+.vault-coach-storage-footprint-list {
+    display: grid;
+    gap: 8px;
+}
+
+.vault-coach-storage-footprint-row {
+    padding: 8px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+}
+
+.vault-coach-storage-footprint-detail,
+.vault-coach-storage-footprint-note {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-storage-footprint-note {
+    margin-top: 14px;
 }

@@ -166,12 +166,77 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         const harness = createRuntimeHarness();
         await harness.runtime.initialize();
         await harness.runtime.rebuildKnowledgeBase(false);
+        const assessmentPath = ".vault-coach/assessments/sessions/exam-1.json";
+        harness.adapter.files.set(assessmentPath, "{\"preserve\":true}");
 
         await harness.runtime.clearKnowledgeIndex(false);
 
         expect(await harness.runtime.application.graph.getSnapshot()).toBeNull();
         expect(harness.adapter.files.has(GRAPH_SNAPSHOT_PATH)).toBe(false);
+        expect(harness.adapter.files.get(assessmentPath)).toBe("{\"preserve\":true}");
         await harness.runtime.dispose();
+    });
+
+    it("does not hydrate stale derived data after an offline Vault change", async () => {
+        const harness = createRuntimeHarness();
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+        await harness.runtime.dispose();
+        harness.deleteKnowledgeFile("details.md");
+
+        const restarted = harness.restart();
+        await restarted.initialize();
+
+        expect(restarted.getSourceInventoryStatus()).toBe("source-sync-required");
+        expect(restarted.isTextIndexDirty()).toBe(true);
+        expect(restarted.getKnowledgeBaseStats()).toMatchObject({ fileCount: 0, chunkCount: 0 });
+        expect(await restarted.application.graph.getSnapshot()).toBeNull();
+        expect(restarted.application.semanticGraph.getState().hasData).toBe(false);
+        expect(restarted.application.mastery.getSnapshot()).toBeNull();
+        await restarted.dispose();
+    });
+
+    it("treats a snapshot from before source inventories as stale rather than hydrating it", async () => {
+        const harness = createRuntimeHarness();
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+        await harness.runtime.dispose();
+        const snapshotPath = `${TEST_CONFIG_DIR}/plugins/vault-coach/index-snapshot.json`;
+        const snapshot: unknown = JSON.parse(harness.adapter.files.get(snapshotPath) ?? "{}");
+        if (!isRecord(snapshot)) throw new Error("Expected a persisted index snapshot.");
+        delete snapshot.sourceInventory;
+        snapshot.version = 2;
+        harness.adapter.files.set(snapshotPath, JSON.stringify(snapshot));
+
+        const restarted = harness.restart();
+        await restarted.initialize();
+
+        expect(restarted.getSourceInventoryStatus()).toBe("source-sync-required");
+        expect(restarted.isTextIndexDirty()).toBe(true);
+        expect(await restarted.application.graph.getSnapshot()).toBeNull();
+        await restarted.dispose();
+    });
+
+    it("classifies an offline replacement as a possible domain switch and removes stale semantic/mastery caches after rebuilding", async () => {
+        const harness = createRuntimeHarness();
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+        await harness.runtime.dispose();
+        harness.deleteKnowledgeFile("details.md");
+        harness.deleteKnowledgeFile("overview.md");
+        harness.addKnowledgeFile("database.md", "# Database\n\nA new unrelated domain.");
+
+        const restarted = harness.restart();
+        await restarted.initialize();
+        expect(restarted.getSourceInventoryStatus()).toBe("possible-domain-switch");
+
+        await restarted.rebuildKnowledgeBase(false);
+
+        expect(restarted.getSourceInventoryStatus()).toBe("ready");
+        expect(restarted.getKnowledgeBaseStats()).toMatchObject({ fileCount: 1, chunkCount: 1 });
+        expect(await restarted.application.graph.getSnapshot()).toMatchObject({ stats: { documentCount: 1 } });
+        expect(restarted.application.mastery.getSnapshot()).toBeNull();
+        await restarted.dispose();
     });
 });
 
@@ -181,6 +246,8 @@ function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = nu
     renameKnowledgeFile(oldPath: string, newPath: string): void;
     writeKnowledgeFile(path: string, content: string): void;
     deleteKnowledgeFile(path: string): void;
+    addKnowledgeFile(path: string, content: string): void;
+    restart(): VaultCoachRuntime;
 } {
     const files = new Map<string, { file: TFile; content: string }>([
         ["details.md", {
@@ -232,8 +299,9 @@ function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = nu
         translate: (key) => key,
     };
 
+    const createRuntime = () => new VaultCoachRuntime(host);
     return {
-        runtime: new VaultCoachRuntime(host),
+        runtime: createRuntime(),
         adapter,
         renameKnowledgeFile: (oldPath, newPath) => {
             const entry = files.get(oldPath);
@@ -255,6 +323,11 @@ function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = nu
         deleteKnowledgeFile: (path) => {
             if (!files.delete(path)) throw new Error(`Missing fixture file: ${path}`);
         },
+        addKnowledgeFile: (path, content) => {
+            if (files.has(path)) throw new Error(`Existing fixture file: ${path}`);
+            files.set(path, { file: createFile(path, Date.now()), content });
+        },
+        restart: createRuntime,
     };
 }
 
@@ -340,4 +413,8 @@ function createFile(path: string, modifiedAt: number): TFile {
         basename: fileName.slice(0, -(extension.length + 1)),
         stat: { size: 100, mtime: modifiedAt },
     });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
 }

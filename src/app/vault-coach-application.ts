@@ -1,5 +1,5 @@
 import type { ChatService } from "./chat/chat-service";
-import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, ProgressApplicationApi, VaultCoachApplicationApi } from "./application-api";
+import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, LearningGraphApplicationApi, MasteryApplicationApi, ProgressApplicationApi, SemanticGraphApplicationApi, VaultCoachApplicationApi } from "./application-api";
 import type { ApplicationEvent, ApplicationEventListener } from "./application-events";
 import type { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
 import { getQuestionIdsNeedingAssessmentEvents } from "../domain/assessment/assessment-event-fingerprint";
@@ -16,6 +16,17 @@ import type { ExamEvaluationService } from "../domain/exam/exam-evaluation-servi
 import type { ExamSessionStore, MarkdownExamHistoryRecord } from "../exam/exam-session-store";
 import type { ExamEvaluationMetadata, ExamGenerationOptions, ExamHistoryItem, ExamScopeSelection, ExamSession } from "../domain/exam/exam-types";
 import type { KnowledgeGraphService } from "./graph/knowledge-graph-service";
+import type { SemanticGraphService } from "./semantic-graph/semantic-graph-service";
+import type { ConceptEvidenceRef, SemanticRelationType } from "../domain/semantic-graph/semantic-graph-types";
+import type { LearningGraphQuery } from "../domain/learning-graph/learning-graph-types";
+import type { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
+import type { MasteryService } from "./mastery/mastery-service";
+import type { ProgressService } from "./progress/progress-service";
+import {
+    PROGRESS_SNAPSHOT_SCHEMA_VERSION,
+    type ProgressSnapshot,
+    type ProgressStateView,
+} from "./progress/progress-types";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
@@ -38,7 +49,12 @@ export interface VaultCoachApplicationDependencies {
     rebuildIndex(signal?: AbortSignal): Promise<void>;
     clearIndex(): Promise<void>;
     abortIndex(): void;
+    getStorageFootprint(): Promise<import("../domain/index-lifecycle/storage-footprint").StorageFootprint>;
     knowledgeGraphService: KnowledgeGraphService;
+    semanticGraphService: SemanticGraphService;
+    learningGraphQueryService?: LearningGraphQueryService;
+    masteryService?: MasteryService;
+    progressService?: ProgressService;
 }
 
 /** Application facade with grouped use-case APIs and no Obsidian UI dependency. */
@@ -47,7 +63,10 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
     readonly exam: ExamApplicationApi;
     readonly index: IndexApplicationApi;
     readonly graph: GraphApplicationApi;
-    readonly progress: ProgressApplicationApi = { isAvailable: () => false };
+    readonly semanticGraph: SemanticGraphApplicationApi;
+    readonly learningGraph: LearningGraphApplicationApi;
+    readonly mastery: MasteryApplicationApi;
+    readonly progress: ProgressApplicationApi;
     private readonly listeners: Set<ApplicationEventListener> = new Set();
 
     constructor(private readonly dependencies: VaultCoachApplicationDependencies) {
@@ -82,8 +101,13 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 this.emit({ type: "index-state-changed" });
             },
             getState: () => dependencies.getIndexState(),
+            getStorageFootprint: () => dependencies.getStorageFootprint(),
         };
         this.graph = this.createGraphApi();
+        this.semanticGraph = this.createSemanticGraphApi();
+        this.learningGraph = this.createLearningGraphApi();
+        this.mastery = this.createMasteryApi();
+        this.progress = this.createProgressApi();
     }
 
     subscribe(listener: ApplicationEventListener): () => void {
@@ -97,6 +121,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
 
     /** Allows non-UI coordinators to publish an index state change. */
     notifyIndexStateChanged(): void {
+        this.invalidateProgress();
         this.emit({ type: "index-state-changed" });
     }
 
@@ -161,7 +186,11 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         return {
             rebuild: async (signal) => {
                 const snapshot = await graphService.rebuildAll(signal);
+                this.dependencies.learningGraphQueryService?.invalidate();
+                this.dependencies.masteryService?.markDirty("知识图谱已变更，需要重新计算掌握度。");
+                this.invalidateProgress();
                 this.emit({ type: "graph-state-changed" });
+                this.emit({ type: "mastery-state-changed" });
                 return snapshot;
             },
             getSnapshot: async () => graphService.getSnapshot(),
@@ -171,6 +200,106 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
             findEdgesBySourceFile: async (filePath) => graphService.findEdgesBySourceFile(filePath),
             getEdgeSources: async (edgeId) => graphService.getEdgeSources(edgeId),
             checkIntegrity: async () => graphService.checkIntegrity(),
+        };
+    }
+
+    private createSemanticGraphApi(): SemanticGraphApplicationApi {
+        const service = this.dependencies.semanticGraphService;
+        const invalidate = () => {
+            this.dependencies.learningGraphQueryService?.invalidate();
+            this.dependencies.masteryService?.markDirty("有效概念图谱已变更，需要重新计算掌握度。");
+            this.invalidateProgress();
+        };
+        return {
+            rebuild: async (signal) => {
+                const rebuilding = service.rebuildAll(signal);
+                // SemanticIndexCoordinator enters busy state synchronously before
+                // its first await. Publish it now so every open workspace can
+                // show a single, non-clickable build-in-progress state.
+                this.emit({ type: "semantic-graph-state-changed" });
+                try {
+                    await rebuilding;
+                    invalidate();
+                    this.emit({ type: "mastery-state-changed" });
+                } finally {
+                    this.emit({ type: "semantic-graph-state-changed" });
+                }
+            },
+            clear: async () => { await service.clear(); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            resetGovernanceDecisions: async () => {
+                await service.resetGovernanceDecisions();
+                invalidate();
+                this.emit({ type: "semantic-graph-state-changed" });
+                this.emit({ type: "mastery-state-changed" });
+            },
+            getGovernanceImpact: () => service.getGovernanceImpact(),
+            abort: () => { service.abort(); this.emit({ type: "semantic-graph-state-changed" }); },
+            getState: () => service.getState(),
+            getReviewProjection: async (query) => service.getReviewProjection(query),
+            confirmCandidate: async (fingerprint) => { await service.confirmCandidate(fingerprint); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            rejectCandidate: async (fingerprint, reason) => { await service.rejectCandidate(fingerprint, reason); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            undoCandidateDecision: async (decisionId) => { await service.undoCandidateDecision(decisionId); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            mergeConcepts: async (canonicalConceptId, mergedConceptIds) => { await service.mergeConcepts(canonicalConceptId, mergedConceptIds); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            undoMerge: async (decisionId) => { await service.undoMerge(decisionId); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            addAlias: async (conceptId, alias) => { await service.addAlias(conceptId, alias); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            removeAlias: async (conceptId, alias) => { await service.removeAlias(conceptId, alias); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            createManualRelation: async (type: SemanticRelationType, sourceConceptId: string, targetConceptId: string, evidence?: readonly ConceptEvidenceRef[], note?: string) => {
+                await service.createManualRelation(type, sourceConceptId, targetConceptId, evidence, note); invalidate();
+                this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" });
+            },
+            removeManualRelation: async (relationId) => { await service.removeManualRelation(relationId); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+            undoManualRelationRemoval: async (decisionId) => { await service.undoManualRelationRemoval(decisionId); invalidate(); this.emit({ type: "semantic-graph-state-changed" }); this.emit({ type: "mastery-state-changed" }); },
+        };
+    }
+
+    private createLearningGraphApi(): LearningGraphApplicationApi {
+        return {
+            getProjection: async (query: LearningGraphQuery = {}) => {
+                const service = this.dependencies.learningGraphQueryService;
+                if (!service) throw new Error("Learning graph service is unavailable.");
+                return service.getProjection(query);
+            },
+            getConceptCatalog: async () => {
+                const service = this.dependencies.learningGraphQueryService;
+                if (!service) throw new Error("Learning graph service is unavailable.");
+                return service.getConceptCatalog();
+            },
+        };
+    }
+
+    private createMasteryApi(): MasteryApplicationApi {
+        const service = this.dependencies.masteryService;
+        return {
+            getState: () => service?.getState() ?? unavailableMasteryState(),
+            getSnapshot: () => service?.getSnapshot() ?? null,
+            getConceptState: (conceptId) => service?.getConceptState(conceptId) ?? null,
+            rebuild: async () => {
+                if (!service) throw new Error("Mastery service is unavailable.");
+                const snapshot = await service.rebuildAll();
+                this.invalidateProgress();
+                this.emit({ type: "mastery-state-changed" });
+                return snapshot;
+            },
+            clear: async () => {
+                if (!service) throw new Error("Mastery service is unavailable.");
+                await service.clear();
+                this.invalidateProgress();
+                this.emit({ type: "mastery-state-changed" });
+            },
+        };
+    }
+
+    private createProgressApi(): ProgressApplicationApi {
+        const service = this.dependencies.progressService;
+        return {
+            isAvailable: () => service !== undefined,
+            getState: (): ProgressStateView => service?.getState() ?? unavailableProgressState(),
+            getSnapshot: async (): Promise<ProgressSnapshot> => {
+                if (!service) {
+                    return createUnavailableProgressSnapshot();
+                }
+                return service.getSnapshot();
+            },
         };
     }
 
@@ -216,12 +345,24 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
 
         if (document !== existingDocument) {
             await dependencies.assessmentSessionStore.save(document);
+            this.invalidateProgress();
         }
 
         const projectedSession = await dependencies.examSessionStore.writeAssessmentProjection(
             document,
             dependencies.getAssessmentSessionPath(document.sessionId),
         );
+        if (dependencies.masteryService) {
+            try {
+                await dependencies.masteryService.syncForSession(document);
+            } catch (error: unknown) {
+                // This cache is derived from already-persisted Assessment facts.
+                // It must never turn a successful exam save into a failed one.
+                console.error("[VaultCoachApplication] 掌握度增量计算失败，Assessment 证据已保留。", error);
+                dependencies.masteryService.markDirty("掌握度增量计算失败，需要稍后重新计算。");
+            }
+            this.emit({ type: "mastery-state-changed" });
+        }
         this.emit({ type: "exam-history-changed" });
         return projectedSession;
     }
@@ -267,8 +408,74 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
     }
 
     private emit(event: ApplicationEvent): void {
+        if (event.type === "mastery-state-changed" && !this.dependencies.masteryService) return;
         this.listeners.forEach((listener) => listener(event));
     }
+
+    private invalidateProgress(): void {
+        this.dependencies.progressService?.invalidate();
+    }
+}
+
+function unavailableMasteryState() {
+    return {
+        hasSnapshot: false,
+        dirty: true,
+        busy: false,
+        lastError: "Mastery service is unavailable.",
+        algorithmVersion: null,
+        stateCount: 0,
+        sourceEventCount: 0,
+        unboundIssueCount: 0,
+    } as const;
+}
+
+function createUnavailableProgressSnapshot(): ProgressSnapshot {
+    return {
+        schemaVersion: PROGRESS_SNAPSHOT_SCHEMA_VERSION,
+        generatedAt: Date.now(),
+        graph: {
+            status: "unavailable",
+            conceptCount: 0,
+            message: "Progress service is unavailable.",
+        },
+        mastery: {
+            status: "unavailable",
+            message: "Progress service is unavailable.",
+            conceptCount: 0,
+            assessedConceptCount: 0,
+            coverageRatio: null,
+            levelCounts: {
+                unknown: 0,
+                weak: 0,
+                developing: 0,
+                proficient: 0,
+                mastered: 0,
+            },
+            snapshotCalculatedAt: null,
+            algorithmVersion: null,
+            sourceEventCount: 0,
+            unboundIssueCount: 0,
+        },
+        assessments: {
+            status: "unavailable",
+            message: "Progress service is unavailable.",
+            sessionCount: 0,
+            scoredSessionCount: 0,
+            latestSessionAt: null,
+        },
+        recommendations: [],
+    };
+}
+
+function unavailableProgressState(): ProgressStateView {
+    return {
+        hasSnapshot: false,
+        dirty: true,
+        busy: false,
+        lastError: "Progress service is unavailable.",
+        generatedAt: null,
+    };
 }
 
 function mergeConceptBindings(

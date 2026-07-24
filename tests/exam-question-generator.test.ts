@@ -125,4 +125,26 @@ describe("ExamQuestionGenerator provenance", () => {
             },
         }]);
     });
+
+    it("persists confirmed Concept IDs proven by a question's source chunks", async () => {
+        const generator = createGenerator(JSON.stringify({ questions: [] }));
+        const conceptIdsByChunk = new Map<string, readonly string[]>([
+            ["chunk-1", ["concept:retrieval", "concept:keyword"]],
+            ["chunk-2", ["concept:reranking", "concept:retrieval"]],
+        ]);
+
+        const result = await generator.generateQuestions(
+            createBlueprint(),
+            createChunks(),
+            undefined,
+            undefined,
+            conceptIdsByChunk,
+        );
+
+        expect(result.questions[0]?.conceptIds).toEqual([
+            "concept:keyword",
+            "concept:reranking",
+            "concept:retrieval",
+        ]);
+    });
 });

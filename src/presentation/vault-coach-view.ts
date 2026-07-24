@@ -37,6 +37,7 @@ export class VaultCoachView extends ItemView {
         leaf: WorkspaceLeaf,
         private readonly application: VaultCoachApplicationApi,
         private readonly plugin: VaultCoachPluginApi,
+        openProgressWorkspace: () => Promise<void>,
     ) {
         super(leaf);
         this.chatController = new ChatController(plugin, () => this.contentEl.win);
@@ -46,7 +47,7 @@ export class VaultCoachView extends ItemView {
         this.examView = new ExamView(this.app, this, this.examController);
         this.unsubscribeExamController = this.examController.subscribe((event) => this.handleExamControllerEvent(event));
         this.progressController = new ProgressController(application.progress);
-        this.progressView = new ProgressView();
+        this.progressView = new ProgressView(openProgressWorkspace);
         this.header = new VaultCoachHeader(plugin, this.chatController);
     }
 
@@ -91,6 +92,14 @@ export class VaultCoachView extends ItemView {
         }
         this.hasDeferredRefresh = false;
         this.render();
+    }
+
+    /** Opens the ordinary Exam setup with a Learning Map source-file scope. */
+    openSourceScopedExam(filePaths: readonly string[]): boolean {
+        if (!this.examController.prepareSourceScopedExam(filePaths)) return false;
+        this.activeInteractionMode = "exam";
+        this.render();
+        return true;
     }
 
     private t(key: TranslationKey, replacements?: Record<string, string | number>): string {

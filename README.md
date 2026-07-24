@@ -2,270 +2,261 @@
 
 > Language: English | [中文](./README_CN.md)
 
-Vault Coach turns your Obsidian vault into a local-first study and research assistant. Ask questions across Markdown notes and text-based PDFs, inspect cited sources, and generate exams from your own knowledge base.
+**Turn an Obsidian vault into a learning workflow:** build a source-grounded knowledge base, practise with structured exams, review concept relationships, and use a Learning Map to see what you know and what still needs work.
 
-It is designed for people who want a practical RAG workflow inside Obsidian without sending vault content to a remote service by default. Local [Ollama](https://ollama.com) is the default model provider, and OpenAI-compatible services can be configured explicitly when you need them.
+Vault Coach is an Obsidian plugin for learners, researchers, and teams who want to study from the notes they already maintain. It supports Markdown and text-based PDFs, cited Q&A, scoped practice exams, reviewable concept graphs, and evidence-based mastery tracking.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
 ![Version](https://img.shields.io/badge/version-1.3.4-1E90FF)
-![Local RAG](https://img.shields.io/badge/Local--first-RAG-10b981)
-![Ollama](https://img.shields.io/badge/Powered%20by-Ollama-111827)
+![Knowledge training](https://img.shields.io/badge/Knowledge-training-10b981)
+![Privacy controls](https://img.shields.io/badge/Privacy-user--controlled-334155)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 
-![alt text](assets/screenshots/vault-coach-qa.png.png)
+<!-- Screenshot recommendation: place a 16:9 overview of the Vault Coach sidebar here. Show a cited answer, the Q&A / Exam mode switch, and the index status. Blur or replace personal note names. -->
+![Vault Coach cited Q&A](assets/screenshots/vault-coach-qa.png.png)
 
-## Why Vault Coach
+## What problem does Vault Coach solve?
 
-Vault Coach is built for repeated learning and research workflows, not just one-off chat.
+Notes are useful only when you can revisit, test, and connect them. Vault Coach closes that loop inside the vault you already use:
 
-- **Ask your vault**: retrieve relevant Markdown notes and text-based PDF pages before answering.
-- **Trust the answer**: every answer can show clickable sources, excerpts, headings, and PDF page references.
-- **Study from your notes**: Exam mode turns selected folders and files into generated practice tests.
-- **Stay local by default**: Ollama is the default for chat and embeddings.
-- **Scale beyond Markdown**: text-based PDFs can be parsed, chunked, embedded, searched, and cited.
-- **Use the model stack you prefer**: local Ollama or explicit OpenAI-compatible chat and embedding providers.
-- **Use it in English or Chinese**: the plugin UI and documentation are available in both languages.
+1. **Find and explain** — ask questions over your Markdown notes and text PDFs; inspect the source behind an answer.
+2. **Practise and assess** — generate an exam from a vault, folder, or chosen files; submit answers and keep structured results.
+3. **Connect concepts** — extract evidence-backed concept and relationship candidates, then decide what is actually true in Concept review.
+4. **Navigate learning** — explore confirmed knowledge in a Learning Map and see evidence-backed mastery states in the Learning dashboard.
+5. **Keep control of data** — choose a local model, a self-hosted endpoint, or an OpenAI-compatible provider. Model calls occur only for the features and provider you configure.
 
-## Highlights
+## What you can do
 
-### Knowledge Q&A
+### Build a personal knowledge base
 
-Ask natural-language questions from the Vault Coach sidebar. The plugin retrieves relevant chunks, optionally rewrites the query, reranks candidates, and streams an answer with sources.
+Choose the whole vault or one folder. Vault Coach indexes Markdown and, optionally, native-text PDFs. It chunks content for retrieval while keeping headings, file paths, excerpts, and PDF page locations for citations.
 
-Supported retrieval modes:
+- Keyword, vector, and hybrid retrieval modes
+- Optional query rewrite and reranking
+- Page-aware citations for text-based PDFs
+- Automatic incremental sync for normal file changes
+- Configurable PDF size/page limits and chunking
+- Optional local long-term memory for durable conversation facts, with a setting to disable it
 
-- Keyword search
-- Vector search
-- Hybrid keyword/vector search
-- Optional rerank endpoint with local heuristic fallback
+<!-- Screenshot recommendation: show an answer with several expanded source cards. Include one Markdown heading source and one PDF page source if possible. -->
+![Answer sources](assets/screenshots/retrieval-sources.png.png)
 
-![alt text](assets/screenshots/retrieval-sources.png.png)
+### Train with exam mode
 
-### Text-Based PDF Support
+Exam mode turns selected knowledge into deliberate practice instead of another chat session. You can choose the entire knowledge base, folders, or individual files; inspect and adjust the included files; generate questions; submit answers; and review scoring feedback.
 
-Vault Coach can index native-text PDFs inside your vault. PDF text is extracted with page information, converted into searchable chunks, and shown as page-level sources in answers.
+- Scope exams to the material you are studying now
+- Persist include/exclude choices for the session
+- Filter low-value material such as TODOs, logs, link indexes, stubs, and drafts
+- Generate a coverage-aware question set and score answers with feedback
+- Save structured assessment records locally and export readable Markdown reports when needed
 
-What works today:
+<!-- Screenshot recommendation: show the exam setup with scope selector, file manager, estimated capacity, and the Generate test button. -->
+![Exam scope selection](assets/screenshots/exam-mode-scope.png)
 
-- Text-layer PDF extraction
-- PDF page count and file size limits
-- Page-aware source links, such as `paper.pdf · page 3`
-- PDF chunks in keyword, vector, hybrid, rerank, Q&A, and Exam mode
-- Basic cleanup for repeated headers, footers, page numbers, and reading order
-- Obsidian/KaTeX-compatible inline and block math normalization for model answers when formulas are produced from PDF content
+<!-- Screenshot recommendation: add a second exam image showing a completed result with score, feedback, and source-backed review items. This is more persuasive than another setup screenshot. -->
 
-Current limits:
+### Turn notes into a reviewable concept graph
 
-- Scanned PDFs are detected as low-text/likely scanned, but OCR is not included yet.
-- Complex tables, diagrams, and heavily visual equations are not fully reconstructed.
-- Multi-column reading order is improved with heuristics, but not guaranteed for every academic layout.
+The optional **Semantic concept graph** extracts Concepts and relationship candidates from indexed Sections. It is deliberately review-first:
 
-![alt text](assets/screenshots/pdf-source-page.png.png)
+- Candidates retain source evidence.
+- Dashed relationships are proposals; confirmed relationships are distinct facts.
+- You can confirm, reject, undo a decision, merge concepts, manage aliases, and add or remove manual relationships.
+- Similarity candidates use a bounded approximate-neighbour search; similarity never auto-merges concepts.
+- A model-backed semantic rebuild is always explicit. It is not silently triggered just by opening Obsidian.
 
+![alt text](assets/screenshots/concept-review.png)
+<!-- Screenshot recommendation: add a Concept review screenshot. Show a readable graph with both dashed candidate edges and solid confirmed edges, a selected Concept inspector, and the confirm / reject controls. -->
 
-### Exam Mode
+### Explore confirmed knowledge in Learning Map
 
-Exam mode helps you turn a vault, folder, or selected files into a practice test.
+**Learning Map** is the focused reading view of the graph. It presents confirmed and user-created relationships, with directed arrows where the relationship has direction. You can search, filter relationship types, zoom/pan, focus a neighbourhood, inspect source evidence, and jump back to the original note.
 
-It supports:
+Pending or rejected candidates remain out of the Learning Map, so a visual connection is never mistaken for a confirmed learning fact. Optional high-confidence auto-relations are visually distinguished and are display-only; they do not change exams or mastery.
 
-- Full-vault, folder, and file-level exam scope selection
-- Persistent include/exclude choices for exam sources
-- Smart filtering for low-quality content such as TODO lists, logs, link indexes, stubs, and draft notes
-- Blueprint-style planning before question generation
-- Question generation from your indexed knowledge base
-- LLM-based scoring and feedback
-- Hidden local exam history
-- Manual export of exam records into visible vault folders
+![alt text](assets/screenshots/kg.png)
 
-Use it for interview preparation, course review, paper reading, project onboarding, and self-checking technical notes.
+<!-- Screenshot recommendation: add a full-width Learning Map screenshot. Show clustered concept nodes, varied node size, directional relationship arrows, the compact upper-right controls, bottom inspector, and legend. Avoid screenshots where labels overlap. -->
 
-#### Structured exam records
+### Follow evidence-based mastery
 
-After a scored exam is saved, Vault Coach stores the durable exam facts in the current vault at:
+The **Learning dashboard** summarizes confirmed concepts, assessment coverage, mastery distribution, and local data health. Mastery is derived from saved structured exam events and confirmed Concept bindings—not from a guess that a note was merely opened.
 
-```text
-.vault-coach/assessments/sessions/<session-id>.json
-.vault-coach/assessments/index-v1.json
-```
+Use **Rebuild concept mastery** after taking exams or after changing the effective Concept graph. The resulting snapshot is rebuildable; saved exam sessions remain the durable learning record.
 
-The session JSON is the source of truth. It contains the exam, answers, grading evidence, source references, concept bindings, and evaluator metadata. The matching Markdown file in `.vault-coach/exams/` is a readable projection: it can be deleted and rebuilt from the JSON without changing the evidence. History keeps structured records visible even when their Markdown report is missing.
+![alt text](assets/screenshots/dashboard.png)
 
-These files stay inside your vault, may contain note excerpts, answers, and model feedback, and are not telemetry or a cloud sync service. Treat them as private vault data; do not commit them to a plugin repository. Exported Markdown reports remain ordinary vault files under the folder you choose.
+<!-- Screenshot recommendation: add a Learning dashboard screenshot with the five summary cards and mastery distribution. Use a vault with enough completed exams to make the distribution meaningful. -->
 
-### Local structural graph snapshot
+## Install
 
-After a successful knowledge-index rebuild or file-level sync, Vault Coach also maintains this local, versioned structure snapshot:
+### From Obsidian Community plugins
 
-```text
-.vault-coach/graph/graph-snapshot-v1.json
-```
+When Vault Coach is available in the community catalog:
 
-It records deterministic Vault structure only: indexed document paths and titles, heading sections, tags, resolved local links/embeds, and source locations needed to explain those relationships. It does not create concepts, mastery scores, recommendations, or a graph UI, and graph construction never calls a chat model, embedding model, or network service.
+1. Open **Settings → Community plugins** in Obsidian.
+2. Turn off Restricted mode if Obsidian asks you to do so.
+3. Select **Browse**, search for **Vault Coach**, then install and enable it.
 
-The snapshot remains inside the current vault, is ignored by this plugin repository, and can be regenerated from the current knowledge scope. It may contain private file paths, headings, tag names, and link metadata, so treat it as private vault data and do not commit it to a public repository.
+### Manual installation from a release
 
-![alt text](assets/screenshots/exam-mode-scope.png)
+1. Download `main.js`, `manifest.json`, and `styles.css` from the matching [GitHub release](https://github.com/Wanjin5508/vault-coach/releases).
+2. Create `<your-vault>/.obsidian/plugins/vault-coach/`.
+3. Put the three files in that folder.
+4. Reload Obsidian, then enable **Vault Coach** in **Settings → Community plugins**.
 
-Users can also manually manage the scope of test questions:
-![alt text](assets/screenshots/exam-mode-scope-m.png)
+Do not install a source-code ZIP as a plugin release unless you build it first.
 
-### Long-Term Memory
+## Quick start
 
-Vault Coach can extract durable facts from conversations and inject relevant memories into later answers. Memories are stored locally and can be disabled from settings.
-
-### Streaming Answers
-
-Answers stream into the sidebar as the model generates them. You can stop a long generation and keep the partial text already produced. When generation finishes, the answer is rendered as Obsidian Markdown.
-
-## Quick Start
+### 1. Install and open Vault Coach
 
 1. Install and enable Vault Coach in Obsidian.
-2. Open the sidebar from the ribbon icon or command palette.
-3. Go to **Settings → Vault Coach**.
-4. Choose the knowledge scope: entire vault or a specific folder.
-5. Enable the file types you want to index: Markdown and, optionally, text-based PDFs.
-6. Configure models:
-   - For local use, keep **Local Ollama** and enter existing Ollama chat and embedding models.
-   - For remote/self-hosted APIs, choose **OpenAI compatible** and configure the endpoint, model, and API key.
-7. Select **Rebuild index**.
-8. Ask a question or switch to **Exam mode**.
+2. Open it from the ribbon or run **Open VaultCoach in the right sidebar** from the Command palette.
+3. Open **Settings → Vault Coach**.
 
-For Ollama, the base URL is usually:
+<!-- Screenshot recommendation: add a settings overview screenshot. Highlight Knowledge base, Models, Semantic concept graph, and Learning Map automatic relations rather than exposing credentials. -->
 
-```text
-http://127.0.0.1:11434
-```
+### 2. Choose the knowledge you want to train on
 
-Do not include `/api/chat`, `/api/embed`, or `/api/embeddings` in the base URL. Vault Coach appends API paths internally.
+![alt text](assets/screenshots/setting-kb.png)
 
-## Recommended Ollama Setup
+Under **Knowledge base**:
 
-Vault Coach needs one chat model and one embedding model.
+1. Choose **Entire vault** or **Specific folder**.
+2. Enable Markdown indexing and, if needed, text-based PDF indexing.
+3. Set sensible PDF limits and chunk settings for the size of your vault.
+4. Select **Rebuild index** in the sidebar.
 
-Example:
+When the build finishes, ask a question to verify that the sources match the intended notes.
 
-```bash
-ollama pull gemma3:4b
-ollama pull embeddinggemma
-```
+### 3. Configure a model provider
 
-Then configure:
+Vault Coach does not require a particular provider. Select the chat and embedding providers that fit your environment:
 
-| Purpose | Example |
-|---------|---------|
-| Local chat model | `gemma3:4b` |
-| Local embedding model | `embeddinggemma` |
-| Local inference service URL | `http://127.0.0.1:11434` |
+| Option | When to choose it |
+| --- | --- |
+| Local Ollama | You want a fully local model workflow and can run suitable chat and embedding models on your device. |
+| OpenAI-compatible endpoint | You use a cloud provider, a self-hosted gateway, or another compatible service. Configure its URL, models, and API key explicitly. |
+| Keyword-only retrieval | You want basic local search without building embeddings. |
 
-You can use other Ollama models. Larger models may produce better answers but require more memory and slower generation.
+![alt text](assets/screenshots/setting-model.png)
 
-## Configuration Overview
+Ollama is an optional privacy-oriented deployment path, not a requirement. If you use it, the typical base URL is `http://127.0.0.1:11434`; do not append `/api/chat`, `/api/embed`, or `/api/embeddings`.
 
-### General
+### 4. Start a study cycle
 
-- Assistant name
-- Default greeting
-- Open sidebar on startup
-- Default retrieval mode
-- Collapse sources by default
+1. Ask a cited question to refresh a topic.
+2. Switch to **Exam mode** and create a short, scoped test.
+3. Submit answers and review feedback.
+4. Open **Concept review** to confirm or correct important relationships.
+5. Open **Learning Map** and **Learning dashboard** to inspect the confirmed structure and mastery evidence.
 
-### Knowledge Base
+This loop works well for interview preparation, certification study, course review, research reading, and project onboarding.
 
-- Scan the whole vault or one folder
-- Enable Markdown indexing
-- Enable text-based PDF indexing
-- Set PDF file size and page limits
-- Configure chunk size and overlap
-- Enable automatic incremental sync
-- Exclude paths from Exam mode
-- Enable smart filtering for exam-ready content
+## How to use each workflow
 
-### Models
+### Ask questions with traceable sources
 
-- Local Ollama chat model
-- Local Ollama embedding model
-- OpenAI-compatible chat endpoint
-- OpenAI-compatible embedding endpoint
-- SecretStorage-backed cloud API key
-- Optional dedicated rerank service
+1. Select **Q&A** in the sidebar.
+2. Choose Keyword, Vector, or Hybrid retrieval.
+3. Ask a focused question.
+4. Expand a source beneath the answer to inspect its excerpt, heading, or PDF page.
+5. Use the source link to open the underlying note.
 
-### Long-Term Memory
+Tips:
 
-- Enable or disable memory extraction
-- Control memory injection count
-- Limit saved memory items
-- Limit persisted conversation messages
+- Start with a narrow question when a vault covers several domains.
+- Use a folder-specific knowledge scope when a project needs isolation.
+- Enable vector retrieval only after configuring an embedding provider and rebuilding the index.
 
-### Advanced RAG
+### Create, take, and review an exam
 
-- Query rewrite
-- Vector retrieval
-- Rerank
-- Keyword/vector/hybrid candidate counts
-- Final context chunk count
-- Source display limit
-- Generation temperature
+1. Switch to **Exam mode**.
+2. Choose the full knowledge base, one or more folders, or a source-scoped exam started from Learning Map.
+3. Select **Manage files** to include/exclude individual files.
+4. Run **Analyze exam scope** when you want to inspect the eligible material.
+5. Choose a question count and select **Generate test**.
+6. Submit answers, review the result, then use **Save result** or **Export**.
 
-## Privacy and Network Use
+Saved assessment facts live in `.vault-coach/assessments/`. They are local vault data and are kept when you rebuild an index or refresh a graph.
 
-Vault Coach is local-first.
+### Build and review the semantic graph
 
-With the default Ollama setup, chat and embedding requests are sent only to your configured local Ollama endpoint, usually `http://127.0.0.1:11434`.
+1. In settings, enable **Semantic concept graph** and review the selected model provider.
+2. Rebuild the normal knowledge index first.
+3. Run **Rebuild semantic concept graph** from the Command palette.
+4. Run **Open concept review**.
+5. Review candidates using their evidence; confirm, reject, merge, or create a manual relationship where appropriate.
+6. Use **Open learning map** to explore the confirmed result.
 
-Remote calls happen only when you explicitly select an OpenAI-compatible chat or embedding provider and configure that provider.
+Use semantic graph rebuilding deliberately: it may send indexed Section excerpts to your chosen chat model and short concept text to your selected embedding provider. The exact destination depends on your provider settings.
 
-When remote chat is enabled, the configured service may receive:
+### Work with Learning Map and dashboard
 
-- Your current question
-- Retrieved Markdown chunks
-- Extracted text chunks from indexed PDFs
-- A small amount of recent conversation context
-- Relevant long-term memory entries, if enabled
-- Exam mode excerpts, generated questions, reference answers, rubrics, user answers, and grading context when using Exam mode
+1. Run **Open learning map**.
+2. Search or filter relationships, then select a node or edge.
+3. Use **Focus neighbourhood** for a local view; use **Reset exploration** to return to the broader projection.
+4. Use **Show source structure** only when you need document/Section/tag context.
+5. Run **Open learning dashboard** to check assessment coverage and mastery distribution.
+6. Run **Rebuild concept mastery** after new exams or major Concept-review changes.
 
-When remote embeddings are enabled, the configured service may receive indexed Markdown and PDF text chunks during vector index building.
+### When your vault changes outside Obsidian
 
-Vault Coach does not include hidden telemetry.
+Vault Coach records a lightweight source inventory with each successful index. If files were added, removed, replaced, or the configured scope changed while the plugin was closed, it will not reuse an old index, graph, or mastery snapshot as if it were current.
 
-The deterministic graph snapshot is also local-only. Creating or updating `.vault-coach/graph/graph-snapshot-v1.json` does not send graph facts to Ollama, OpenAI-compatible providers, or any other service.
+1. The sidebar, Learning Map, and dashboard show an update-required message.
+2. Select **Rebuild index**.
+3. For a substantial domain replacement, optionally run **Reset semantic graph decisions** after reviewing its impact count.
+4. Use **Show VaultCoach derived storage usage** to inspect the local footprint by category.
 
-## Current Limits
+Rebuilding never deletes original notes, saved assessment sessions, or exported reports. It replaces only rebuildable derived data such as indexes, vectors, graph snapshots, and mastery snapshots.
 
-- PDF support is for text-based PDFs. OCR for scanned PDFs is not included yet.
-- PDF layout recovery is heuristic. Complex academic layouts, tables, diagrams, and visual formulas may need manual verification.
-- Exam scoring is generated by your configured LLM. Treat it as study feedback, not authoritative grading.
-- Long-term memory search is currently keyword-based.
-- Streaming output is shown as plain text while tokens arrive, then rendered as Markdown after completion.
+## Command palette reference
 
-## Who It Is For
+| Command | Purpose |
+| --- | --- |
+| **Rebuild knowledge index** | Re-scan the current knowledge scope and rebuild retrieval data. |
+| **Clear knowledge index** | Clear rebuildable index and graph data; saved assessments remain. |
+| **Rebuild semantic concept graph** | Explicitly run model-backed Concept/relationship extraction. |
+| **Open concept review** | Review concept candidates and make reversible governance decisions. |
+| **Open learning map** | Explore the confirmed knowledge graph. |
+| **Open learning dashboard** | Inspect concept, assessment, and mastery summaries. |
+| **Rebuild concept mastery** | Recalculate the local mastery read model from assessment evidence. |
+| **Reset semantic graph decisions** | Clear manual semantic decisions after a deliberate review. |
+| **Show VaultCoach derived storage usage** | Read-only breakdown of VaultCoach-managed local data. |
 
-Vault Coach is especially useful if you:
+## Privacy, storage, and network use
 
-- Keep technical notes, papers, and project documentation in Obsidian
-- Prepare for interviews or exams from your own notes
-- Want local-first RAG with transparent citations
-- Need Q&A over both Markdown notes and text PDFs
-- Want an Obsidian-native workflow instead of a separate chat app
+Vault Coach has no hidden telemetry. It writes its working data inside the current vault, primarily under `.vault-coach/` and the plugin configuration directory.
 
-## Roadmap
+| Data | Why it is stored | What happens on index rebuild |
+| --- | --- | --- |
+| Text/vector indexes and graph snapshots | Fast retrieval and graph rendering | Rebuilt from the current knowledge scope |
+| Semantic candidates, embeddings, and review decisions | Concept review and Learning Map | Stale source-derived records are reconciled; manual decisions require an explicit reset |
+| Mastery snapshot | Fast dashboard reads | Rebuildable from assessment evidence and the effective Concept graph |
+| Assessment sessions and exported reports | Your learning history | Preserved |
 
-Planned directions include OCR support, better PDF layout recovery, stronger exam workflows, improved memory retrieval, richer source inspection, and optional external vector backends.
+Network behavior is controlled by your model settings:
 
-See [PROJECT_PLAN.md](./PROJECT_PLAN.md) for more details.
+- A local Ollama configuration keeps model requests on the local endpoint you configure.
+- An OpenAI-compatible provider may receive the text required for the feature you explicitly run: for example, retrieved context for Q&A, exam material and answers for scoring, or Section excerpts for semantic extraction.
+- The deterministic structural graph and source-inventory comparison do not call a model or network service.
+
+Treat `.vault-coach/` as private vault data. It can include note excerpts, filenames, headings, answers, feedback, graph evidence, and model metadata. Do not commit it to a public repository unless you have reviewed its contents.
+
+## Current limits
+
+- PDF support is for PDFs with a native text layer. OCR for scanned PDFs is not included.
+- Complex PDF tables, diagrams, formulas, and multi-column layouts may need manual verification.
+- Exam generation and scoring are study aids produced by your configured model, not authoritative grading.
+- Concept extraction quality depends on the source material and selected model; review is intentional, not a failure mode.
+- Large knowledge bases may pause new local semantic work to protect the Obsidian UI. Existing indexing, Q&A, exams, and confirmed graph reads remain available.
 
 ## Contributing
 
-Issues and pull requests are welcome.
-
-For bugs, include:
-
-- Reproduction steps
-- Obsidian version
-- Vault Coach version
-- Model provider and model names
-- Relevant settings
-- Console errors or screenshots
+Issues and pull requests are welcome. For a bug report, include reproduction steps, Obsidian and plugin versions, provider/model details, relevant non-secret settings, and console errors or screenshots.
 
 ## License
 

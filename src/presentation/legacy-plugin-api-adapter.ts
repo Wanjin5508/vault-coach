@@ -17,6 +17,7 @@ import type {
 } from "../domain/exam/exam-types";
 import type { VaultCoachSettings } from "../app/config/settings-types";
 import type { VaultCoachPluginApi } from "./plugin-api";
+import type { SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 
 type ApplicationDelegatedMethod =
     | "resetConversation"
@@ -121,6 +122,10 @@ export class LegacyPluginApiAdapter implements VaultCoachPluginApi {
 
     isVectorIndexDirty(): boolean {
         return this.host.isVectorIndexDirty();
+    }
+
+    getSourceInventoryStatus(): SourceInventoryStatus {
+        return this.host.getSourceInventoryStatus();
     }
 
     getKnowledgeIndexBusyState() {

@@ -11,6 +11,18 @@ export class PluginSettingTab {
     update(): void {}
 }
 
+export class ItemView {
+    contentEl = {
+        empty: (): void => undefined,
+    } as unknown as HTMLElement;
+
+    constructor(_leaf: unknown) {}
+}
+
+export class Notice {
+    constructor(_message: string) {}
+}
+
 export class Setting {}
 
 export class DropdownComponent {}
@@ -35,3 +47,5 @@ export function normalizePath(path: string): string {
         .replace(/^\//, "")
         .replace(/\/$/, "");
 }
+
+export function setIcon(_parent: HTMLElement, _iconId: string): void {}

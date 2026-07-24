@@ -72,6 +72,35 @@ function createEvaluationItem(questionId = "question-1") {
 }
 
 describe("ExamController", () => {
+    it("prepares a visible, editable exam scope from Learning Map source files", () => {
+        const getExamFileOptions = vi.fn(() => [
+            { filePath: "notes/concept.md", fileName: "concept.md", parentFolder: "notes", chunkCount: 3, permanentlyExcluded: false },
+            { filePath: "notes/other.md", fileName: "other.md", parentFolder: "notes", chunkCount: 2, permanentlyExcluded: false },
+            { filePath: "notes/rule-excluded.md", fileName: "rule-excluded.md", parentFolder: "notes", chunkCount: 1, permanentlyExcluded: true },
+        ]);
+        const api = {
+            settings: { enableExamSmartFiltering: true },
+            getExamScopeOptions: () => [
+                { id: "__all__", label: "All", folderPath: null, fileCount: 3, chunkCount: 6 },
+                { id: "notes", label: "notes", folderPath: "notes", fileCount: 3, chunkCount: 6 },
+            ],
+            getExamFileOptions,
+        } as unknown as VaultCoachPluginApi;
+        const controller = new ExamController(api, (key) => key);
+
+        expect(controller.prepareSourceScopedExam(["notes/concept.md", "notes/rule-excluded.md"])).toBe(true);
+        expect(getExamFileOptions).toHaveBeenCalledWith([]);
+        expect(controller.getState()).toMatchObject({ phase: "setup", showFileManager: true });
+        expect(controller.getState().selectedScopeIds).toEqual(new Set(["notes"]));
+        expect(controller.getState().forceIncludedFilePaths).toEqual(new Set(["notes/concept.md"]));
+        expect(controller.getState().excludedFilePaths).toEqual(new Set(["notes/other.md", "notes/rule-excluded.md"]));
+        expect(controller.getScopeSelection().selectedFolderPaths).toEqual(["notes"]);
+        expect(getExamFileOptions).toHaveBeenCalledWith(["notes"]);
+
+        expect(controller.prepareSourceScopedExam(["missing.md", "notes/rule-excluded.md"])).toBe(false);
+        expect(controller.getState().forceIncludedFilePaths).toEqual(new Set(["notes/concept.md"]));
+    });
+
     it("owns exam generation state, progress, and final cleanup", async () => {
         const deferred = createDeferred<ExamSession>();
         const createExamSession = vi.fn((_selection, _questionCount: number, options?: ExamGenerationOptions) => {

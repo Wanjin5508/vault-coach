@@ -639,10 +639,10 @@ export class LocalModelClient {
      * Ollama 的 /api/embed 支持 string 或 string[] 输入，
      * 因此这里直接一次发送一个小批次，避免为每个 chunk 单独发请求。
      */
-    async embedTexts(texts: string[]): Promise<number[][]> {
+    async embedTexts(texts: string[], options: { allowWhenVectorRetrievalDisabled?: boolean } = {}): Promise<number[][]> {
         const settings: VaultCoachSettings = this.getSettings();
         const activeEmbeddingModel: string = this.getActiveEmbeddingModel(settings);
-        if (!settings.enableVectorRetrieval || activeEmbeddingModel.length === 0) {
+        if ((!settings.enableVectorRetrieval && !options.allowWhenVectorRetrievalDisabled) || activeEmbeddingModel.length === 0) {
             return [];
         } 
 

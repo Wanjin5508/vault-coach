@@ -4,6 +4,11 @@ import type { KnowledgeBaseSnapshot, PersistedPluginState } from "./infrastructu
 
 const KNOWLEDGE_INDEX_DIR_NAME = "knowledge-index";
 
+export interface VaultCoachDerivedDataPaths {
+    textSnapshotPath: string;
+    vectorDirectoryPath: string;
+}
+
 /**
  * 本地持久化存储模块。
  *
@@ -119,6 +124,14 @@ export class VaultCoachPersistentStore {
         if (await this.app.vault.adapter.exists(path)) {
             await this.app.vault.adapter.rmdir(path, true);
         }
+    }
+
+    /** Stable, read-only roots for the storage-footprint diagnostic. */
+    getDerivedDataPaths(): VaultCoachDerivedDataPaths {
+        return {
+            textSnapshotPath: this.getIndexSnapshotPath(),
+            vectorDirectoryPath: this.getKnowledgeIndexPath("vectors"),
+        };
     }
 
     /**

@@ -50,4 +50,16 @@ export interface VaultCoachSettings {
     autoIndexFileThreshold: number;
     examExcludePathPatterns: string;
     enableExamSmartFiltering: boolean;
+    /** Explicit opt-in: semantic extraction may send Section excerpts to the selected model. */
+    enableSemanticGraph: boolean;
+    enableSemanticGraphAutoSync: boolean;
+    semanticGraphMaxSectionsPerRun: number;
+    semanticGraphMaxSectionCharacters: number;
+    semanticGraphSimilarityTopK: number;
+    semanticGraphSimilarityThreshold: number;
+    /** Shows high-confidence proposals in Learning Map without turning them into confirmed facts. */
+    learningMapAutoRelationsEnabled: boolean;
+    learningMapAutoModelThreshold: number;
+    learningMapAutoIncludeRuleRelations: boolean;
+    learningMapAutoIncludeSimilarityRelations: boolean;
 }

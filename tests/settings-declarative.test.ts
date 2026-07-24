@@ -70,4 +70,17 @@ describe("VaultCoachSettingTab declarative settings", () => {
         expect(markVectorIndexDirty).toHaveBeenCalledOnce();
         expect(saveSettings).toHaveBeenCalledTimes(2);
     });
+
+    it("keeps Learning Map automatic relations display-only and clamps their threshold", async () => {
+        const { api, refreshAllViews, saveSettings } = createApi();
+        const tab = new VaultCoachSettingTab(new App(), {} as never, api);
+
+        await tab.setControlValue("learningMapAutoRelationsEnabled", false);
+        await tab.setControlValue("learningMapAutoModelThreshold", "0.2");
+
+        expect(api.settings.learningMapAutoRelationsEnabled).toBe(false);
+        expect(api.settings.learningMapAutoModelThreshold).toBe(0.7);
+        expect(refreshAllViews).toHaveBeenCalledTimes(2);
+        expect(saveSettings).toHaveBeenCalledTimes(2);
+    });
 });
