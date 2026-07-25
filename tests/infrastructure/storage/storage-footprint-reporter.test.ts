@@ -14,6 +14,7 @@ describe("StorageFootprintReporter", () => {
             ".vault-coach/graph/semantic/sections/aa.json": { size: 8, mtime: 6 },
             ".vault-coach/graph/semantic/embeddings/vectors-a.bin": { size: 16, mtime: 7 },
             ".vault-coach/mastery/mastery-snapshot-v1.json": { size: 20, mtime: 8 },
+            ".vault-coach/recommendations/review-actions-v1.json": { size: 11, mtime: 9 },
             ".vault-coach/assessments/sessions/exam-1.json": { size: 25, mtime: 9 },
             ".vault-coach/exams/exam-1.md": { size: 15, mtime: 10 },
             "notes/private.md": { size: 999, mtime: 11 },
@@ -24,12 +25,13 @@ describe("StorageFootprintReporter", () => {
 
         const footprint = await reporter.getFootprint();
 
-        expect(footprint).toMatchObject({ generatedAt: 99, totalBytes: 148 });
+        expect(footprint).toMatchObject({ generatedAt: 99, totalBytes: 159 });
         expect(footprint.entries).toEqual(expect.arrayContaining([
             expect.objectContaining({ category: "text-index", bytes: 10, fileCount: 1 }),
             expect.objectContaining({ category: "vector-index", bytes: 17, fileCount: 2, latestModifiedAt: 3 }),
             expect.objectContaining({ category: "semantic-facts", bytes: 15, fileCount: 2 }),
             expect.objectContaining({ category: "semantic-embeddings", bytes: 16, fileCount: 1 }),
+            expect.objectContaining({ category: "recommendation-actions", bytes: 11, fileCount: 1 }),
             expect.objectContaining({ category: "assessments", bytes: 25, fileCount: 1 }),
         ]));
     });

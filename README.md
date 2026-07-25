@@ -22,7 +22,7 @@ Notes are useful only when you can revisit, test, and connect them. Vault Coach 
 1. **Find and explain** — ask questions over your Markdown notes and text PDFs; inspect the source behind an answer.
 2. **Practise and assess** — generate an exam from a vault, folder, or chosen files; submit answers and keep structured results.
 3. **Connect concepts** — extract evidence-backed concept and relationship candidates, then decide what is actually true in Concept review.
-4. **Navigate learning** — explore confirmed knowledge in a Learning Map and see evidence-backed mastery states in the Learning dashboard.
+4. **Navigate learning** — explore confirmed knowledge in a Learning Map, see evidence-backed mastery states, and act on local study recommendations in the Learning dashboard.
 5. **Keep control of data** — choose a local model, a self-hosted endpoint, or an OpenAI-compatible provider. Model calls occur only for the features and provider you configure.
 
 ## What you can do
@@ -88,7 +88,9 @@ Pending or rejected candidates remain out of the Learning Map, so a visual conne
 
 ### Follow evidence-based mastery
 
-The **Learning dashboard** summarizes confirmed concepts, assessment coverage, mastery distribution, and local data health. Mastery is derived from saved structured exam events and confirmed Concept bindings—not from a guess that a note was merely opened.
+The **Learning dashboard** summarizes confirmed concepts, assessment coverage, mastery distribution, local data health, and up to five evidence-backed next steps. Mastery is derived from saved structured exam events and confirmed Concept bindings—not from a guess that a note was merely opened.
+
+Recommendations are deterministic local projections of confirmed source-backed Concepts, Mastery, saved assessments, and confirmed prerequisites. You can open their sources, start a source-scoped exam, complete, defer, dismiss, or restore an item, and copy the current plan as Markdown. Those actions are stored locally under `.vault-coach/recommendations/`; they never alter scores, Mastery, or graph facts. An optional Simple/Challenge suggestion is only a hint—you still choose the final mode in exam setup.
 
 Use **Rebuild concept mastery** after taking exams or after changing the effective Concept graph. The resulting snapshot is rebuildable; saved exam sessions remain the durable learning record.
 

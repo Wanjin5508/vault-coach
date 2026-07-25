@@ -460,6 +460,59 @@
     gap: var(--size-2-3);
 }
 
+.vault-coach-progress-recommendations {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+    min-width: 0;
+    padding: var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-secondary);
+}
+
+.vault-coach-progress-recommendations-header,
+.vault-coach-progress-recommendation-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--size-2-3);
+}
+
+.vault-coach-progress-recommendations-header {
+    justify-content: space-between;
+}
+
+.vault-coach-progress-recommendations-header h3 {
+    margin: 0;
+    font-size: var(--font-ui-medium);
+}
+
+.vault-coach-progress-recommendation-list {
+    display: grid;
+    gap: var(--size-2-3);
+}
+
+.vault-coach-progress-recommendation {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-2);
+    padding: var(--size-2-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary-alt);
+}
+
+.vault-coach-progress-recommendation-history summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-progress-recommendation-history .vault-coach-progress-recommendation-list {
+    margin-top: var(--size-2-3);
+}
+
 .vault-coach-retrieval-group {
     display: inline-flex;
     align-items: center;

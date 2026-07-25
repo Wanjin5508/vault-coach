@@ -18,6 +18,7 @@ import { ObsidianGraphSourceReader } from "../infrastructure/obsidian/obsidian-g
 import { JsonGraphStore } from "../infrastructure/storage/json-graph-store";
 import { JsonSemanticGraphStore } from "../infrastructure/storage/json-semantic-graph-store";
 import { JsonMasteryStore } from "../infrastructure/storage/json-mastery-store";
+import { JsonReviewActionStore } from "../infrastructure/storage/json-review-action-store";
 import { StorageFootprintReporter } from "../infrastructure/storage/storage-footprint-reporter";
 import { LongTermMemoryService } from "../memory/memory-service";
 import { VaultCoachPersistentStore } from "../persistent-store";
@@ -32,6 +33,7 @@ import { LearningGraphQueryService } from "./learning-graph/learning-graph-query
 import { ServiceLearningGraphSource } from "./learning-graph/learning-graph-source";
 import { MasteryService } from "./mastery/mastery-service";
 import { ProgressService } from "./progress/progress-service";
+import { RecommendationService } from "./recommendation/recommendation-service";
 import { AdaptiveExamPlanner } from "./exam/adaptive-exam-planner";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
@@ -85,6 +87,7 @@ export interface ApplicationContainerServices {
     learningGraphQueryService: LearningGraphQueryService;
     masteryService: MasteryService;
     progressService: ProgressService;
+    recommendationService: RecommendationService;
     adaptiveExamPlanner: AdaptiveExamPlanner;
 }
 
@@ -170,10 +173,18 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         store: new JsonMasteryStore(dependencies.app.vault.adapter),
         getCapacityAssessment: () => semanticGraphService.getCapacityAssessment(),
     });
+    let reviewActionSequence = 0;
+    const recommendationService = new RecommendationService({
+        learningGraph: learningGraphQueryService,
+        mastery: masteryService,
+        actionStore: new JsonReviewActionStore(dependencies.app.vault.adapter),
+        createEventId: () => createReviewActionEventId(reviewActionSequence++),
+    });
     const progressService = new ProgressService({
         catalogReader: learningGraphQueryService,
         masteryReader: masteryService,
         assessmentSessionStore,
+        recommendationReader: recommendationService,
     });
     const adaptiveExamPlanner = new AdaptiveExamPlanner({
         learningGraph: learningGraphQueryService,
@@ -234,6 +245,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         learningGraphQueryService,
         masteryService,
         progressService,
+        recommendationService,
         adaptiveExamPlanner,
     });
     application = applicationInstance;
@@ -259,6 +271,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             learningGraphQueryService,
             masteryService,
             progressService,
+            recommendationService,
             adaptiveExamPlanner,
         },
         async dispose(): Promise<void> {
@@ -276,6 +289,16 @@ function createAssessmentEventId(sequence: number): string {
     }
 
     return `assessment-event-${Date.now().toString(36)}-${sequence.toString(36)}`;
+}
+
+function createReviewActionEventId(sequence: number): string {
+    const randomValues = new Uint32Array(2);
+    if (window.crypto?.getRandomValues) {
+        window.crypto.getRandomValues(randomValues);
+        return `review-action-${randomValues[0]?.toString(36) ?? "0"}-${randomValues[1]?.toString(36) ?? "0"}-${sequence.toString(36)}`;
+    }
+
+    return `review-action-${Date.now().toString(36)}-${sequence.toString(36)}`;
 }
 
 function createExamEvaluationMetadata(settings: VaultCoachSettings): ExamEvaluationMetadata {

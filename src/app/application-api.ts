@@ -28,6 +28,7 @@ import type { ProgressSnapshot, ProgressStateView } from "./progress/progress-ty
 import type { SourceInventoryDiff, SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 import type { StorageFootprint } from "../domain/index-lifecycle/storage-footprint";
 import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
+import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendation/recommendation-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -129,6 +130,18 @@ export interface ProgressApplicationApi {
     getSnapshot(): Promise<ProgressSnapshot>;
 }
 
+/**
+ * M7 recommendation facade. It exposes disposable recommendations and the
+ * small durable action log separately, so presentation never writes storage
+ * files or changes mastery/graph facts directly.
+ */
+export interface RecommendationApplicationApi {
+    isAvailable(): boolean;
+    getSnapshot(): Promise<RecommendationSnapshot>;
+    recordAction(recommendationId: string, action: ReviewAction, deferUntil?: number): Promise<void>;
+    exportMarkdown(): Promise<string>;
+}
+
 export interface VaultCoachApplicationApi {
     chat: ChatApplicationApi;
     exam: ExamApplicationApi;
@@ -138,4 +151,5 @@ export interface VaultCoachApplicationApi {
     learningGraph: LearningGraphApplicationApi;
     mastery: MasteryApplicationApi;
     progress: ProgressApplicationApi;
+    recommendations: RecommendationApplicationApi;
 }

@@ -1,5 +1,5 @@
 import type { ChatService } from "./chat/chat-service";
-import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, LearningGraphApplicationApi, MasteryApplicationApi, ProgressApplicationApi, SemanticGraphApplicationApi, VaultCoachApplicationApi } from "./application-api";
+import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, LearningGraphApplicationApi, MasteryApplicationApi, ProgressApplicationApi, RecommendationApplicationApi, SemanticGraphApplicationApi, VaultCoachApplicationApi } from "./application-api";
 import type { ApplicationEvent, ApplicationEventListener } from "./application-events";
 import type { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
 import { getQuestionIdsNeedingAssessmentEvents } from "../domain/assessment/assessment-event-fingerprint";
@@ -23,12 +23,14 @@ import type { LearningGraphQueryService } from "./learning-graph/learning-graph-
 import type { MasteryService } from "./mastery/mastery-service";
 import type { ProgressService } from "./progress/progress-service";
 import type { AdaptiveExamPlanner } from "./exam/adaptive-exam-planner";
+import type { RecommendationService } from "./recommendation/recommendation-service";
 import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
 import {
     PROGRESS_SNAPSHOT_SCHEMA_VERSION,
     type ProgressSnapshot,
     type ProgressStateView,
 } from "./progress/progress-types";
+import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendation/recommendation-types";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
@@ -58,6 +60,7 @@ export interface VaultCoachApplicationDependencies {
     masteryService?: MasteryService;
     progressService?: ProgressService;
     adaptiveExamPlanner?: AdaptiveExamPlanner;
+    recommendationService?: RecommendationService;
 }
 
 /** Application facade with grouped use-case APIs and no Obsidian UI dependency. */
@@ -70,6 +73,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
     readonly learningGraph: LearningGraphApplicationApi;
     readonly mastery: MasteryApplicationApi;
     readonly progress: ProgressApplicationApi;
+    readonly recommendations: RecommendationApplicationApi;
     private readonly listeners: Set<ApplicationEventListener> = new Set();
 
     constructor(private readonly dependencies: VaultCoachApplicationDependencies) {
@@ -111,6 +115,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         this.learningGraph = this.createLearningGraphApi();
         this.mastery = this.createMasteryApi();
         this.progress = this.createProgressApi();
+        this.recommendations = this.createRecommendationApi();
     }
 
     subscribe(listener: ApplicationEventListener): () => void {
@@ -342,6 +347,27 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         };
     }
 
+    private createRecommendationApi(): RecommendationApplicationApi {
+        const service = this.dependencies.recommendationService;
+        return {
+            isAvailable: () => service !== undefined,
+            getSnapshot: async (): Promise<RecommendationSnapshot> => {
+                if (!service) return createUnavailableRecommendationSnapshot();
+                return service.getSnapshot();
+            },
+            recordAction: async (recommendationId: string, action: ReviewAction, deferUntil?: number): Promise<void> => {
+                if (!service) throw new Error("Recommendation service is unavailable.");
+                await service.recordAction(recommendationId, action, deferUntil);
+                this.dependencies.progressService?.invalidate();
+                this.emit({ type: "recommendations-changed" });
+            },
+            exportMarkdown: async (): Promise<string> => {
+                if (!service) return "# VaultCoach study plan\n\nStudy recommendations are unavailable.\n";
+                return createRecommendationsMarkdown(await service.getSnapshot());
+            },
+        };
+    }
+
     /**
      * Persists structured facts before their disposable Markdown projection.
      * Draft saving retains the legacy report-only behaviour for compatibility.
@@ -456,6 +482,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
 
     private invalidateProgress(): void {
         this.dependencies.progressService?.invalidate();
+        this.dependencies.recommendationService?.invalidate();
     }
 }
 
@@ -508,6 +535,40 @@ function createUnavailableProgressSnapshot(): ProgressSnapshot {
         },
         recommendations: [],
     };
+}
+
+function createUnavailableRecommendationSnapshot(): RecommendationSnapshot {
+    return {
+        algorithmVersion: "recommendation/unavailable",
+        generatedAt: Date.now(),
+        primary: [],
+        queue: [],
+    };
+}
+
+/** Markdown is an export projection only; recommendation facts stay in JSON. */
+function createRecommendationsMarkdown(snapshot: RecommendationSnapshot): string {
+    const open = snapshot.primary;
+    const lines = [
+        "# VaultCoach study plan",
+        "",
+        `Generated: ${new Date(snapshot.generatedAt).toISOString()}`,
+        `Algorithm: ${snapshot.algorithmVersion}`,
+        "",
+    ];
+    if (open.length === 0) {
+        lines.push("No open recommendations are available.");
+        return `${lines.join("\n")}\n`;
+    }
+    lines.push("## Next steps", "");
+    for (const item of open) {
+        lines.push(`- [ ] **${escapeMarkdown(item.label)}** — ${item.reasonCodes.join(", ")}`);
+    }
+    return `${lines.join("\n")}\n`;
+}
+
+function escapeMarkdown(value: string): string {
+    return value.replace(/[\\`*_{}<>]/g, "\\$&");
 }
 
 function unavailableProgressState(): ProgressStateView {

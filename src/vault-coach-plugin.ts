@@ -61,6 +61,8 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
             leaf,
             this.runtime.application,
             () => this.activateLearningMapView(),
+            (sourcePath) => this.openLearningMapSource(sourcePath),
+            (sourcePaths) => this.startLearningMapSourceExam(sourcePaths),
         ));
         registerVaultCoachCommands(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
         this.registerSemanticGraphCommands();

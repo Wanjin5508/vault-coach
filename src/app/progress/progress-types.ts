@@ -1,4 +1,11 @@
 import type { MasteryLevel } from "../../domain/mastery/mastery-types";
+import type {
+    RecommendationActionState,
+    RecommendationKind,
+    RecommendationReasonCode,
+    SuggestedAction,
+} from "../../domain/recommendation/recommendation-types";
+import type { ExamMode } from "../../domain/exam/exam-types";
 
 export const PROGRESS_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 
@@ -44,16 +51,18 @@ export interface ProgressAssessmentSummary {
     latestSessionAt: number | null;
 }
 
-/**
- * Reserved stable display contract for M7. L5.1 intentionally returns an
- * empty list because no RecommendationService exists yet.
- */
+/** A bounded display projection of an independently rebuildable recommendation. */
 export interface ProgressRecommendationPreview {
     id: string;
-    kind: "review-concept" | "review-prerequisite" | "practice-topic" | "explore-gap";
+    kind: RecommendationKind;
     label: string;
-    explanation: string;
     targetConceptIds: readonly string[];
+    sourceChunkIds: readonly string[];
+    priority: number;
+    reasonCodes: readonly RecommendationReasonCode[];
+    actionState: RecommendationActionState;
+    suggestedAction: SuggestedAction;
+    suggestedExamMode?: ExamMode;
 }
 
 /**
