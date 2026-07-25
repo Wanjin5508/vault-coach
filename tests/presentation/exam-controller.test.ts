@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ExamController, type ExamControllerEvent } from "../../src/presentation/controllers/exam-controller";
 import type { VaultCoachPluginApi } from "../../src/presentation/plugin-api";
-import type { ExamGenerationOptions, ExamSession } from "../../src/domain/exam/exam-types";
+import type { ExamGenerationOptions, ExamScopeAnalysisResult, ExamSession } from "../../src/domain/exam/exam-types";
 
 function createDeferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
     let resolvePromise: ((value: T) => void) | null = null;
@@ -71,6 +71,32 @@ function createEvaluationItem(questionId = "question-1") {
     };
 }
 
+function createAnalysis(): ExamScopeAnalysisResult {
+    return {
+        selection: {
+            selectedFolderPaths: [],
+            excludedFilePaths: [],
+            forceIncludedFilePaths: [],
+        },
+        profiles: [],
+        summary: {
+            totalFiles: 1,
+            ruleExcludedFiles: 0,
+            manualExcludedFiles: 0,
+            semanticExcludedFiles: 0,
+            partialFiles: 0,
+            includedFiles: 1,
+            eligibleChunkCount: 1,
+            estimatedMinQuestions: 1,
+            estimatedMaxQuestions: 1,
+            cacheHits: 0,
+            cacheMisses: 1,
+        },
+        eligibleChunkIds: ["chunk-1"],
+        promptVersion: "test/v1",
+    };
+}
+
 describe("ExamController", () => {
     it("prepares a visible, editable exam scope from Learning Map source files", () => {
         const getExamFileOptions = vi.fn(() => [
@@ -125,6 +151,7 @@ describe("ExamController", () => {
         const options = createExamSession.mock.calls[0]?.[2] as ExamGenerationOptions;
         expect(options.abortSignal).toBeInstanceOf(AbortSignal);
         expect(options.skipSemanticFiltering).toBe(false);
+        expect(options.examMode).toBe("simple");
 
         deferred.resolve(createSession());
         await creating;
@@ -132,6 +159,45 @@ describe("ExamController", () => {
         expect(controller.getState()).toMatchObject({ busy: false, phase: "taking", progressLabel: "" });
         expect(controller.getState().session?.id).toBe("exam-1");
         expect(events.some((event) => event.type === "notice" && event.key === "exam.notice.questionCountReduced")).toBe(true);
+    });
+
+    it("switches the generation policy to challenge mode without changing the selected scope", () => {
+        const api = {
+            settings: { enableExamSmartFiltering: true },
+            getExamScopeOptions: () => [],
+        } as unknown as VaultCoachPluginApi;
+        const controller = new ExamController(api, (key) => key);
+
+        controller.setExamMode("challenge");
+
+        expect(controller.getState()).toMatchObject({ examMode: "challenge", phase: "setup" });
+        expect(controller.getScopeSelection()).toEqual({
+            selectedFolderPaths: [],
+            excludedFilePaths: [],
+            forceIncludedFilePaths: [],
+        });
+    });
+
+    it("locks the analyzed mode until the user explicitly returns to setup", async () => {
+        const api = {
+            settings: { enableExamSmartFiltering: true },
+            getExamScopeOptions: () => [],
+            analyzeExamScope: vi.fn(async () => createAnalysis()),
+        } as unknown as VaultCoachPluginApi;
+        const controller = new ExamController(api, (key) => key);
+
+        controller.setExamMode("challenge");
+        await controller.analyzeScope(false);
+        controller.setExamMode("simple");
+
+        const analyzedState = controller.getState();
+        expect(analyzedState.examMode).toBe("challenge");
+        expect(analyzedState.analysis).not.toBeNull();
+
+        controller.returnToSetup();
+        controller.setExamMode("simple");
+
+        expect(controller.getState()).toMatchObject({ examMode: "simple", analysis: null, phase: "setup" });
     });
 
     it("cancels scope analysis and restores a usable setup state", async () => {

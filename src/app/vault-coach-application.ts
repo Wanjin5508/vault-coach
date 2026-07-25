@@ -12,7 +12,7 @@ import {
     type AssessmentSessionStore,
 } from "../domain/assessment/assessment-types";
 import type { ExamEngine } from "../exam/exam-engine";
-import type { ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
+import type { ExamEvaluator } from "../domain/exam/exam-evaluation-router";
 import type { ExamSessionStore, MarkdownExamHistoryRecord } from "../exam/exam-session-store";
 import type { ExamEvaluationMetadata, ExamGenerationOptions, ExamHistoryItem, ExamScopeSelection, ExamSession } from "../domain/exam/exam-types";
 import type { KnowledgeGraphService } from "./graph/knowledge-graph-service";
@@ -31,7 +31,7 @@ import {
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
     examEngine: ExamEngine;
-    examEvaluationService: ExamEvaluationService;
+    examEvaluationService: ExamEvaluator;
     examSessionStore: ExamSessionStore;
     assessmentSessionStore: AssessmentSessionStore;
     assessmentEventFactory: AssessmentEventFactory;

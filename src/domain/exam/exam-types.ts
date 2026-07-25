@@ -120,6 +120,8 @@ export interface ExamGenerationProgress {
 
 export interface ExamGenerationOptions {
     analysis?: ExamScopeAnalysisResult;
+    /** The user-facing generation policy for the session being created. */
+    examMode?: ExamMode;
     forceProfileRefresh?: boolean;
     skipSemanticFiltering?: boolean;
     abortSignal?: AbortSignal;
@@ -134,6 +136,10 @@ export interface GeneratedExamQuestionCandidate {
     rubric: string;
     sourceChunkIds: string[];
     evidenceExcerptIds: string[];
+    /** Candidate UI/answer contract. Kept optional for legacy generator fixtures. */
+    answerForm?: ExamAnswerForm;
+    options?: ExamChoiceOption[];
+    correctOptionId?: string;
 }
 
 export interface ExamQuestionReview {
@@ -176,6 +182,11 @@ export interface ExamBlueprintItem {
     learningObjective: string;
     questionType: ExamQuestionType;
     difficulty: ExamDifficulty;
+    /** Separate from cognitive questionType: determines how the learner answers. */
+    /** Undefined is a legacy free-response blueprint item. */
+    answerForm?: ExamAnswerForm;
+    /** A short, auditable planner explanation used only during generation diagnostics. */
+    selectionRationale?: string;
     sourceChunkIds: string[];
 }
 
@@ -190,6 +201,18 @@ export type ExamQuestionType = "explanation" | "comparison" | "application" | "r
 
 export type ExamDifficulty = "basic" | "intermediate" | "advanced";
 
+/** A session-level experience policy. Do not confuse this with per-item ExamDifficulty. */
+export type ExamMode = "simple" | "challenge";
+
+/** The response UI and evaluation route for a generated question. */
+export type ExamAnswerForm = "single-choice" | "true-false" | "free-response";
+
+/** A stable option identifier is persisted instead of a display index or translated label. */
+export interface ExamChoiceOption {
+    id: string;
+    text: string;
+}
+
 /** Identifies the model and prompt contract used to produce a domain value. */
 export interface ModelPromptMetadata {
     modelProvider: string;
@@ -200,6 +223,8 @@ export interface ModelPromptMetadata {
 /** Identifies the model and prompt contract used for a completed evaluation. */
 export interface ExamEvaluationMetadata extends ModelPromptMetadata {
     evaluatedAt: number;
+    /** Existing sessions are model-scored; objective questions declare deterministic scoring explicitly. */
+    evaluatorKind?: "model" | "deterministic";
 }
 
 export type AssessmentErrorCode =
@@ -222,6 +247,12 @@ export interface ExamQuestion {
     rubric: string;
     questionType: ExamQuestionType;
     difficulty: ExamDifficulty;
+    /** Undefined on legacy records and therefore interpreted as free-response. */
+    answerForm?: ExamAnswerForm;
+    /** Present exactly for objective questions. */
+    options?: ExamChoiceOption[];
+    /** Present exactly for objective questions; never rendered in the taking UI. */
+    correctOptionId?: string;
     sourceChunkIds: string[];
     evidenceExcerptIds: string[];
     sourcePaths: string[];
@@ -259,6 +290,8 @@ export interface ExamSession {
     selectedFolderPaths: string[];
     excludedFilePaths: string[];
     forceIncludedFilePaths: string[];
+    /** Undefined on legacy records; current UI treats those sessions as legacy free-response sessions. */
+    examMode?: ExamMode;
     scopeSnapshot?: ExamScopeSnapshot;
     analysisSummary?: ExamScopeAnalysisSummary;
     blueprint?: ExamBlueprint;

@@ -1,7 +1,10 @@
 import type {
+    ExamAnswerForm,
+    ExamChoiceOption,
     ExamQuestionReview,
     GeneratedExamQuestionCandidate,
 } from "../domain/exam/exam-types";
+import { normalizeObjectiveOptions } from "../domain/exam/exam-question-policy";
 import type { IndexedChunk } from "../domain/documents/document-types";
 import {
     normalizeWhitespace,
@@ -58,6 +61,8 @@ export class ExamQuestionValidator {
             rubric: this.normalizeRubricText(stripInternalExamLabels(normalizeWhitespace(candidate.rubric))),
             sourceChunkIds: this.normalizeStringArray(candidate.sourceChunkIds),
             evidenceExcerptIds: this.normalizeStringArray(candidate.evidenceExcerptIds),
+            options: normalizeObjectiveOptions(candidate.options),
+            correctOptionId: typeof candidate.correctOptionId === "string" ? candidate.correctOptionId.trim() : undefined,
         };
     }
 
@@ -107,6 +112,8 @@ export class ExamQuestionValidator {
             failureCodes.push("rubric-not-100-point");
         }
 
+        this.validateObjectiveContract(candidate, failureCodes);
+
         if (this.questionLeaksReferenceAnswer(candidate.question, candidate.referenceAnswer)) {
             failureCodes.push("question-leaks-answer");
         }
@@ -132,6 +139,22 @@ export class ExamQuestionValidator {
             failureCodes,
             repairInstruction: passed ? "" : this.buildRepairInstruction(failureCodes),
         };
+    }
+
+    /** Objective questions must be locally and uniquely scoreable. */
+    private validateObjectiveContract(candidate: GeneratedExamQuestionCandidate, failureCodes: string[]): void {
+        const answerForm: ExamAnswerForm | undefined = candidate.answerForm;
+        if (answerForm !== "single-choice" && answerForm !== "true-false") return;
+
+        const options: ExamChoiceOption[] = normalizeObjectiveOptions(candidate.options);
+        const requiredCount = answerForm === "true-false" ? 2 : 3;
+        const maxCount = answerForm === "true-false" ? 2 : 5;
+        if (options.length < requiredCount || options.length > maxCount) {
+            failureCodes.push("invalid-objective-options");
+        }
+        if (!candidate.correctOptionId || !options.some((option) => option.id === candidate.correctOptionId)) {
+            failureCodes.push("missing-objective-answer-key");
+        }
     }
 
     /**

@@ -4,6 +4,7 @@ import type {
     ExamGenerationOptions,
     ExamGenerationProgress,
     ExamHistoryItem,
+    ExamMode,
     ExamScopeAnalysisResult,
     ExamScopeOption,
     ExamScopeSelection,
@@ -27,6 +28,7 @@ export interface ExamViewState {
     smartFilteringFailed: boolean;
     progressLabel: string;
     busy: boolean;
+    examMode: ExamMode;
     questionCount: number;
     exportFolderPath: string;
     historyItems: readonly ExamHistoryItem[];
@@ -64,6 +66,7 @@ export class ExamController {
         smartFilteringFailed: false,
         progressLabel: "",
         busy: false,
+        examMode: "simple",
         questionCount: 5,
         exportFolderPath: "VaultCoach Exams",
         historyItems: [],
@@ -156,6 +159,7 @@ export class ExamController {
     }
 
     toggleScope(option: ExamScopeOption, isAllOption: boolean, checked: boolean): void {
+        if (this.isSetupConfigurationLocked()) return;
         this.invalidateAnalysis();
         if (isAllOption) {
             if (checked) {
@@ -177,11 +181,20 @@ export class ExamController {
     }
 
     setQuestionCount(value: string, maxQuestionCount = 10): void {
+        if (this.isSetupConfigurationLocked()) return;
         this.state.questionCount = this.normalizeQuestionCount(value, maxQuestionCount);
         this.notifyStateChanged();
     }
 
+    setExamMode(mode: ExamMode): void {
+        if (this.isSetupConfigurationLocked() || this.state.examMode === mode) return;
+        this.state.examMode = mode;
+        this.invalidateAnalysis();
+        this.notifyStateChanged();
+    }
+
     setFileManagerVisible(visible: boolean): void {
+        if (this.isSetupConfigurationLocked()) return;
         this.state.showFileManager = visible;
         this.notifyStateChanged();
     }
@@ -192,6 +205,7 @@ export class ExamController {
     }
 
     includeAllFiles(fileOptions: ExamFileOption[]): void {
+        if (this.isSetupConfigurationLocked()) return;
         this.invalidateAnalysis();
         for (const option of fileOptions) {
             this.state.excludedFilePaths.delete(option.filePath);
@@ -200,6 +214,7 @@ export class ExamController {
     }
 
     excludeAllFiles(fileOptions: ExamFileOption[]): void {
+        if (this.isSetupConfigurationLocked()) return;
         this.invalidateAnalysis();
         for (const option of fileOptions) {
             if (!option.permanentlyExcluded) {
@@ -210,6 +225,7 @@ export class ExamController {
     }
 
     resetFileSelection(fileOptions: ExamFileOption[]): void {
+        if (this.isSetupConfigurationLocked()) return;
         this.invalidateAnalysis();
         for (const option of fileOptions) {
             this.state.excludedFilePaths.delete(option.filePath);
@@ -219,6 +235,7 @@ export class ExamController {
     }
 
     setFileExcluded(option: ExamFileOption, excluded: boolean): void {
+        if (this.isSetupConfigurationLocked()) return;
         this.invalidateAnalysis();
         if (excluded) {
             this.state.excludedFilePaths.add(option.filePath);
@@ -230,6 +247,7 @@ export class ExamController {
     }
 
     forceIncludeFile(option: ExamFileOption): void {
+        if (this.isSetupConfigurationLocked()) return;
         this.invalidateAnalysis();
         this.state.forceIncludedFilePaths.add(option.filePath);
         this.state.excludedFilePaths.delete(option.filePath);
@@ -237,6 +255,7 @@ export class ExamController {
     }
 
     async setSmartFilteringEnabled(enabled: boolean): Promise<void> {
+        if (this.isSetupConfigurationLocked()) return;
         this.invalidateAnalysis();
         this.api.settings.enableExamSmartFiltering = enabled;
         await this.api.saveSettings();
@@ -259,7 +278,7 @@ export class ExamController {
     }
 
     async analyzeScope(forceRefresh: boolean): Promise<void> {
-        if (this.state.busy) {
+        if (this.isSetupConfigurationLocked()) {
             return;
         }
 
@@ -525,6 +544,18 @@ export class ExamController {
         this.notifyStateChanged();
     }
 
+    /**
+     * Discards the completed analysis and reopens setup controls. A learner
+     * must take this explicit step before changing the scope, count, or mode
+     * used to produce the current analysis.
+     */
+    returnToSetup(): void {
+        if (this.state.busy || !this.state.analysis) return;
+        this.state.phase = "setup";
+        this.invalidateAnalysis();
+        this.notifyStateChanged();
+    }
+
     returnFromHistory(): void {
         if (!this.state.session) {
             this.state.phase = "setup";
@@ -560,6 +591,7 @@ export class ExamController {
     private createGenerationOptions(skipSemanticFiltering: boolean): ExamGenerationOptions {
         return {
             analysis: skipSemanticFiltering ? undefined : this.state.analysis ?? undefined,
+            examMode: this.state.examMode,
             skipSemanticFiltering,
             abortSignal: this.activeAbortController?.signal,
             onProgress: (progress) => this.updateProgress(progress),
@@ -608,6 +640,10 @@ export class ExamController {
     private invalidateAnalysis(): void {
         this.state.analysis = null;
         this.state.smartFilteringFailed = false;
+    }
+
+    private isSetupConfigurationLocked(): boolean {
+        return this.state.busy || this.state.analysis !== null;
     }
 
     private normalizeQuestionCount(value: string, maxQuestionCount: number): number {

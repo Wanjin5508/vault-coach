@@ -1,6 +1,7 @@
 import { App } from "obsidian";
 import { LocalModelClient } from "../model-client";
 import type {
+    ExamMode,
     ExamContentProfile,
     ExamFileOption,
     ExamGenerationDiagnostics,
@@ -12,6 +13,7 @@ import type {
     ExamScopeSelection,
     ExamSession,
 } from "../domain/exam/exam-types";
+import { getExamModeOrDefault } from "../domain/exam/exam-question-policy";
 import type { IndexedChunk } from "../domain/documents/document-types";
 import type { DocumentFileMetadataReader } from "../domain/documents/document-file-metadata-reader";
 import type { DocumentIndexReader } from "../domain/documents/document-index-reader";
@@ -181,6 +183,7 @@ export class ExamEngine {
         scopeSnapshot: ExamScopeSnapshot,
         options: ExamGenerationOptions = {},
     ): Promise<ExamSession> {
+        const examMode: ExamMode = getExamModeOrDefault(options.examMode);
         const diagnosticsStart = Date.now();
         const durations = {
             scopeMs: 0,
@@ -217,6 +220,7 @@ export class ExamEngine {
             eligibleChunks,
             analysis.profiles,
             effectiveQuestionCount,
+            examMode,
             options.abortSignal,
         );
         durations.planningMs = Date.now() - planningStart;
@@ -299,6 +303,7 @@ export class ExamEngine {
             selectedFolderPaths: [...selection.selectedFolderPaths],
             excludedFilePaths: [...selection.excludedFilePaths],
             forceIncludedFilePaths: [...selection.forceIncludedFilePaths],
+            examMode,
             scopeSnapshot,
             analysisSummary: analysis.summary,
             blueprint,

@@ -2,6 +2,7 @@ import { MarkdownRenderer, Notice, type App, type Component } from "obsidian";
 import { createShortErrorMessage, formatDateTime } from "../../ui/view-formatters";
 import { translate, type TranslationKey } from "../../i18n";
 import type {
+    ExamMode,
     ExamContentProfile,
     ExamFileOption,
     ExamHistoryItem,
@@ -11,6 +12,7 @@ import type {
     ExamScopeSnapshot,
     ExamSession,
 } from "../../domain/exam/exam-types";
+import { getQuestionAnswerForm, isObjectiveQuestion } from "../../domain/exam/exam-question-policy";
 import { ExamController, type ExamViewState } from "../controllers/exam-controller";
 
 /** Renders the exam interface and delegates every state change to ExamController. */
@@ -132,9 +134,12 @@ export class ExamView {
         countInputEl.max = String(Math.max(1, maxQuestionCount || 10));
         countInputEl.step = "1";
         countInputEl.value = String(state.questionCount);
+        countInputEl.disabled = this.isSetupConfigurationLocked(state);
         countInputEl.addEventListener("change", () => {
             this.controller.setQuestionCount(countInputEl.value, maxQuestionCount);
         });
+
+        this.renderExamModeSection(panelEl, state);
 
         const actionRowEl = panelEl.createDiv({ cls: "vault-coach-exam-actions" });
         const smartFilteringEnabled = this.controller.isSmartFilteringEnabled();
@@ -152,13 +157,34 @@ export class ExamView {
         });
 
         if (state.analysis) {
-            const reanalyzeButtonEl = actionRowEl.createEl("button", { text: this.t("exam.reanalyze") });
-            reanalyzeButtonEl.disabled = state.busy;
-            reanalyzeButtonEl.addEventListener("click", () => void this.controller.analyzeScope(true));
+            const backButtonEl = actionRowEl.createEl("button", { text: this.t("exam.analysis.backToSetup") });
+            backButtonEl.disabled = state.busy;
+            backButtonEl.addEventListener("click", () => this.controller.returnToSetup());
+        } else {
+            const historyButtonEl = actionRowEl.createEl("button", { text: this.t("exam.history") });
+            historyButtonEl.disabled = state.busy;
+            historyButtonEl.addEventListener("click", () => void this.controller.showHistory());
         }
-        const historyButtonEl = actionRowEl.createEl("button", { text: this.t("exam.history") });
-        historyButtonEl.disabled = state.busy;
-        historyButtonEl.addEventListener("click", () => void this.controller.showHistory());
+    }
+
+    private renderExamModeSection(containerEl: HTMLElement, state: Readonly<ExamViewState>): void {
+        const sectionEl = containerEl.createDiv({ cls: "vault-coach-exam-section vault-coach-exam-mode-section" });
+        sectionEl.createDiv({ cls: "vault-coach-exam-section-title", text: this.t("exam.mode.title") });
+        (Object.entries({
+            simple: { title: this.t("exam.mode.simple.title"), description: this.t("exam.mode.simple.desc") },
+            challenge: { title: this.t("exam.mode.challenge.title"), description: this.t("exam.mode.challenge.desc") },
+        }) as Array<[ExamMode, { title: string; description: string }]>).forEach(([mode, copy]) => {
+            const labelEl = sectionEl.createEl("label", { cls: "vault-coach-exam-mode-option" });
+            const inputEl = labelEl.createEl("input", { attr: { type: "radio", name: "vault-coach-exam-mode" } });
+            inputEl.checked = state.examMode === mode;
+            inputEl.disabled = this.isSetupConfigurationLocked(state);
+            const textEl = labelEl.createSpan({ cls: "vault-coach-exam-mode-text" });
+            textEl.createSpan({ cls: "vault-coach-exam-mode-title", text: copy.title });
+            textEl.createSpan({ cls: "vault-coach-exam-mode-description", text: copy.description });
+            inputEl.addEventListener("change", () => {
+                if (inputEl.checked) this.controller.setExamMode(mode);
+            });
+        });
     }
 
     private renderScopeOption(
@@ -171,6 +197,7 @@ export class ExamView {
         const checkboxEl = optionEl.createEl("input");
         checkboxEl.type = "checkbox";
         checkboxEl.checked = isAllOption ? state.selectedScopeIds.has("__all__") : state.selectedScopeIds.has(option.id);
+        checkboxEl.disabled = this.isSetupConfigurationLocked(state);
         if (checkboxEl.checked) {
             optionEl.addClass("is-selected");
         }
@@ -211,7 +238,7 @@ export class ExamView {
         const manageButtonEl = summaryEl.createEl("button", {
             text: state.showFileManager ? this.t("exam.files.hideManager") : this.t("exam.files.manage"),
         });
-        manageButtonEl.disabled = state.busy || fileOptions.length === 0;
+        manageButtonEl.disabled = this.isSetupConfigurationLocked(state) || fileOptions.length === 0;
         manageButtonEl.addEventListener("click", () => this.controller.setFileManagerVisible(!state.showFileManager));
 
         if (scopeSnapshot.eligibleChunkCount === 0) {
@@ -227,7 +254,7 @@ export class ExamView {
         const checkboxEl = toggleLabelEl.createEl("input");
         checkboxEl.type = "checkbox";
         checkboxEl.checked = this.controller.isSmartFilteringEnabled();
-        checkboxEl.disabled = state.busy;
+        checkboxEl.disabled = this.isSetupConfigurationLocked(state);
         const textEl = toggleLabelEl.createSpan({ cls: "vault-coach-exam-toggle-text" });
         textEl.createSpan({ cls: "vault-coach-exam-toggle-title", text: this.t("settings.examSmartFiltering.name") });
         textEl.createSpan({ cls: "vault-coach-exam-toggle-description", text: this.t("settings.examSmartFiltering.desc") });
@@ -243,16 +270,17 @@ export class ExamView {
         const toolbarEl = managerEl.createDiv({ cls: "vault-coach-exam-file-toolbar" });
         const searchInputEl = toolbarEl.createEl("input", { attr: { type: "search", placeholder: this.t("exam.files.search") } });
         searchInputEl.value = state.fileSearchText;
+        searchInputEl.disabled = this.isSetupConfigurationLocked(state);
         searchInputEl.addEventListener("input", () => this.controller.setFileSearchText(searchInputEl.value));
 
         const includeAllButtonEl = toolbarEl.createEl("button", { text: this.t("exam.files.includeAll") });
-        includeAllButtonEl.disabled = state.busy;
+        includeAllButtonEl.disabled = this.isSetupConfigurationLocked(state);
         includeAllButtonEl.addEventListener("click", () => this.controller.includeAllFiles(fileOptions));
         const excludeAllButtonEl = toolbarEl.createEl("button", { text: this.t("exam.files.excludeAll") });
-        excludeAllButtonEl.disabled = state.busy;
+        excludeAllButtonEl.disabled = this.isSetupConfigurationLocked(state);
         excludeAllButtonEl.addEventListener("click", () => this.controller.excludeAllFiles(fileOptions));
         const resetButtonEl = toolbarEl.createEl("button", { text: this.t("exam.files.reset") });
-        resetButtonEl.disabled = state.busy;
+        resetButtonEl.disabled = this.isSetupConfigurationLocked(state);
         resetButtonEl.addEventListener("click", () => this.controller.resetFileSelection(fileOptions));
 
         const searchText = state.fileSearchText.trim().toLowerCase();
@@ -284,7 +312,7 @@ export class ExamView {
         });
         const checkboxEl = optionEl.createEl("input");
         checkboxEl.type = "checkbox";
-        checkboxEl.disabled = option.permanentlyExcluded || state.busy;
+        checkboxEl.disabled = option.permanentlyExcluded || this.isSetupConfigurationLocked(state);
         checkboxEl.checked = !option.permanentlyExcluded && !state.excludedFilePaths.has(option.filePath);
         checkboxEl.addEventListener("change", () => this.controller.setFileExcluded(option, !checkboxEl.checked));
         const bodyEl = optionEl.createDiv({ cls: "vault-coach-exam-file-option-body" });
@@ -358,25 +386,11 @@ export class ExamView {
             if (reasonText.length > 0) {
                 statusEl.createSpan({ cls: "vault-coach-exam-file-badge is-muted", text: reasonText });
             }
-            const actionEl = rowEl.createDiv({ cls: "vault-coach-exam-analysis-actions" });
-            if (!option.permanentlyExcluded && !state.excludedFilePaths.has(option.filePath)) {
-                const excludeButtonEl = actionEl.createEl("button", { text: this.t("exam.analysis.exclude") });
-                excludeButtonEl.disabled = state.busy;
-                excludeButtonEl.addEventListener("click", () => {
-                    this.controller.setFileExcluded(option, true);
-                    void this.controller.analyzeScope(false);
-                });
-            }
-            if (profile && !option.permanentlyExcluded && !state.forceIncludedFilePaths.has(option.filePath)
-                && (profile.decision === "exclude" || profile.decision === "partial")) {
-                const includeButtonEl = actionEl.createEl("button", { text: this.t("exam.analysis.forceInclude") });
-                includeButtonEl.disabled = state.busy;
-                includeButtonEl.addEventListener("click", () => {
-                    this.controller.forceIncludeFile(option);
-                    void this.controller.analyzeScope(false);
-                });
-            }
         }
+    }
+
+    private isSetupConfigurationLocked(state: Readonly<ExamViewState>): boolean {
+        return state.busy || state.analysis !== null;
     }
 
     private renderAnalysisStat(containerEl: HTMLDivElement, label: string, value: string | number): void {
@@ -434,6 +448,22 @@ export class ExamView {
         session.questions.forEach((question, index) => {
             const questionEl = panelEl.createDiv({ cls: "vault-coach-exam-question" });
             questionEl.createDiv({ cls: "vault-coach-exam-question-title", text: `${index + 1}. ${question.question}` });
+            if (isObjectiveQuestion(question)) {
+                const choicesEl = questionEl.createDiv({ cls: "vault-coach-exam-choice-list" });
+                for (const option of question.options) {
+                    const choiceEl = choicesEl.createEl("label", { cls: "vault-coach-exam-choice" });
+                    const inputEl = choiceEl.createEl("input", {
+                        attr: { type: "radio", name: `exam-${session.id}-${question.id}`, value: option.id },
+                    });
+                    inputEl.checked = session.userAnswers[index] === option.id;
+                    inputEl.disabled = state.busy;
+                    choiceEl.createSpan({ text: option.text });
+                    inputEl.addEventListener("change", () => {
+                        if (inputEl.checked) this.controller.setAnswer(index, option.id);
+                    });
+                }
+                return;
+            }
             const answerEl = questionEl.createEl("textarea", {
                 cls: "vault-coach-exam-answer-input",
                 attr: { placeholder: this.t("exam.answerPlaceholder"), rows: "5" },
@@ -446,7 +476,10 @@ export class ExamView {
         const actionRowEl = panelEl.createDiv({ cls: "vault-coach-exam-actions" });
         const submitButtonEl = actionRowEl.createEl("button", { text: this.t("exam.submit"), cls: "mod-cta" });
         submitButtonEl.disabled = state.busy;
-        submitButtonEl.addEventListener("click", () => void this.controller.submitAnswers(this.answerEls.map((answerEl) => answerEl.value)));
+        submitButtonEl.addEventListener("click", () => {
+            const currentSession = this.controller.getState().session;
+            void this.controller.submitAnswers(currentSession?.userAnswers ?? []);
+        });
         const deleteButtonEl = actionRowEl.createEl("button", { text: this.t("exam.delete") });
         deleteButtonEl.disabled = state.busy;
         deleteButtonEl.addEventListener("click", () => void this.controller.deleteSession());
@@ -503,7 +536,7 @@ export class ExamView {
                 text: `${this.t("exam.score")}: ${item.score} / ${item.maxScore}`,
             });
         }
-        this.renderReviewBlock(questionEl, this.t("exam.userAnswer"), session.userAnswers[index]?.trim() || this.t("exam.unanswered"));
+        this.renderReviewBlock(questionEl, this.t("exam.userAnswer"), this.formatUserAnswer(question, session.userAnswers[index]));
         this.renderReviewBlock(questionEl, this.t("exam.referenceAnswer"), question.referenceAnswer);
         this.renderReviewBlock(questionEl, this.t("exam.rubric"), question.rubric);
         if (item) {
@@ -583,6 +616,13 @@ export class ExamView {
         const blockEl = containerEl.createDiv({ cls: "vault-coach-exam-review-block" });
         blockEl.createEl("strong", { cls: "vault-coach-exam-review-label", text: label });
         blockEl.createDiv({ cls: "vault-coach-exam-review-text", text });
+    }
+
+    private formatUserAnswer(question: ExamQuestion, answer: string | undefined): string {
+        const trimmedAnswer = answer?.trim() ?? "";
+        if (trimmedAnswer.length === 0) return this.t("exam.unanswered");
+        if (getQuestionAnswerForm(question) === "free-response") return trimmedAnswer;
+        return question.options?.find((option) => option.id === trimmedAnswer)?.text ?? trimmedAnswer;
     }
 
     private getScoreClass(score: number): string {

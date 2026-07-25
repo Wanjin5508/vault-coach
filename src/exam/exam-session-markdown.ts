@@ -2,11 +2,12 @@ import type { Stat } from "obsidian";
 import type { AssessmentSessionDocumentV1 } from "../domain/assessment/assessment-types";
 import type { TranslationKey } from "../i18n";
 import type { ExamEvaluationItem, ExamHistoryItem, ExamQuestion, ExamSession } from "../domain/exam/exam-types";
+import { getQuestionAnswerForm, isObjectiveQuestion } from "../domain/exam/exam-question-policy";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
 /** Increment when the Markdown projection's own frontmatter contract changes. */
-export const EXAM_MARKDOWN_PROJECTION_VERSION = 1;
+export const EXAM_MARKDOWN_PROJECTION_VERSION = 2;
 
 interface AssessmentProjectionMetadata {
     assessmentSchemaVersion: number;
@@ -31,6 +32,7 @@ export function formatExamSessionMarkdown(
         `score: ${session.evaluation?.score ?? ""}`,
         `maxScore: ${session.evaluation?.maxScore ?? ""}`,
         `scope: ${JSON.stringify(session.scopeLabel)}`,
+        ...(session.examMode ? [`examMode: ${JSON.stringify(session.examMode)}`] : []),
         ...(projectionMetadata ? [
             "vaultCoachAssessmentProjection: true",
             `assessmentSchemaVersion: ${projectionMetadata.assessmentSchemaVersion}`,
@@ -59,7 +61,7 @@ export function formatExamSessionMarkdown(
     lines.push(`## ${t("exam.markdown.questions")}`);
 
     session.questions.forEach((question: ExamQuestion, index: number) => {
-        const answer: string = session.userAnswers[index]?.trim() ?? "";
+        const answer: string = formatStoredAnswer(question, session.userAnswers[index]);
         const evaluationItem: ExamEvaluationItem | undefined = session.evaluation?.items.find((item: ExamEvaluationItem) => {
             return item.questionId === question.id;
         });
@@ -67,6 +69,14 @@ export function formatExamSessionMarkdown(
         lines.push("");
         lines.push(`### ${index + 1}. ${question.question}`);
         lines.push("");
+        if (isObjectiveQuestion(question)) {
+            lines.push(`#### ${t("exam.markdown.options")}`);
+            lines.push("");
+            for (const option of question.options) {
+                lines.push(`- ${option.text}`);
+            }
+            lines.push("");
+        }
         lines.push(`#### ${t("exam.markdown.userAnswer")}`);
         lines.push("");
         lines.push(answer.length > 0 ? answer : t("exam.unanswered"));
@@ -100,6 +110,13 @@ export function formatExamSessionMarkdown(
 
     lines.push("");
     return lines.join("\n");
+}
+
+function formatStoredAnswer(question: ExamQuestion, storedAnswer: string | undefined): string {
+    const answer = storedAnswer?.trim() ?? "";
+    if (answer.length === 0) return "";
+    if (getQuestionAnswerForm(question) === "free-response") return answer;
+    return question.options?.find((option) => option.id === answer)?.text ?? answer;
 }
 
 /**

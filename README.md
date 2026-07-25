@@ -48,7 +48,10 @@ Exam mode turns selected knowledge into deliberate practice instead of another c
 - Scope exams to the material you are studying now
 - Persist include/exclude choices for the session
 - Filter low-value material such as TODOs, logs, link indexes, stubs, and drafts
-- Generate a coverage-aware question set and score answers with feedback
+- Choose **Simple** mode for single-choice and true/false questions with deterministic on-device 100/0 scoring
+- Choose **Challenge** mode for a bounded content-aware mix of supported objective and free-response formats
+- Analyze the selected material before generation; analysis locks the exam setup so its scope and mode remain consistent until you select **Back to settings**
+- Generate a coverage-aware question set and score answers with feedback without writing to the knowledge graph
 - Save structured assessment records locally and export readable Markdown reports when needed
 
 <!-- Screenshot recommendation: show the exam setup with scope selector, file manager, estimated capacity, and the Generate test button. -->
@@ -177,10 +180,10 @@ Tips:
 
 1. Switch to **Exam mode**.
 2. Choose the full knowledge base, one or more folders, or a source-scoped exam started from Learning Map.
-3. Select **Manage files** to include/exclude individual files.
-4. Run **Analyze exam scope** when you want to inspect the eligible material.
-5. Choose a question count and select **Generate test**.
-6. Submit answers, review the result, then use **Save result** or **Export**.
+3. Select **Manage files** to include/exclude individual files, then select **Simple** or **Challenge** mode and a question count.
+4. Run **Analyze exam scope** when you want to inspect the eligible material. Once analysis completes, the scope, files, question count, smart-filter setting, and mode are locked.
+5. Select **Generate test**. To change the mode or setup instead, select **Back to settings** first; this discards the completed analysis.
+6. Submit answers, review the result, then use **Save result** or **Export**. Simple-mode answers are scored locally from their answer key; free-response answers retain the configured model-based evaluation path.
 
 Saved assessment facts live in `.vault-coach/assessments/`. They are local vault data and are kept when you rebuild an index or refresh a graph.
 
@@ -243,7 +246,7 @@ Vault Coach has no hidden telemetry. It writes its working data inside the curre
 Network behavior is controlled by your model settings:
 
 - A local Ollama configuration keeps model requests on the local endpoint you configure.
-- An OpenAI-compatible provider may receive the text required for the feature you explicitly run: for example, retrieved context for Q&A, exam material and answers for scoring, or Section excerpts for semantic extraction.
+- An OpenAI-compatible provider may receive the text required for the feature you explicitly run: for example, retrieved context for Q&A, Challenge-mode exam generation or free-response scoring, or Section excerpts for semantic extraction. Simple-mode objective scoring is local.
 - The deterministic structural graph and source-inventory comparison do not call a model or network service.
 
 Treat `.vault-coach/` as private vault data. It can include note excerpts, filenames, headings, answers, feedback, graph evidence, and model metadata. Do not commit it to a public repository unless you have reviewed its contents.
@@ -252,7 +255,7 @@ Treat `.vault-coach/` as private vault data. It can include note excerpts, filen
 
 - PDF support is for PDFs with a native text layer. OCR for scanned PDFs is not included.
 - Complex PDF tables, diagrams, formulas, and multi-column layouts may need manual verification.
-- Exam generation and scoring are study aids produced by your configured model, not authoritative grading.
+- Challenge-mode generation and free-response scoring are study aids produced by your configured model, not authoritative grading. Simple-mode objective scoring is deterministic from the generated answer key, so answer-key quality still depends on the source material and generation step.
 - Concept extraction quality depends on the source material and selected model; review is intentional, not a failure mode.
 - Large knowledge bases may pause new local semantic work to protect the Obsidian UI. Existing indexing, Q&A, exams, and confirmed graph reads remain available.
 

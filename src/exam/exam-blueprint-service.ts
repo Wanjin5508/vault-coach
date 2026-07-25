@@ -1,9 +1,12 @@
 import { LocalModelClient } from "../model-client";
 import type {
+    ExamAnswerForm,
     ExamBlueprint,
     ExamBlueprintItem,
     ExamContentProfile,
+    ExamMode,
 } from "../domain/exam/exam-types";
+import { getExamModeOrDefault, isAnswerFormAllowedForMode } from "../domain/exam/exam-question-policy";
 import type { IndexedChunk } from "../domain/documents/document-types";
 import type { LocalChatMessage } from "../domain/model/model-types";
 import { generateParsedJsonAnswer, normalizeWhitespace } from "./exam-utils";
@@ -34,6 +37,8 @@ interface ExamBlueprintItemPayload {
     learning_objective?: unknown;
     question_type?: unknown;
     difficulty?: unknown;
+    answer_form?: unknown;
+    selection_rationale?: unknown;
     source_chunk_ids?: unknown;
 }
 
@@ -50,6 +55,8 @@ const DIFFICULTIES: ExamBlueprintItem["difficulty"][] = [
     "intermediate",
     "advanced",
 ];
+
+const ANSWER_FORMS: readonly ExamAnswerForm[] = ["single-choice", "true-false", "free-response"];
 
 /**
  * 考试蓝图服务。
@@ -71,6 +78,7 @@ export class ExamBlueprintService {
         chunks: IndexedChunk[],
         profiles: ExamContentProfile[],
         requestedQuestionCount: number,
+        examMode: ExamMode = "simple",
         abortSignal?: AbortSignal,
     ): Promise<ExamBlueprint> {
         const plannedQuestionCount: number = Math.min(
@@ -88,6 +96,7 @@ export class ExamBlueprintService {
                 profiles,
                 requestedQuestionCount,
                 plannedQuestionCount,
+                examMode,
                 abortSignal,
             );
             const normalizedBlueprint: ExamBlueprint = this.normalizeBlueprintPayload(
@@ -96,6 +105,7 @@ export class ExamBlueprintService {
                 chunks,
                 requestedQuestionCount,
                 plannedQuestionCount,
+                examMode,
             );
             if (normalizedBlueprint.items.length > 0) {
                 return normalizedBlueprint;
@@ -107,7 +117,7 @@ export class ExamBlueprintService {
             console.warn("[VaultCoach] 考试蓝图模型规划失败，将使用确定性蓝图。", error);
         }
 
-        return this.buildDeterministicBlueprint(scopeLabel, chunks, requestedQuestionCount, plannedQuestionCount);
+        return this.buildDeterministicBlueprint(scopeLabel, chunks, requestedQuestionCount, plannedQuestionCount, examMode);
     }
 
     /**
@@ -119,6 +129,7 @@ export class ExamBlueprintService {
         profiles: ExamContentProfile[],
         requestedQuestionCount: number,
         plannedQuestionCount: number,
+        examMode: ExamMode,
         abortSignal?: AbortSignal,
     ): Promise<ExamBlueprintPayload> {
         const inventoryChunks: IndexedChunk[] = this.selectPlanningChunks(chunks, 32, 18000);
@@ -134,7 +145,8 @@ export class ExamBlueprintService {
                     "3. 默认不要重复使用同一个 chunk。",
                     "4. 优先覆盖不同文件和不同主题。",
                     "5. 内容不足时减少 planned_question_count，不能凑题。",
-                    "6. 只输出 JSON，不要输出 Markdown、解释或代码块。",
+                    "6. answer_form 只能是 single-choice、true-false 或 free-response。",
+                    "7. 只输出 JSON，不要输出 Markdown、解释或代码块。",
                 ].join("\n"),
             },
             {
@@ -143,6 +155,10 @@ export class ExamBlueprintService {
                     `考试范围：${scopeLabel}`,
                     `请求题目数：${requestedQuestionCount}`,
                     `容量上限：${plannedQuestionCount}`,
+                    `考试模式：${getExamModeOrDefault(examMode)}`,
+                    getExamModeOrDefault(examMode) === "simple"
+                        ? "简单模式只允许 answer_form 为 single-choice 或 true-false。"
+                        : "挑战模式可根据证据选择 single-choice、true-false 或 free-response。",
                     "",
                     "内容画像摘要：",
                     this.buildProfileSummary(profiles),
@@ -175,6 +191,7 @@ export class ExamBlueprintService {
         chunks: IndexedChunk[],
         requestedQuestionCount: number,
         maxQuestionCount: number,
+        examMode: ExamMode,
     ): ExamBlueprint {
         const chunkById: Map<string, IndexedChunk> = new Map<string, IndexedChunk>(
             chunks.map((chunk: IndexedChunk) => [chunk.id, chunk]),
@@ -213,11 +230,13 @@ export class ExamBlueprintService {
                     || `考察用户是否理解「${topic}」并能基于来源内容作答。`,
                 questionType: this.normalizeQuestionType(payloadItem.question_type, items.length),
                 difficulty: this.normalizeDifficulty(payloadItem.difficulty, items.length, maxQuestionCount),
+                answerForm: this.normalizeAnswerForm(payloadItem.answer_form, examMode, items.length),
+                selectionRationale: normalizeWhitespace(payloadItem.selection_rationale ?? "") || undefined,
                 sourceChunkIds,
             });
         }
 
-        const fallbackBlueprint: ExamBlueprint = this.buildDeterministicBlueprint(scopeLabel, chunks, requestedQuestionCount, maxQuestionCount);
+        const fallbackBlueprint: ExamBlueprint = this.buildDeterministicBlueprint(scopeLabel, chunks, requestedQuestionCount, maxQuestionCount, examMode);
         for (const fallbackItem of fallbackBlueprint.items) {
             if (items.length >= maxQuestionCount) {
                 break;
@@ -283,6 +302,7 @@ export class ExamBlueprintService {
         chunks: IndexedChunk[],
         requestedQuestionCount: number,
         plannedQuestionCount: number,
+        examMode: ExamMode,
     ): ExamBlueprint {
         const selectedChunks: IndexedChunk[] = this.selectPlanningChunks(chunks, plannedQuestionCount, 20000);
         const items: ExamBlueprintItem[] = selectedChunks.slice(0, plannedQuestionCount).map((chunk: IndexedChunk, index: number) => {
@@ -293,6 +313,12 @@ export class ExamBlueprintService {
                 learningObjective: `考察用户是否理解「${topic}」并能基于来源内容解释、比较或应用。`,
                 questionType: QUESTION_TYPES[index % QUESTION_TYPES.length] ?? "explanation",
                 difficulty: DIFFICULTIES[Math.min(DIFFICULTIES.length - 1, Math.floor(index / Math.max(1, Math.ceil(plannedQuestionCount / DIFFICULTIES.length))))] ?? "basic",
+                answerForm: getExamModeOrDefault(examMode) === "simple"
+                    ? (index % 2 === 0 ? "single-choice" : "true-false")
+                    : "free-response",
+                selectionRationale: getExamModeOrDefault(examMode) === "simple"
+                    ? "简单模式使用可确定判分的客观题。"
+                    : "挑战模式的确定性回退保留自由文本题。",
                 sourceChunkIds: [chunk.id],
             };
         });
@@ -417,6 +443,8 @@ export class ExamBlueprintService {
             "      \"learning_objective\": \"学习目标\",",
             "      \"question_type\": \"explanation | comparison | application | reasoning | process\",",
             "      \"difficulty\": \"basic | intermediate | advanced\",",
+            "      \"answer_form\": \"single-choice | true-false | free-response\",",
+            "      \"selection_rationale\": \"为什么该形式适合此来源\",",
             "      \"source_chunk_ids\": [\"真实 chunk id\"]",
             "    }",
             "  ]",
@@ -450,6 +478,19 @@ export class ExamBlueprintService {
         }
 
         return DIFFICULTIES[Math.min(DIFFICULTIES.length - 1, Math.floor(index / Math.max(1, Math.ceil(total / DIFFICULTIES.length))))] ?? "basic";
+    }
+
+    /** Keeps the LLM adaptive within a finite UI/evaluation contract. */
+    private normalizeAnswerForm(value: unknown, examMode: ExamMode, index: number): ExamAnswerForm {
+        const normalizedMode = getExamModeOrDefault(examMode);
+        const requested = typeof value === "string" ? value.trim() as ExamAnswerForm : "" as ExamAnswerForm;
+        if (ANSWER_FORMS.includes(requested) && isAnswerFormAllowedForMode(requested, normalizedMode)) {
+            return requested;
+        }
+        if (normalizedMode === "simple") {
+            return index % 2 === 0 ? "single-choice" : "true-false";
+        }
+        return "free-response";
     }
 
     /**

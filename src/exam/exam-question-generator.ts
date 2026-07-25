@@ -1,11 +1,14 @@
 import { LocalModelClient } from "../model-client";
 import type {
+    ExamAnswerForm,
     ExamBlueprint,
     ExamBlueprintItem,
+    ExamChoiceOption,
     ExamQuestion,
     ModelPromptMetadata,
     GeneratedExamQuestionCandidate,
 } from "../domain/exam/exam-types";
+import { normalizeObjectiveOptions } from "../domain/exam/exam-question-policy";
 import type { IndexedChunk } from "../domain/documents/document-types";
 import type { LocalChatMessage } from "../domain/model/model-types";
 import type { VaultCoachSettings } from "../app/config/settings-types";
@@ -13,7 +16,7 @@ import { generateParsedJsonAnswer, normalizeWhitespace, throwIfAborted } from ".
 import { ExamCandidateValidation, ExamQuestionValidator } from "./exam-question-validator";
 
 /** Bump only when the question-generation prompt contract changes. */
-export const EXAM_QUESTION_GENERATION_PROMPT_VERSION = "exam-question-generation/v1";
+export const EXAM_QUESTION_GENERATION_PROMPT_VERSION = "exam-question-generation/v2";
 
 /**
  * 考试题目生成模块。
@@ -34,6 +37,8 @@ interface GeneratedExamQuestionPayload {
     rubric?: unknown;
     source_chunk_ids?: unknown;
     evidence_excerpt_ids?: unknown;
+    options?: unknown;
+    correct_option_id?: unknown;
 }
 
 /**
@@ -190,7 +195,9 @@ export class ExamQuestionGenerator {
                     "4. 参考答案必须能从来源完整得出。",
                     "5. 评分标准必须是 100 分制。",
                     "6. 不要在题目、答案或评分标准中出现 EXCERPT_ID、SOURCE_PATH、HEADING、CHUNK_ID、BLUEPRINT_ITEM 等内部标记。",
-                    "7. 只输出 JSON，不要输出 Markdown、解释或代码块。",
+                    "7. 蓝图的 ANSWER_FORM 为 single-choice 或 true-false 时，必须生成唯一 correct_option_id 和 options。单选题有 3 到 5 个选项；判断题有且只有两个选项。",
+                    "8. 蓝图的 ANSWER_FORM 为 free-response 时，不要生成 options 或 correct_option_id。",
+                    "9. 只输出 JSON，不要输出 Markdown、解释或代码块。",
                 ].join("\n"),
             },
             {
@@ -358,6 +365,13 @@ export class ExamQuestionGenerator {
                     "evidence",
                     "证据片段",
                 ]), []),
+                answerForm: item.answerForm,
+                options: this.normalizeChoiceOptions(this.readRecordValue(payloadRecord, [
+                    "options", "choices", "answer_options", "answerOptions", "选项", "答案选项",
+                ])),
+                correctOptionId: normalizeWhitespace(this.readRecordValue(payloadRecord, [
+                    "correct_option_id", "correctOptionId", "answer_key", "answerKey", "correct_answer_id", "正确选项", "正确答案ID",
+                ])),
             });
         }
 
@@ -397,6 +411,22 @@ export class ExamQuestionGenerator {
         return values.length > 0 ? Array.from(new Set(values)) : [...fallback];
     }
 
+    /** Normalizes model choice payloads while preserving stable option IDs. */
+    private normalizeChoiceOptions(rawValue: unknown): ExamChoiceOption[] {
+        if (!Array.isArray(rawValue)) return [];
+        const options: ExamChoiceOption[] = rawValue.map((value: unknown, index: number) => {
+            if (typeof value === "string") {
+                return { id: `option-${String.fromCharCode(97 + index)}`, text: value };
+            }
+            const record = this.asRecord(value);
+            return {
+                id: normalizeWhitespace(this.readRecordValue(record, ["id", "key", "option_id", "optionId"])) || `option-${String.fromCharCode(97 + index)}`,
+                text: this.normalizeTextValue(this.readRecordValue(record, ["text", "label", "content", "value", "选项", "内容"])),
+            };
+        });
+        return normalizeObjectiveOptions(options);
+    }
+
     /**
      * 选择可接受的候选题。
      *
@@ -427,9 +457,17 @@ export class ExamQuestionGenerator {
     ): boolean {
         const normalizedCandidate: GeneratedExamQuestionCandidate = this.validator.normalizeCandidate(candidate);
         const hasValidSource: boolean = normalizedCandidate.sourceChunkIds.some((chunkId: string) => chunksById.has(chunkId));
+        const answerForm: ExamAnswerForm = normalizedCandidate.answerForm ?? "free-response";
+        const objectiveOptions = normalizeObjectiveOptions(normalizedCandidate.options);
+        const objectiveValid = answerForm === "free-response"
+            || (objectiveOptions.length >= (answerForm === "true-false" ? 2 : 3)
+                && objectiveOptions.length <= (answerForm === "true-false" ? 2 : 5)
+                && typeof normalizedCandidate.correctOptionId === "string"
+                && objectiveOptions.some((option) => option.id === normalizedCandidate.correctOptionId));
         return hasValidSource
             && normalizedCandidate.question.length >= 8
-            && normalizedCandidate.referenceAnswer.length >= 8;
+            && normalizedCandidate.referenceAnswer.length >= 8
+            && objectiveValid;
     }
 
     /**
@@ -481,6 +519,10 @@ export class ExamQuestionGenerator {
             || "当前主题";
         const sourceText: string = this.buildSourceAnswerText(sourceChunks, topic);
 
+        if ((item.answerForm ?? "free-response") !== "free-response") {
+            return this.buildDeterministicObjectiveCandidate(item, sourceChunkIds, sourceChunks, topic);
+        }
+
         return {
             id: `q-${item.id}`,
             blueprintItemId: item.id,
@@ -489,6 +531,47 @@ export class ExamQuestionGenerator {
             rubric: "本题按 100 分制评分；核心概念和事实准确 45 分，关键步骤或关系覆盖 30 分，能结合来源进行解释或应用 15 分，表达清晰有条理 10 分。",
             sourceChunkIds,
             evidenceExcerptIds: [],
+            answerForm: "free-response",
+        };
+    }
+
+    /** A source-bound local fallback that remains objectively scoreable. */
+    private buildDeterministicObjectiveCandidate(
+        item: ExamBlueprintItem,
+        sourceChunkIds: string[],
+        sourceChunks: IndexedChunk[],
+        topic: string,
+    ): GeneratedExamQuestionCandidate {
+        const statement = this.extractObjectiveStatement(sourceChunks, topic);
+        if (item.answerForm === "true-false") {
+            return {
+                id: `q-${item.id}`,
+                blueprintItemId: item.id,
+                question: `根据「${topic}」的来源内容，下列说法是否正确：${statement}`,
+                referenceAnswer: `正确。${statement}`,
+                rubric: "本题按 100 分制评分；选择正确得 100 分，其他答案得 0 分。",
+                sourceChunkIds,
+                evidenceExcerptIds: [],
+                answerForm: "true-false",
+                options: [{ id: "true", text: "正确" }, { id: "false", text: "错误" }],
+                correctOptionId: "true",
+            };
+        }
+        return {
+            id: `q-${item.id}`,
+            blueprintItemId: item.id,
+            question: `根据「${topic}」的来源内容，下列哪项表述正确？`,
+            referenceAnswer: statement,
+            rubric: "本题按 100 分制评分；选择正确得 100 分，其他答案得 0 分。",
+            sourceChunkIds,
+            evidenceExcerptIds: [],
+            answerForm: "single-choice",
+            options: [
+                { id: "option-a", text: statement },
+                { id: "option-b", text: `「${topic}」在来源中完全没有相关说明。` },
+                { id: "option-c", text: `理解「${topic}」不需要依据来源中的任何条件或事实。` },
+            ],
+            correctOptionId: "option-a",
         };
     }
 
@@ -525,6 +608,14 @@ export class ExamQuestionGenerator {
         }
 
         return `应围绕「${topic}」说明来源中的核心概念、关键步骤、适用条件和结论，并保持答案与考试范围一致。`;
+    }
+
+    private extractObjectiveStatement(sourceChunks: IndexedChunk[], topic: string): string {
+        const text = normalizeWhitespace(sourceChunks.map((chunk) => chunk.text).join(" "));
+        const sentence = text.split(/[。！？.!?]/g).map((item) => item.trim()).find((item) => item.length >= 12);
+        return sentence
+            ? sentence.slice(0, 180)
+            : `来源说明了「${topic}」的核心概念、条件或步骤。`;
     }
 
     /**
@@ -654,6 +745,13 @@ export class ExamQuestionGenerator {
             rubric: candidate.rubric,
             questionType: blueprintItem.questionType,
             difficulty: blueprintItem.difficulty,
+            ...(blueprintItem.answerForm ? {
+                answerForm: blueprintItem.answerForm,
+                ...(blueprintItem.answerForm === "free-response" ? {} : {
+                    options: normalizeObjectiveOptions(candidate.options),
+                    correctOptionId: candidate.correctOptionId,
+                }),
+            } : {}),
             sourceChunkIds,
             evidenceExcerptIds: Array.from(new Set(candidate.evidenceExcerptIds)),
             sourcePaths,
@@ -726,6 +824,7 @@ export class ExamQuestionGenerator {
             `LEARNING_OBJECTIVE: ${item.learningObjective}`,
             `QUESTION_TYPE: ${item.questionType}`,
             `DIFFICULTY: ${item.difficulty}`,
+            `ANSWER_FORM: ${item.answerForm ?? "free-response"}`,
             "SOURCES:",
             item.sourceChunkIds.map((chunkId: string, index: number) => {
                 const chunk: IndexedChunk | undefined = chunksById.get(chunkId);
@@ -759,6 +858,8 @@ export class ExamQuestionGenerator {
             "      \"question\": \"题目\",",
             "      \"reference_answer\": \"参考答案\",",
             "      \"rubric\": \"本题按 100 分制评分；评分标准...\",",
+            "      \"options\": [{\"id\": \"option-a\", \"text\": \"选项文本\"}],",
+            "      \"correct_option_id\": \"option-a\",",
             "      \"source_chunk_ids\": [\"真实 chunk id\"],",
             "      \"evidence_excerpt_ids\": [\"E1\"]",
             "    }",

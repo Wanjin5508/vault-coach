@@ -4,6 +4,8 @@ import { DeterministicGraphBuilder } from "../domain/graph/deterministic-graph-b
 import { ExamEngine } from "../exam/exam-engine";
 import { ExamSessionStore } from "../exam/exam-session-store";
 import { EXAM_EVALUATION_PROMPT_VERSION, ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
+import { ExamEvaluationRouter, type ExamEvaluator } from "../domain/exam/exam-evaluation-router";
+import { ObjectiveExamEvaluationService } from "../domain/exam/objective-exam-evaluation-service";
 import {
     getAssessmentSessionIdFromPath,
     getAssessmentSessionPath,
@@ -69,7 +71,7 @@ export interface ApplicationContainerServices {
     ragEngine: AdvancedRagEngine;
     chatService: ChatService;
     examEngine: ExamEngine;
-    examEvaluationService: ExamEvaluationService;
+    examEvaluationService: ExamEvaluator;
     examSessionStore: ExamSessionStore;
     assessmentSessionStore: AssessmentSessionStore;
     assessmentEventFactory: AssessmentEventFactory;
@@ -115,11 +117,15 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         () => chatService.getMessagesForMemory(),
         ragEngine,
     );
-    const examEvaluationService = new ExamEvaluationService(
+    const freeResponseExamEvaluationService = new ExamEvaluationService(
         new LocalModelClient(
             () => dependencies.getSettings(),
             () => dependencies.getCloudApiKey(),
         ),
+    );
+    const examEvaluationService: ExamEvaluator = new ExamEvaluationRouter(
+        freeResponseExamEvaluationService,
+        new ObjectiveExamEvaluationService(),
     );
     const examSessionStore = new ExamSessionStore(
         dependencies.app,
