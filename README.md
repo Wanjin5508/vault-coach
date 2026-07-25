@@ -50,8 +50,10 @@ Exam mode turns selected knowledge into deliberate practice instead of another c
 - Filter low-value material such as TODOs, logs, link indexes, stubs, and drafts
 - Choose **Simple** mode for single-choice and true/false questions with deterministic on-device 100/0 scoring
 - Choose **Challenge** mode for a bounded content-aware mix of supported objective and free-response formats
-- Analyze the selected material before generation; analysis locks the exam setup so its scope and mode remain consistent until you select **Back to settings**
-- Generate a coverage-aware question set and score answers with feedback without writing to the knowledge graph
+- Choose an adaptive target—**Diagnostic**, **Weak review**, **Prerequisites**, or **Mixed**—to decide what to practise without changing answer format or scoring
+- Analyze the selected material before generation; the preview uses only confirmed Concepts, confirmed prerequisite relations, Mastery, saved assessment evidence, and exact source chunks
+- Analysis locks scope, files, question count, exam mode, and adaptive target until you select **Back to settings**; if those facts change before generation, reanalyze instead of silently changing the plan
+- Fall back cleanly to a scoped exam when no traceable adaptive target is available; this flow never writes to the knowledge graph
 - Save structured assessment records locally and export readable Markdown reports when needed
 
 <!-- Screenshot recommendation: show the exam setup with scope selector, file manager, estimated capacity, and the Generate test button. -->
@@ -180,9 +182,9 @@ Tips:
 
 1. Switch to **Exam mode**.
 2. Choose the full knowledge base, one or more folders, or a source-scoped exam started from Learning Map.
-3. Select **Manage files** to include/exclude individual files, then select **Simple** or **Challenge** mode and a question count.
-4. Run **Analyze exam scope** when you want to inspect the eligible material. Once analysis completes, the scope, files, question count, smart-filter setting, and mode are locked.
-5. Select **Generate test**. To change the mode or setup instead, select **Back to settings** first; this discards the completed analysis.
+3. Select **Manage files** to include/exclude individual files, then choose an adaptive target, **Simple** or **Challenge** mode, and a question count.
+4. Select **Analyze exam scope** to inspect eligible material and the source-backed adaptive plan. Once analysis completes, the scope, files, question count, smart-filter setting, exam mode, and adaptive target are locked.
+5. Select **Generate test**. To change the target, mode, or setup instead, select **Back to settings** first; this discards the completed analysis. If the vault facts change, analyze again rather than reusing the plan.
 6. Submit answers, review the result, then use **Save result** or **Export**. Simple-mode answers are scored locally from their answer key; free-response answers retain the configured model-based evaluation path.
 
 Saved assessment facts live in `.vault-coach/assessments/`. They are local vault data and are kept when you rebuild an index or refresh a graph.

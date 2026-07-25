@@ -32,6 +32,7 @@ import { LearningGraphQueryService } from "./learning-graph/learning-graph-query
 import { ServiceLearningGraphSource } from "./learning-graph/learning-graph-source";
 import { MasteryService } from "./mastery/mastery-service";
 import { ProgressService } from "./progress/progress-service";
+import { AdaptiveExamPlanner } from "./exam/adaptive-exam-planner";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
@@ -84,6 +85,7 @@ export interface ApplicationContainerServices {
     learningGraphQueryService: LearningGraphQueryService;
     masteryService: MasteryService;
     progressService: ProgressService;
+    adaptiveExamPlanner: AdaptiveExamPlanner;
 }
 
 /**
@@ -173,6 +175,11 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         masteryReader: masteryService,
         assessmentSessionStore,
     });
+    const adaptiveExamPlanner = new AdaptiveExamPlanner({
+        learningGraph: learningGraphQueryService,
+        mastery: masteryService,
+        assessmentSessionStore,
+    });
     let assessmentEventSequence = 0;
     const assessmentEventFactory = new AssessmentEventFactory({
         createEventId: () => createAssessmentEventId(assessmentEventSequence++),
@@ -227,6 +234,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         learningGraphQueryService,
         masteryService,
         progressService,
+        adaptiveExamPlanner,
     });
     application = applicationInstance;
 
@@ -251,6 +259,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             learningGraphQueryService,
             masteryService,
             progressService,
+            adaptiveExamPlanner,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();

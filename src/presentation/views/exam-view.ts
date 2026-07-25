@@ -12,6 +12,7 @@ import type {
     ExamScopeSnapshot,
     ExamSession,
 } from "../../domain/exam/exam-types";
+import type { AdaptiveReasonCode, AdaptiveTargetMode } from "../../domain/adaptive-exam/adaptive-exam-types";
 import { getQuestionAnswerForm, isObjectiveQuestion } from "../../domain/exam/exam-question-policy";
 import { ExamController, type ExamViewState } from "../controllers/exam-controller";
 
@@ -140,16 +141,16 @@ export class ExamView {
         });
 
         this.renderExamModeSection(panelEl, state);
+        this.renderAdaptiveTargetModeSection(panelEl, state);
 
         const actionRowEl = panelEl.createDiv({ cls: "vault-coach-exam-actions" });
-        const smartFilteringEnabled = this.controller.isSmartFilteringEnabled();
         const startButtonEl = actionRowEl.createEl("button", {
-            text: smartFilteringEnabled && !state.analysis ? this.t("exam.analyze") : this.t("exam.start"),
+            text: !state.analysis ? this.t("exam.analyze") : this.t("exam.start"),
             cls: "mod-cta",
         });
         startButtonEl.disabled = state.busy || !this.controller.hasScopeSelection(scopeOptions) || scopeSnapshot.eligibleChunkCount === 0;
         startButtonEl.addEventListener("click", () => {
-            if (smartFilteringEnabled && !state.analysis) {
+            if (!state.analysis) {
                 void this.controller.analyzeScope(false);
                 return;
             }
@@ -183,6 +184,29 @@ export class ExamView {
             textEl.createSpan({ cls: "vault-coach-exam-mode-description", text: copy.description });
             inputEl.addEventListener("change", () => {
                 if (inputEl.checked) this.controller.setExamMode(mode);
+            });
+        });
+    }
+
+    private renderAdaptiveTargetModeSection(containerEl: HTMLElement, state: Readonly<ExamViewState>): void {
+        const sectionEl = containerEl.createDiv({ cls: "vault-coach-exam-section vault-coach-exam-mode-section" });
+        sectionEl.createDiv({ cls: "vault-coach-exam-section-title", text: this.t("exam.adaptive.title") });
+        sectionEl.createDiv({ cls: "vault-coach-exam-muted", text: this.t("exam.adaptive.desc") });
+        (Object.entries({
+            diagnostic: { title: this.t("exam.adaptive.diagnostic.title"), description: this.t("exam.adaptive.diagnostic.desc") },
+            "weak-review": { title: this.t("exam.adaptive.weakReview.title"), description: this.t("exam.adaptive.weakReview.desc") },
+            prerequisite: { title: this.t("exam.adaptive.prerequisite.title"), description: this.t("exam.adaptive.prerequisite.desc") },
+            mixed: { title: this.t("exam.adaptive.mixed.title"), description: this.t("exam.adaptive.mixed.desc") },
+        }) as Array<[AdaptiveTargetMode, { title: string; description: string }]>).forEach(([mode, copy]) => {
+            const labelEl = sectionEl.createEl("label", { cls: "vault-coach-exam-mode-option" });
+            const inputEl = labelEl.createEl("input", { attr: { type: "radio", name: "vault-coach-adaptive-target" } });
+            inputEl.checked = state.adaptiveTargetMode === mode;
+            inputEl.disabled = this.isSetupConfigurationLocked(state);
+            const textEl = labelEl.createSpan({ cls: "vault-coach-exam-mode-text" });
+            textEl.createSpan({ cls: "vault-coach-exam-mode-title", text: copy.title });
+            textEl.createSpan({ cls: "vault-coach-exam-mode-description", text: copy.description });
+            inputEl.addEventListener("change", () => {
+                if (inputEl.checked) this.controller.setAdaptiveTargetMode(mode);
             });
         });
     }
@@ -362,6 +386,7 @@ export class ExamView {
         this.renderAnalysisStat(summaryEl, this.t("exam.analysis.included"), summary.includedFiles);
         this.renderAnalysisStat(summaryEl, this.t("exam.analysis.capacity"), `${summary.estimatedMinQuestions}–${summary.estimatedMaxQuestions}`);
         this.renderAnalysisStat(summaryEl, this.t("exam.analysis.cache"), `${summary.cacheHits}/${summary.cacheHits + summary.cacheMisses}`);
+        this.renderAdaptivePlanPreview(previewEl, state);
 
         const detailsEl = previewEl.createEl("details", { cls: "vault-coach-exam-analysis-details" });
         detailsEl.createEl("summary", { text: this.t("exam.analysis.details") });
@@ -391,6 +416,51 @@ export class ExamView {
 
     private isSetupConfigurationLocked(state: Readonly<ExamViewState>): boolean {
         return state.busy || state.analysis !== null;
+    }
+
+    private renderAdaptivePlanPreview(containerEl: HTMLDivElement, state: Readonly<ExamViewState>): void {
+        const result = state.adaptivePlanResult;
+        if (!result) return;
+        const planEl = containerEl.createDiv({ cls: "vault-coach-exam-analysis-details" });
+        planEl.createDiv({ cls: "vault-coach-exam-analysis-title", text: this.t("exam.adaptive.planTitle") });
+        if (result.status === "unavailable") {
+            planEl.createDiv({
+                cls: "vault-coach-exam-warning",
+                text: `${this.t("exam.adaptive.unavailable")} ${result.message}`,
+            });
+            return;
+        }
+        planEl.createDiv({
+            cls: "vault-coach-exam-muted",
+            text: this.t("exam.adaptive.planSummary", {
+                count: result.plan.targets.length,
+                questions: result.plan.diagnostics.plannedQuestionCount,
+            }),
+        });
+        if (result.status === "degraded") {
+            planEl.createDiv({ cls: "vault-coach-exam-warning", text: this.t("exam.adaptive.degraded") });
+        }
+        const listEl = planEl.createEl("ul", { cls: "vault-coach-exam-source-list" });
+        for (const target of result.plan.targets) {
+            listEl.createEl("li", {
+                text: `${target.label} · ${this.formatAdaptiveReasons(target.reasonCodes)} · ${this.t("exam.adaptive.questions", { count: target.expectedQuestionCount })}`,
+            });
+        }
+    }
+
+    private formatAdaptiveReasons(reasons: readonly AdaptiveReasonCode[]): string {
+        const keys: Record<AdaptiveReasonCode, TranslationKey> = {
+            unassessed: "exam.adaptive.reason.unassessed",
+            "low-confidence": "exam.adaptive.reason.lowConfidence",
+            "weak-mastery": "exam.adaptive.reason.weakMastery",
+            "developing-mastery": "exam.adaptive.reason.developingMastery",
+            "review-due": "exam.adaptive.reason.reviewDue",
+            "confirmed-prerequisite": "exam.adaptive.reason.confirmedPrerequisite",
+            "recently-covered": "exam.adaptive.reason.recentlyCovered",
+            "insufficient-evidence": "exam.adaptive.reason.insufficientEvidence",
+            "scope-capacity-limited": "exam.adaptive.reason.scopeCapacityLimited",
+        };
+        return reasons.map((reason) => this.t(keys[reason])).join(" · ");
     }
 
     private renderAnalysisStat(containerEl: HTMLDivElement, label: string, value: string | number): void {

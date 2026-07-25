@@ -11,6 +11,11 @@ import type {
     ExamScopeSnapshot,
     ExamSession,
 } from "../../domain/exam/exam-types";
+import {
+    createAdaptiveExamGenerationContext,
+    type AdaptiveExamPlanResult,
+    type AdaptiveTargetMode,
+} from "../../domain/adaptive-exam/adaptive-exam-types";
 import type { TranslationKey } from "../../i18n";
 import type { VaultCoachPluginApi } from "../plugin-api";
 
@@ -29,6 +34,8 @@ export interface ExamViewState {
     progressLabel: string;
     busy: boolean;
     examMode: ExamMode;
+    adaptiveTargetMode: AdaptiveTargetMode;
+    adaptivePlanResult: AdaptiveExamPlanResult | null;
     questionCount: number;
     exportFolderPath: string;
     historyItems: readonly ExamHistoryItem[];
@@ -67,6 +74,8 @@ export class ExamController {
         progressLabel: "",
         busy: false,
         examMode: "simple",
+        adaptiveTargetMode: "diagnostic",
+        adaptivePlanResult: null,
         questionCount: 5,
         exportFolderPath: "VaultCoach Exams",
         historyItems: [],
@@ -193,6 +202,13 @@ export class ExamController {
         this.notifyStateChanged();
     }
 
+    setAdaptiveTargetMode(mode: AdaptiveTargetMode): void {
+        if (this.isSetupConfigurationLocked() || this.state.adaptiveTargetMode === mode) return;
+        this.state.adaptiveTargetMode = mode;
+        this.invalidateAnalysis();
+        this.notifyStateChanged();
+    }
+
     setFileManagerVisible(visible: boolean): void {
         if (this.isSetupConfigurationLocked()) return;
         this.state.showFileManager = visible;
@@ -296,6 +312,32 @@ export class ExamController {
                 abortSignal: this.activeAbortController.signal,
                 onProgress: (progress) => this.updateProgress(progress),
             });
+            if (typeof this.api.previewAdaptiveExamPlan !== "function") {
+                this.state.adaptivePlanResult = {
+                    status: "unavailable",
+                    reasonCode: "no-effective-concepts",
+                    message: "自适应选题暂不可用；仍可按当前范围生成考试。",
+                };
+            } else {
+                try {
+                    this.state.adaptivePlanResult = await this.api.previewAdaptiveExamPlan({
+                        selection: this.getScopeSelection(),
+                        analysis: this.state.analysis,
+                        questionCount: this.state.questionCount,
+                        examMode: this.state.examMode,
+                        targetMode: this.state.adaptiveTargetMode,
+                    });
+                } catch (error: unknown) {
+                    // Planning is optional and must never discard a completed
+                    // scope analysis or block the existing scope-only exam flow.
+                    console.error("[VaultCoachExamController] 自适应考试规划失败", error);
+                    this.state.adaptivePlanResult = {
+                        status: "unavailable",
+                        reasonCode: "no-effective-concepts",
+                        message: "自适应选题暂不可用；仍可按当前范围生成考试。",
+                    };
+                }
+            }
             this.state.phase = "setup";
         } catch (error: unknown) {
             this.state.phase = "setup";
@@ -328,13 +370,15 @@ export class ExamController {
         await this.emit({ type: "state-changed" });
 
         try {
+            const plannedQuestionCount = this.getAdaptivePlannedQuestionCount() ?? this.state.questionCount;
             const session = await this.api.createExamSession(
                 this.getScopeSelection(),
-                this.state.questionCount,
+                plannedQuestionCount,
                 this.createGenerationOptions(skipSemanticFiltering),
             );
             this.state.session = session;
             this.state.analysis = null;
+            this.state.adaptivePlanResult = null;
             this.state.smartFilteringFailed = false;
             this.state.phase = "taking";
             if (session.questions.length < this.state.questionCount) {
@@ -589,13 +633,24 @@ export class ExamController {
     }
 
     private createGenerationOptions(skipSemanticFiltering: boolean): ExamGenerationOptions {
+        const plan = this.state.adaptivePlanResult;
+        const adaptivePlan = !skipSemanticFiltering && plan && plan.status !== "unavailable"
+            ? createAdaptiveExamGenerationContext(plan.plan)
+            : undefined;
         return {
             analysis: skipSemanticFiltering ? undefined : this.state.analysis ?? undefined,
             examMode: this.state.examMode,
+            ...(adaptivePlan ? { adaptivePlan } : {}),
             skipSemanticFiltering,
             abortSignal: this.activeAbortController?.signal,
             onProgress: (progress) => this.updateProgress(progress),
         };
+    }
+
+    private getAdaptivePlannedQuestionCount(): number | null {
+        const plan = this.state.adaptivePlanResult;
+        if (!plan || plan.status === "unavailable") return null;
+        return plan.plan.diagnostics.plannedQuestionCount;
     }
 
     private updateProgress(progress: ExamGenerationProgress): void {
@@ -639,6 +694,7 @@ export class ExamController {
 
     private invalidateAnalysis(): void {
         this.state.analysis = null;
+        this.state.adaptivePlanResult = null;
         this.state.smartFilteringFailed = false;
     }
 

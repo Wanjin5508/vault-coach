@@ -25,6 +25,8 @@ import { ExamQuestionValidator } from "./exam-question-validator";
 import { ExamProfileStore } from "./exam-profile-store";
 import { ExamResolvedScope, ExamScopeService } from "./exam-scope-service";
 import { throwIfAborted } from "./exam-utils";
+import { createAdaptivePlanAuditSnapshot, type AdaptiveExamGenerationContext } from "../domain/adaptive-exam/adaptive-exam-types";
+import { validateAdaptiveExamPlan } from "../domain/adaptive-exam/adaptive-exam-integrity";
 
 /**
  * 考试模式编排引擎。
@@ -200,9 +202,19 @@ export class ExamEngine {
         durations.profilingMs = durations.scopeMs;
         throwIfAborted(options.abortSignal);
 
-        const eligibleChunks: IndexedChunk[] = this.documentIndex.getChunksByIds(analysis.eligibleChunkIds);
+        let eligibleChunks: IndexedChunk[] = this.documentIndex.getChunksByIds(analysis.eligibleChunkIds);
         if (eligibleChunks.length === 0) {
             throw new Error("当前考试范围内没有通过规则和智能筛选的可用片段。");
+        }
+
+        const adaptivePlan = options.adaptivePlan;
+        if (adaptivePlan) {
+            this.assertAdaptivePlanCanGenerate(adaptivePlan, examMode, analysis.eligibleChunkIds);
+            const plannedChunkIds = new Set(adaptivePlan.targets.flatMap((target) => target.sourceChunkIds));
+            eligibleChunks = eligibleChunks.filter((chunk) => plannedChunkIds.has(chunk.id));
+            if (eligibleChunks.length === 0) {
+                throw new Error("自适应考试计划没有保留当前范围内可出题的证据片段，请返回并重新分析。");
+            }
         }
 
         const requestedQuestionCount: number = Math.max(1, Math.min(10, Math.floor(questionCount)));
@@ -215,14 +227,23 @@ export class ExamEngine {
             label: "正在规划知识点",
         });
         const planningStart = Date.now();
-        const blueprint = await this.blueprintService.buildBlueprint(
+        const generatedBlueprint = await this.blueprintService.buildBlueprint(
             scopeLabel,
             eligibleChunks,
             analysis.profiles,
             effectiveQuestionCount,
             examMode,
             options.abortSignal,
+            adaptivePlan?.targets.map((target) => ({
+                conceptId: target.conceptId,
+                label: target.label,
+                sourceChunkIds: target.sourceChunkIds,
+                expectedQuestionCount: target.expectedQuestionCount,
+            })) ?? [],
         );
+        const blueprint = adaptivePlan
+            ? attachAdaptiveTargets(generatedBlueprint, adaptivePlan)
+            : generatedBlueprint;
         durations.planningMs = Date.now() - planningStart;
         throwIfAborted(options.abortSignal);
 
@@ -304,6 +325,7 @@ export class ExamEngine {
             excludedFilePaths: [...selection.excludedFilePaths],
             forceIncludedFilePaths: [...selection.forceIncludedFilePaths],
             examMode,
+            ...(adaptivePlan ? { adaptivePlan: createAdaptivePlanAuditSnapshot(adaptivePlan) } : {}),
             scopeSnapshot,
             analysisSummary: analysis.summary,
             blueprint,
@@ -333,6 +355,43 @@ export class ExamEngine {
         }
 
         return this.getSettings().enableExamSmartFiltering;
+    }
+
+    private assertAdaptivePlanCanGenerate(
+        adaptivePlan: AdaptiveExamGenerationContext,
+        examMode: ExamMode,
+        eligibleChunkIds: readonly string[],
+    ): void {
+        if (adaptivePlan.examMode !== examMode) {
+            throw new Error("自适应考试计划与当前考试模式不一致，请返回并重新分析。");
+        }
+        const validation = validateAdaptiveExamPlan({
+            id: adaptivePlan.planId,
+            algorithmVersion: adaptivePlan.algorithmVersion,
+            inputFingerprint: adaptivePlan.inputFingerprint,
+            revisionFingerprint: adaptivePlan.revisionFingerprint,
+            planningAt: 0,
+            examMode: adaptivePlan.examMode,
+            targetMode: adaptivePlan.targetMode,
+            scopeSignature: adaptivePlan.scopeSignature,
+            revisions: adaptivePlan.revisions,
+            targets: adaptivePlan.targets,
+            appliedFallbacks: adaptivePlan.appliedFallbacks,
+            diagnostics: {
+                candidateConceptCount: adaptivePlan.targets.length,
+                sourceBackedConceptCount: adaptivePlan.targets.length,
+                excludedConceptIds: [],
+                requestedQuestionCount: adaptivePlan.targets.reduce((total, target) => total + target.expectedQuestionCount, 0),
+                plannedQuestionCount: adaptivePlan.targets.reduce((total, target) => total + target.expectedQuestionCount, 0),
+            },
+        });
+        if (validation.length > 0) {
+            throw new Error("自适应考试计划无效，请返回并重新分析。");
+        }
+        const scopedChunkIds = new Set(eligibleChunkIds);
+        if (adaptivePlan.targets.some((target) => target.sourceChunkIds.some((chunkId) => !scopedChunkIds.has(chunkId)))) {
+            throw new Error("自适应考试计划的证据范围已变化，请返回并重新分析。");
+        }
     }
 
     /**
@@ -381,4 +440,32 @@ export class ExamEngine {
     private createExamId(timestamp: number): string {
         return `exam_${new Date(timestamp).toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
     }
+}
+
+/**
+ * Carries a plan's selected effective Concept IDs forward without teaching the
+ * blueprint/model layer about graph services. Every item already has sources
+ * restricted to the plan evidence set.
+ */
+function attachAdaptiveTargets(
+    blueprint: import("../domain/exam/exam-types").ExamBlueprint,
+    plan: AdaptiveExamGenerationContext,
+): import("../domain/exam/exam-types").ExamBlueprint {
+    const remainingByConceptId = new Map(plan.targets.map((target) => [target.conceptId, target.expectedQuestionCount]));
+    return {
+        ...blueprint,
+        items: blueprint.items.map((item) => ({
+            ...item,
+            plannedTargetConceptIds: plan.targets
+                .filter((target) => target.sourceChunkIds.some((chunkId) => item.sourceChunkIds.includes(chunkId)))
+                .filter((target) => (remainingByConceptId.get(target.conceptId) ?? 0) > 0)
+                .sort((left, right) => right.priority - left.priority || left.conceptId.localeCompare(right.conceptId))
+                .slice(0, 1)
+                .map((target) => target.conceptId)
+                .map((conceptId) => {
+                    remainingByConceptId.set(conceptId, (remainingByConceptId.get(conceptId) ?? 1) - 1);
+                    return conceptId;
+                }),
+        })),
+    };
 }

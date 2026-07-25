@@ -200,6 +200,30 @@ describe("ExamController", () => {
         expect(controller.getState()).toMatchObject({ examMode: "simple", analysis: null, phase: "setup" });
     });
 
+    it("locks the adaptive target together with the exam mode after analysis", async () => {
+        const api = {
+            settings: { enableExamSmartFiltering: true },
+            getExamScopeOptions: () => [],
+            analyzeExamScope: vi.fn(async () => createAnalysis()),
+            previewAdaptiveExamPlan: vi.fn(async () => ({
+                status: "unavailable" as const,
+                reasonCode: "no-effective-concepts" as const,
+                message: "No plan",
+            })),
+        } as unknown as VaultCoachPluginApi;
+        const controller = new ExamController(api, (key) => key);
+
+        controller.setAdaptiveTargetMode("mixed");
+        await controller.analyzeScope(false);
+        controller.setAdaptiveTargetMode("prerequisite");
+
+        expect(controller.getState().adaptiveTargetMode).toBe("mixed");
+        expect(controller.getState().analysis).not.toBeNull();
+        controller.returnToSetup();
+        controller.setAdaptiveTargetMode("prerequisite");
+        expect(controller.getState().adaptiveTargetMode).toBe("prerequisite");
+    });
+
     it("cancels scope analysis and restores a usable setup state", async () => {
         const analyzeExamScope = vi.fn((_selection, options?: ExamGenerationOptions) => {
             return new Promise<never>((_resolve, reject) => {

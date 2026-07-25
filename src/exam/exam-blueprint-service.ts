@@ -58,6 +58,14 @@ const DIFFICULTIES: ExamBlueprintItem["difficulty"][] = [
 
 const ANSWER_FORMS: readonly ExamAnswerForm[] = ["single-choice", "true-false", "free-response"];
 
+/** Read-only target hints supplied by the adaptive ExamEngine bridge. */
+export interface AdaptiveBlueprintTarget {
+    conceptId: string;
+    label: string;
+    sourceChunkIds: readonly string[];
+    expectedQuestionCount: number;
+}
+
 /**
  * 考试蓝图服务。
  */
@@ -80,6 +88,7 @@ export class ExamBlueprintService {
         requestedQuestionCount: number,
         examMode: ExamMode = "simple",
         abortSignal?: AbortSignal,
+        adaptiveTargets: readonly AdaptiveBlueprintTarget[] = [],
     ): Promise<ExamBlueprint> {
         const plannedQuestionCount: number = Math.min(
             Math.max(1, Math.floor(requestedQuestionCount)),
@@ -98,6 +107,7 @@ export class ExamBlueprintService {
                 plannedQuestionCount,
                 examMode,
                 abortSignal,
+                adaptiveTargets,
             );
             const normalizedBlueprint: ExamBlueprint = this.normalizeBlueprintPayload(
                 payload,
@@ -106,6 +116,7 @@ export class ExamBlueprintService {
                 requestedQuestionCount,
                 plannedQuestionCount,
                 examMode,
+                adaptiveTargets,
             );
             if (normalizedBlueprint.items.length > 0) {
                 return normalizedBlueprint;
@@ -117,7 +128,7 @@ export class ExamBlueprintService {
             console.warn("[VaultCoach] 考试蓝图模型规划失败，将使用确定性蓝图。", error);
         }
 
-        return this.buildDeterministicBlueprint(scopeLabel, chunks, requestedQuestionCount, plannedQuestionCount, examMode);
+        return this.buildDeterministicBlueprint(scopeLabel, chunks, requestedQuestionCount, plannedQuestionCount, examMode, adaptiveTargets);
     }
 
     /**
@@ -131,6 +142,7 @@ export class ExamBlueprintService {
         plannedQuestionCount: number,
         examMode: ExamMode,
         abortSignal?: AbortSignal,
+        adaptiveTargets: readonly AdaptiveBlueprintTarget[] = [],
     ): Promise<ExamBlueprintPayload> {
         const inventoryChunks: IndexedChunk[] = this.selectPlanningChunks(chunks, 32, 18000);
         const messages: LocalChatMessage[] = [
@@ -162,6 +174,11 @@ export class ExamBlueprintService {
                     "",
                     "内容画像摘要：",
                     this.buildProfileSummary(profiles),
+                    ...(adaptiveTargets.length > 0 ? [
+                        "",
+                        "本次自适应目标（优先围绕这些名称和已列出的来源 chunk 出题；不要输出内部 concept id）：",
+                        this.buildAdaptiveTargetSummary(adaptiveTargets),
+                    ] : []),
                     "",
                     "可用 chunk 清单：",
                     this.buildChunkInventory(inventoryChunks),
@@ -192,6 +209,7 @@ export class ExamBlueprintService {
         requestedQuestionCount: number,
         maxQuestionCount: number,
         examMode: ExamMode,
+        adaptiveTargets: readonly AdaptiveBlueprintTarget[] = [],
     ): ExamBlueprint {
         const chunkById: Map<string, IndexedChunk> = new Map<string, IndexedChunk>(
             chunks.map((chunk: IndexedChunk) => [chunk.id, chunk]),
@@ -236,7 +254,14 @@ export class ExamBlueprintService {
             });
         }
 
-        const fallbackBlueprint: ExamBlueprint = this.buildDeterministicBlueprint(scopeLabel, chunks, requestedQuestionCount, maxQuestionCount, examMode);
+        const fallbackBlueprint: ExamBlueprint = this.buildDeterministicBlueprint(
+            scopeLabel,
+            chunks,
+            requestedQuestionCount,
+            maxQuestionCount,
+            examMode,
+            adaptiveTargets,
+        );
         for (const fallbackItem of fallbackBlueprint.items) {
             if (items.length >= maxQuestionCount) {
                 break;
@@ -303,10 +328,13 @@ export class ExamBlueprintService {
         requestedQuestionCount: number,
         plannedQuestionCount: number,
         examMode: ExamMode,
+        adaptiveTargets: readonly AdaptiveBlueprintTarget[] = [],
     ): ExamBlueprint {
-        const selectedChunks: IndexedChunk[] = this.selectPlanningChunks(chunks, plannedQuestionCount, 20000);
-        const items: ExamBlueprintItem[] = selectedChunks.slice(0, plannedQuestionCount).map((chunk: IndexedChunk, index: number) => {
-            const topic: string = chunk.primaryHeading ?? chunk.headingPath[0] ?? chunk.fileName.replace(/\.md$/i, "");
+        const selected = adaptiveTargets.length > 0
+            ? this.selectAdaptivePlanningChunks(chunks, adaptiveTargets, plannedQuestionCount)
+            : this.selectPlanningChunks(chunks, plannedQuestionCount, 20000).map((chunk) => ({ chunk, target: null }));
+        const items: ExamBlueprintItem[] = selected.slice(0, plannedQuestionCount).map(({ chunk, target }, index: number) => {
+            const topic: string = target?.label || chunk.primaryHeading || chunk.headingPath[0] || chunk.fileName.replace(/\.md$/i, "");
             return {
                 id: `bp${index + 1}`,
                 topic,
@@ -319,6 +347,7 @@ export class ExamBlueprintService {
                 selectionRationale: getExamModeOrDefault(examMode) === "simple"
                     ? "简单模式使用可确定判分的客观题。"
                     : "挑战模式的确定性回退保留自由文本题。",
+                ...(target ? { plannedTargetConceptIds: [target.conceptId] } : {}),
                 sourceChunkIds: [chunk.id],
             };
         });
@@ -378,6 +407,35 @@ export class ExamBlueprintService {
         }
 
         return selectedChunks;
+    }
+
+    private selectAdaptivePlanningChunks(
+        chunks: readonly IndexedChunk[],
+        targets: readonly AdaptiveBlueprintTarget[],
+        maxChunks: number,
+    ): Array<{ chunk: IndexedChunk; target: AdaptiveBlueprintTarget }> {
+        const chunksById = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+        const selected: Array<{ chunk: IndexedChunk; target: AdaptiveBlueprintTarget }> = [];
+        for (const target of targets) {
+            const targetChunks = Array.from(new Set(target.sourceChunkIds))
+                .sort((left, right) => left.localeCompare(right))
+                .flatMap((chunkId) => {
+                    const chunk = chunksById.get(chunkId);
+                    return chunk ? [chunk] : [];
+                });
+            for (let index = 0; index < target.expectedQuestionCount && selected.length < maxChunks; index += 1) {
+                const chunk = targetChunks[index % targetChunks.length];
+                if (chunk) selected.push({ chunk, target });
+            }
+            if (selected.length >= maxChunks) break;
+        }
+        return selected;
+    }
+
+    private buildAdaptiveTargetSummary(targets: readonly AdaptiveBlueprintTarget[]): string {
+        return targets.map((target) => {
+            return `- ${target.label}：预计 ${target.expectedQuestionCount} 题；允许来源：${target.sourceChunkIds.join(", ")}`;
+        }).join("\n");
     }
 
     /**

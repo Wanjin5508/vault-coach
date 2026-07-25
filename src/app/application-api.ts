@@ -27,6 +27,7 @@ import type { ConceptMasteryState, MasterySnapshotV1, MasteryStateView } from ".
 import type { ProgressSnapshot, ProgressStateView } from "./progress/progress-types";
 import type { SourceInventoryDiff, SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 import type { StorageFootprint } from "../domain/index-lifecycle/storage-footprint";
+import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -40,6 +41,7 @@ export interface ExamApplicationApi {
     getFileOptions(folderPaths: string[]): ExamFileOption[];
     getScopeSnapshot(selection: ExamScopeSelection): ExamScopeSnapshot;
     analyzeScope(selection: ExamScopeSelection, options?: ExamGenerationOptions): Promise<ExamScopeAnalysisResult>;
+    previewAdaptivePlan(request: AdaptiveExamPlanRequest): Promise<AdaptiveExamPlanResult>;
     createSession(selection: ExamScopeSelection, count: number, options?: ExamGenerationOptions): Promise<ExamSession>;
     submitSession(session: ExamSession, answers: string[]): Promise<ExamSession>;
     saveSession(session: ExamSession): Promise<ExamSession>;

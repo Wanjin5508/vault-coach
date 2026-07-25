@@ -1,3 +1,5 @@
+import type { AdaptiveExamGenerationContext, AdaptivePlanAuditSnapshot } from "../adaptive-exam/adaptive-exam-types";
+
 export type ExamSessionStatus = "draft" | "submitted" | "saved";
 
 export interface ExamScopeOption {
@@ -122,6 +124,8 @@ export interface ExamGenerationOptions {
     analysis?: ExamScopeAnalysisResult;
     /** The user-facing generation policy for the session being created. */
     examMode?: ExamMode;
+    /** A verified, disposable target plan. Undefined preserves the legacy scope-only flow. */
+    adaptivePlan?: AdaptiveExamGenerationContext;
     forceProfileRefresh?: boolean;
     skipSemanticFiltering?: boolean;
     abortSignal?: AbortSignal;
@@ -187,6 +191,8 @@ export interface ExamBlueprintItem {
     answerForm?: ExamAnswerForm;
     /** A short, auditable planner explanation used only during generation diagnostics. */
     selectionRationale?: string;
+    /** Effective Concepts selected by an accepted adaptive plan for this item. */
+    plannedTargetConceptIds?: string[];
     sourceChunkIds: string[];
 }
 
@@ -257,6 +263,8 @@ export interface ExamQuestion {
     evidenceExcerptIds: string[];
     sourcePaths: string[];
     conceptIds: string[];
+    /** Subset of conceptIds explicitly selected by the adaptive plan, if any. */
+    plannedTargetConceptIds?: string[];
     generationMetadata: ModelPromptMetadata & {
         generatedAt: number;
     };
@@ -292,6 +300,8 @@ export interface ExamSession {
     forceIncludedFilePaths: string[];
     /** Undefined on legacy records; current UI treats those sessions as legacy free-response sessions. */
     examMode?: ExamMode;
+    /** Additive audit snapshot; raw graph/mastery facts remain in their own sources. */
+    adaptivePlan?: AdaptivePlanAuditSnapshot;
     scopeSnapshot?: ExamScopeSnapshot;
     analysisSummary?: ExamScopeAnalysisSummary;
     blueprint?: ExamBlueprint;

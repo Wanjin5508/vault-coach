@@ -218,6 +218,39 @@ describe("AssessmentEventFactory", () => {
         expect(result.conceptBindings).toHaveLength(2);
     });
 
+    it("keeps adaptive audit data separate from evidence-bound Mastery inputs", () => {
+        const session = createScoredSession();
+        session.examMode = "simple";
+        session.adaptivePlan = {
+            planId: "adaptive-exam:1",
+            algorithmVersion: "adaptive-exam/v1",
+            inputFingerprint: "fingerprint",
+            targetMode: "diagnostic",
+            examMode: "simple",
+            scopeSignature: "scope",
+            targetConceptIds: ["exam-topic:retrieval"],
+            reasonCodesByConceptId: { "exam-topic:retrieval": ["unassessed"] },
+            appliedFallbacks: [],
+        };
+        const firstQuestion = session.questions[0];
+        const firstEvaluation = session.evaluation?.items[0];
+        if (!firstQuestion || !firstEvaluation) throw new Error("Expected first question and evaluation.");
+        firstQuestion.plannedTargetConceptIds = ["exam-topic:retrieval", "not-evidenced"];
+        firstEvaluation.evaluator.evaluatorKind = "deterministic";
+
+        const event = createFactory("event-adaptive").createForQuestionIds(session, ["q1"]).events[0];
+
+        expect(event).toMatchObject({
+            conceptIds: ["exam-topic:retrieval"],
+            evaluator: { kind: "deterministic" },
+            adaptive: {
+                planId: "adaptive-exam:1",
+                targetMode: "diagnostic",
+                plannedTargetConceptIds: ["exam-topic:retrieval"],
+            },
+        });
+    });
+
     it("links a re-evaluation to the latest active event without modifying history", () => {
         const session = createScoredSession();
         const oldEvent: AssessmentEvent = {

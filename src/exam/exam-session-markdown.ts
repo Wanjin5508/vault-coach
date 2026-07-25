@@ -7,7 +7,7 @@ import { getQuestionAnswerForm, isObjectiveQuestion } from "../domain/exam/exam-
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
 /** Increment when the Markdown projection's own frontmatter contract changes. */
-export const EXAM_MARKDOWN_PROJECTION_VERSION = 2;
+export const EXAM_MARKDOWN_PROJECTION_VERSION = 3;
 
 interface AssessmentProjectionMetadata {
     assessmentSchemaVersion: number;
@@ -55,6 +55,17 @@ export function formatExamSessionMarkdown(
         lines.push(`## ${t("exam.markdown.overallFeedback")}`);
         lines.push("");
         lines.push(session.evaluation.overallFeedback);
+    }
+
+    if (session.adaptivePlan) {
+        lines.push("");
+        lines.push(`## ${t("exam.markdown.adaptivePlan")}`);
+        lines.push("");
+        lines.push(`- ${t("exam.markdown.adaptiveTargetMode")}：${session.adaptivePlan.targetMode}`);
+        lines.push(`- ${t("exam.markdown.adaptiveTargetCount")}：${session.adaptivePlan.targetConceptIds.length}`);
+        if (session.adaptivePlan.appliedFallbacks.length > 0) {
+            lines.push(`- ${t("exam.markdown.adaptiveFallbacks")}：${session.adaptivePlan.appliedFallbacks.join(", ")}`);
+        }
     }
 
     lines.push("");

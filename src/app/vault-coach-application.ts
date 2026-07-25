@@ -22,6 +22,8 @@ import type { LearningGraphQuery } from "../domain/learning-graph/learning-graph
 import type { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
 import type { MasteryService } from "./mastery/mastery-service";
 import type { ProgressService } from "./progress/progress-service";
+import type { AdaptiveExamPlanner } from "./exam/adaptive-exam-planner";
+import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
 import {
     PROGRESS_SNAPSHOT_SCHEMA_VERSION,
     type ProgressSnapshot,
@@ -55,6 +57,7 @@ export interface VaultCoachApplicationDependencies {
     learningGraphQueryService?: LearningGraphQueryService;
     masteryService?: MasteryService;
     progressService?: ProgressService;
+    adaptiveExamPlanner?: AdaptiveExamPlanner;
 }
 
 /** Application facade with grouped use-case APIs and no Obsidian UI dependency. */
@@ -142,6 +145,18 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 await dependencies.ensureKnowledgeBaseReady();
                 return dependencies.examEngine.analyzeScope(dependencies.normalizeSelection(selection), options);
             },
+            previewAdaptivePlan: async (request: AdaptiveExamPlanRequest): Promise<AdaptiveExamPlanResult> => {
+                const planner = dependencies.adaptiveExamPlanner;
+                if (!planner) {
+                    return {
+                        status: "unavailable",
+                        reasonCode: "no-effective-concepts",
+                        message: "自适应考试规划暂不可用；仍可按所选范围生成普通考试。",
+                    };
+                }
+                await dependencies.ensureKnowledgeBaseReady();
+                return planner.preview({ ...request, selection: dependencies.normalizeSelection(request.selection) });
+            },
             createSession: async (selection, count, options: ExamGenerationOptions = {}) => {
                 await dependencies.ensureKnowledgeBaseReady();
                 const normalized = dependencies.normalizeSelection(selection);
@@ -153,6 +168,25 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 const effectiveCount = snapshot.estimatedMaxQuestions > 0
                     ? Math.min(count, snapshot.estimatedMaxQuestions)
                     : count;
+                if (options.adaptivePlan) {
+                    const planner = dependencies.adaptiveExamPlanner;
+                    const analysis = options.analysis;
+                    if (!planner || !analysis) {
+                        throw new Error("自适应考试计划不可用，请返回并重新分析。");
+                    }
+                    const plannedQuestionCount = options.adaptivePlan.targets
+                        .reduce((total, target) => total + target.expectedQuestionCount, 0);
+                    const current = plannedQuestionCount === effectiveCount && await planner.isCurrent(options.adaptivePlan, {
+                        selection: normalized,
+                        analysis,
+                        questionCount: effectiveCount,
+                        examMode: options.examMode ?? options.adaptivePlan.examMode,
+                        targetMode: options.adaptivePlan.targetMode,
+                    });
+                    if (!current) {
+                        throw new Error("知识状态已变化，请返回并重新分析后生成考试。");
+                    }
+                }
                 return dependencies.examEngine.createExamSession(
                     label,
                     normalized,
@@ -314,6 +348,9 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
      */
     private async saveExamSession(session: ExamSession): Promise<ExamSession> {
         const dependencies = this.dependencies;
+        if (session.adaptivePlan && session.adaptivePlan.examMode !== session.examMode) {
+            throw new Error("考试模式与自适应考试计划不一致，无法保存。");
+        }
         if (!session.evaluation) {
             const saved = await dependencies.examSessionStore.save(session);
             this.emit({ type: "exam-history-changed" });

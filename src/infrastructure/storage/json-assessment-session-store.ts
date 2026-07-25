@@ -389,9 +389,15 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
                 || !this.isRecord(event.evaluator)
                 || typeof event.evaluator.provider !== "string"
                 || typeof event.evaluator.model !== "string"
-                || typeof event.evaluator.promptVersion !== "string") {
+                || typeof event.evaluator.promptVersion !== "string"
+                || (event.evaluator.kind !== undefined && event.evaluator.kind !== "model" && event.evaluator.kind !== "deterministic")
+                || (event.adaptive !== undefined && !this.isValidAdaptiveEventAudit(event.adaptive))) {
                 throw new Error(`Assessment Event 格式无效：${path}`);
             }
+        }
+
+        if (value.examSession.adaptivePlan !== undefined && !this.isValidAdaptivePlanAudit(value.examSession.adaptivePlan, value.examSession.examMode)) {
+            throw new Error(`Assessment Session 自适应考试计划格式无效：${path}`);
         }
 
         for (const binding of value.conceptBindings) {
@@ -426,6 +432,45 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
                 throw new Error(`Assessment 索引条目格式无效：${path}`);
             }
         }
+    }
+
+    private isValidAdaptiveEventAudit(value: unknown): boolean {
+        return this.isRecord(value)
+            && typeof value.planId === "string"
+            && this.isAdaptiveTargetMode(value.targetMode)
+            && Array.isArray(value.plannedTargetConceptIds)
+            && value.plannedTargetConceptIds.every((conceptId) => typeof conceptId === "string");
+    }
+
+    private isValidAdaptivePlanAudit(value: unknown, examMode: unknown): boolean {
+        if (!this.isRecord(value)
+            || typeof value.planId !== "string"
+            || typeof value.algorithmVersion !== "string"
+            || typeof value.inputFingerprint !== "string"
+            || typeof value.scopeSignature !== "string"
+            || !this.isAdaptiveTargetMode(value.targetMode)
+            || (value.examMode !== "simple" && value.examMode !== "challenge")
+            || value.examMode !== examMode
+            || !Array.isArray(value.targetConceptIds)
+            || !value.targetConceptIds.every((conceptId) => typeof conceptId === "string")
+            || !Array.isArray(value.appliedFallbacks)
+            || !value.appliedFallbacks.every((reason) => this.isAdaptiveReasonCode(reason))
+            || !this.isRecord(value.reasonCodesByConceptId)) {
+            return false;
+        }
+        return Object.values(value.reasonCodesByConceptId).every((reasons) => {
+            return Array.isArray(reasons) && reasons.every((reason) => this.isAdaptiveReasonCode(reason));
+        });
+    }
+
+    private isAdaptiveTargetMode(value: unknown): boolean {
+        return value === "diagnostic" || value === "weak-review" || value === "prerequisite" || value === "mixed";
+    }
+
+    private isAdaptiveReasonCode(value: unknown): boolean {
+        return value === "unassessed" || value === "low-confidence" || value === "weak-mastery"
+            || value === "developing-mastery" || value === "review-due" || value === "confirmed-prerequisite"
+            || value === "recently-covered" || value === "insufficient-evidence" || value === "scope-capacity-limited";
     }
 
     private isRecord(value: unknown): value is Record<string, unknown> {

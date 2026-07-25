@@ -2,6 +2,7 @@ import { LEARNING_GRAPH_DEFAULT_MAX_EDGES, LEARNING_GRAPH_DEFAULT_MAX_NODES, LEA
 import { compareLearningGraphEdges, compareLearningGraphNodes } from "../../domain/learning-graph/learning-graph-id";
 import { LearningGraphIntegrityService } from "../../domain/learning-graph/learning-graph-integrity";
 import type { SemanticRelationType } from "../../domain/semantic-graph/semantic-graph-types";
+import type { ConfirmedPrerequisite } from "../../domain/adaptive-exam/adaptive-exam-types";
 import { LearningGraphProjectionService } from "./learning-graph-projection-service";
 import type { LearningGraphSource } from "./learning-graph-source";
 
@@ -92,6 +93,29 @@ export class LearningGraphQueryService {
             conceptIds.sort((left, right) => left.localeCompare(right));
         }
         return conceptIdsByChunk;
+    }
+
+    /**
+     * Returns only effective, directed prerequisite relations.  This is a
+     * domain read model for adaptive exams: it never includes pending
+     * candidates, display-only automatic relations, or inferred edges.
+     */
+    getConfirmedPrerequisites(): readonly ConfirmedPrerequisite[] {
+        const snapshot = this.source.getStructuralSnapshot();
+        if (!snapshot) return [];
+        return this.source.getEffectiveSemanticGraph().relations
+            .filter((relation) => relation.type === "prerequisite_of")
+            .map((relation) => ({
+                prerequisiteConceptId: relation.sourceConceptId,
+                targetConceptId: relation.targetConceptId,
+                relationId: relation.id,
+            }))
+            .sort((left, right) => left.relationId.localeCompare(right.relationId));
+    }
+
+    /** A stable source revision used to reject stale adaptive exam plans. */
+    getRevision(): string {
+        return this.source.getLearningMapRevision();
     }
 
     invalidate(): void {

@@ -158,6 +158,33 @@ describe("ExamQuestionGenerator provenance", () => {
         ]);
     });
 
+    it("carries only source-proven adaptive targets into a generated question", async () => {
+        const generator = createGenerator(JSON.stringify({ questions: [] }));
+        const blueprint: ExamBlueprint = {
+            ...createBlueprint(),
+            items: [{
+                ...createBlueprint().items[0]!,
+                plannedTargetConceptIds: ["concept:retrieval", "concept:not-proven"],
+            }],
+        };
+
+        const result = await generator.generateQuestions(
+            blueprint,
+            createChunks(),
+            undefined,
+            undefined,
+            new Map([
+                ["chunk-1", ["concept:retrieval"]],
+                ["chunk-2", ["concept:reranking"]],
+            ]),
+        );
+
+        expect(result.questions[0]).toMatchObject({
+            conceptIds: ["concept:reranking", "concept:retrieval"],
+            plannedTargetConceptIds: ["concept:retrieval"],
+        });
+    });
+
     it("keeps a simple-mode multiple-choice question locally scoreable", async () => {
         const generator = createGenerator(JSON.stringify({
             questions: [{

@@ -18,6 +18,7 @@ import type {
 import type { VaultCoachSettings } from "../app/config/settings-types";
 import type { VaultCoachPluginApi } from "./plugin-api";
 import type { SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
+import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
 
 type ApplicationDelegatedMethod =
     | "resetConversation"
@@ -28,6 +29,7 @@ type ApplicationDelegatedMethod =
     | "getExamFileOptions"
     | "getExamScopeSnapshot"
     | "analyzeExamScope"
+    | "previewAdaptiveExamPlan"
     | "createExamSession"
     | "evaluateExamSession"
     | "saveExamSession"
@@ -198,6 +200,10 @@ export class LegacyPluginApiAdapter implements VaultCoachPluginApi {
 
     analyzeExamScope(selection: ExamScopeSelection, options?: ExamGenerationOptions): Promise<ExamScopeAnalysisResult> {
         return this.application.exam.analyzeScope(selection, options);
+    }
+
+    previewAdaptiveExamPlan(request: AdaptiveExamPlanRequest): Promise<AdaptiveExamPlanResult> {
+        return this.application.exam.previewAdaptivePlan(request);
     }
 
     createExamSession(

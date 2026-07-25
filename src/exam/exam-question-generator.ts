@@ -736,6 +736,12 @@ export class ExamQuestionGenerator {
                 .map((chunkId: string) => chunksById.get(chunkId)?.filePath)
                 .filter((filePath: string | undefined): filePath is string => filePath !== undefined),
         ));
+        const conceptIds = this.resolveConfirmedConceptIds(
+            sourceChunkIds,
+            conceptIdsByChunk,
+            blueprintItem.topic,
+            blueprintItem.id,
+        );
 
         return {
             id: `q${index}`,
@@ -755,12 +761,10 @@ export class ExamQuestionGenerator {
             sourceChunkIds,
             evidenceExcerptIds: Array.from(new Set(candidate.evidenceExcerptIds)),
             sourcePaths,
-            conceptIds: this.resolveConfirmedConceptIds(
-                sourceChunkIds,
-                conceptIdsByChunk,
-                blueprintItem.topic,
-                blueprintItem.id,
-            ),
+            conceptIds,
+            ...(blueprintItem.plannedTargetConceptIds ? {
+                plannedTargetConceptIds: blueprintItem.plannedTargetConceptIds.filter((conceptId) => conceptIds.includes(conceptId)),
+            } : {}),
             generationMetadata: { ...generationMetadata },
         };
     }
