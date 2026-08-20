@@ -34,6 +34,8 @@ import { ServiceLearningGraphSource } from "./learning-graph/learning-graph-sour
 import { MasteryService } from "./mastery/mastery-service";
 import { ProgressService } from "./progress/progress-service";
 import { RecommendationService } from "./recommendation/recommendation-service";
+import { LiteEngineClient } from "./engine/lite-engine-client";
+import type { KnowledgeEngineClient } from "./engine/knowledge-engine-types";
 import { AdaptiveExamPlanner } from "./exam/adaptive-exam-planner";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
@@ -88,6 +90,7 @@ export interface ApplicationContainerServices {
     masteryService: MasteryService;
     progressService: ProgressService;
     recommendationService: RecommendationService;
+    knowledgeEngineClient: KnowledgeEngineClient;
     adaptiveExamPlanner: AdaptiveExamPlanner;
 }
 
@@ -180,6 +183,10 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         actionStore: new JsonReviewActionStore(dependencies.app.vault.adapter),
         createEventId: () => createReviewActionEventId(reviewActionSequence++),
     });
+    // VC-L8 intentionally composes only the offline fallback. A future Local
+    // client is injected here after explicit settings, loopback handshake,
+    // consent, and protocol compatibility work are complete in KE-7.
+    const knowledgeEngineClient = new LiteEngineClient();
     const progressService = new ProgressService({
         catalogReader: learningGraphQueryService,
         masteryReader: masteryService,
@@ -246,6 +253,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         masteryService,
         progressService,
         recommendationService,
+        knowledgeEngineClient,
         adaptiveExamPlanner,
     });
     application = applicationInstance;
@@ -272,6 +280,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             masteryService,
             progressService,
             recommendationService,
+            knowledgeEngineClient,
             adaptiveExamPlanner,
         },
         async dispose(): Promise<void> {

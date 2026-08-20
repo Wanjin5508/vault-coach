@@ -29,6 +29,7 @@ import type { SourceInventoryDiff, SourceInventoryStatus } from "../domain/index
 import type { StorageFootprint } from "../domain/index-lifecycle/storage-footprint";
 import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
 import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendation/recommendation-types";
+import type { KnowledgeEngineAvailability, KnowledgeEngineDiagnostics } from "./engine/knowledge-engine-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -142,6 +143,17 @@ export interface RecommendationApplicationApi {
     exportMarkdown(): Promise<string>;
 }
 
+/**
+ * Read-only Engine seam. VC-L8 exposes diagnostics without making any
+ * service a prerequisite for Lite workflows or allowing presentation to call
+ * an arbitrary URL.
+ */
+export interface KnowledgeEngineApplicationApi {
+    getAvailability(): KnowledgeEngineAvailability;
+    getDiagnostics(): KnowledgeEngineDiagnostics;
+    refresh(signal?: AbortSignal): Promise<KnowledgeEngineAvailability>;
+}
+
 export interface VaultCoachApplicationApi {
     chat: ChatApplicationApi;
     exam: ExamApplicationApi;
@@ -152,4 +164,5 @@ export interface VaultCoachApplicationApi {
     mastery: MasteryApplicationApi;
     progress: ProgressApplicationApi;
     recommendations: RecommendationApplicationApi;
+    engine: KnowledgeEngineApplicationApi;
 }

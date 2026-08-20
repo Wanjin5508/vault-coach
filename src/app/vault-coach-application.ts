@@ -1,5 +1,5 @@
 import type { ChatService } from "./chat/chat-service";
-import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, LearningGraphApplicationApi, MasteryApplicationApi, ProgressApplicationApi, RecommendationApplicationApi, SemanticGraphApplicationApi, VaultCoachApplicationApi } from "./application-api";
+import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeEngineApplicationApi, KnowledgeIndexViewState, LearningGraphApplicationApi, MasteryApplicationApi, ProgressApplicationApi, RecommendationApplicationApi, SemanticGraphApplicationApi, VaultCoachApplicationApi } from "./application-api";
 import type { ApplicationEvent, ApplicationEventListener } from "./application-events";
 import type { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
 import { getQuestionIdsNeedingAssessmentEvents } from "../domain/assessment/assessment-event-fingerprint";
@@ -31,6 +31,7 @@ import {
     type ProgressStateView,
 } from "./progress/progress-types";
 import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendation/recommendation-types";
+import type { KnowledgeEngineClient } from "./engine/knowledge-engine-types";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
@@ -61,6 +62,7 @@ export interface VaultCoachApplicationDependencies {
     progressService?: ProgressService;
     adaptiveExamPlanner?: AdaptiveExamPlanner;
     recommendationService?: RecommendationService;
+    knowledgeEngineClient?: KnowledgeEngineClient;
 }
 
 /** Application facade with grouped use-case APIs and no Obsidian UI dependency. */
@@ -74,6 +76,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
     readonly mastery: MasteryApplicationApi;
     readonly progress: ProgressApplicationApi;
     readonly recommendations: RecommendationApplicationApi;
+    readonly engine: KnowledgeEngineApplicationApi;
     private readonly listeners: Set<ApplicationEventListener> = new Set();
 
     constructor(private readonly dependencies: VaultCoachApplicationDependencies) {
@@ -116,6 +119,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         this.mastery = this.createMasteryApi();
         this.progress = this.createProgressApi();
         this.recommendations = this.createRecommendationApi();
+        this.engine = this.createKnowledgeEngineApi();
     }
 
     subscribe(listener: ApplicationEventListener): () => void {
@@ -368,6 +372,18 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         };
     }
 
+    private createKnowledgeEngineApi(): KnowledgeEngineApplicationApi {
+        const client = this.dependencies.knowledgeEngineClient;
+        return {
+            getAvailability: () => client ? cloneEngineAvailability(client.getAvailability()) : unavailableEngineAvailability(),
+            getDiagnostics: () => client ? { ...client.getDiagnostics() } : unavailableEngineDiagnostics(),
+            refresh: async (signal?: AbortSignal) => {
+                if (!client) return unavailableEngineAvailability();
+                return cloneEngineAvailability(await client.refresh(signal));
+            },
+        };
+    }
+
     /**
      * Persists structured facts before their disposable Markdown projection.
      * Draft saving retains the legacy report-only behaviour for compatibility.
@@ -579,6 +595,33 @@ function unavailableProgressState(): ProgressStateView {
         lastError: "Progress service is unavailable.",
         generatedAt: null,
     };
+}
+
+function unavailableEngineAvailability(): import("./engine/knowledge-engine-types").KnowledgeEngineAvailability {
+    return {
+        mode: "lite",
+        status: "unavailable",
+        protocolVersion: 1,
+        capabilities: [],
+        reason: "not-configured",
+        detail: "Knowledge Engine client is unavailable; Vault Coach Lite remains available.",
+    };
+}
+
+function unavailableEngineDiagnostics(): import("./engine/knowledge-engine-types").KnowledgeEngineDiagnostics {
+    return {
+        endpoint: null,
+        lastCheckedAt: null,
+        lastError: "Knowledge Engine client is unavailable.",
+        networkRequestsMade: 0,
+        dataTransfer: "none",
+    };
+}
+
+function cloneEngineAvailability(
+    availability: import("./engine/knowledge-engine-types").KnowledgeEngineAvailability,
+): import("./engine/knowledge-engine-types").KnowledgeEngineAvailability {
+    return { ...availability, capabilities: [...availability.capabilities] };
 }
 
 function mergeConceptBindings(

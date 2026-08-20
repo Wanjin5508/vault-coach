@@ -10,6 +10,7 @@ import type { ExamEvaluation, ExamSession } from "../../src/domain/exam/exam-typ
 import type { MarkdownExamHistoryRecord } from "../../src/exam/exam-session-store";
 import type { MasteryService } from "../../src/app/mastery/mastery-service";
 import type { ProgressService } from "../../src/app/progress/progress-service";
+import type { KnowledgeEngineClient } from "../../src/app/engine/knowledge-engine-types";
 
 describe("VaultCoachApplication", () => {
     it("publishes grouped chat use-case events without a presentation dependency", async () => {
@@ -50,6 +51,35 @@ describe("VaultCoachApplication", () => {
         expect(application.progress.isAvailable()).toBe(true);
         await expect(application.progress.getSnapshot()).resolves.toBe(progressSnapshot);
         expect(getSnapshot).toHaveBeenCalledOnce();
+    });
+
+    it("exposes an Engine seam without making it a dependency of Lite application APIs", async () => {
+        const refresh = vi.fn(async () => ({
+            mode: "lite" as const,
+            status: "available" as const,
+            protocolVersion: 1 as const,
+            capabilities: [],
+            reason: "lite-default" as const,
+            detail: "Lite only",
+        }));
+        const client = {
+            getAvailability: () => ({ mode: "lite" as const, status: "available" as const, protocolVersion: 1 as const, capabilities: [], reason: "lite-default" as const, detail: "Lite only" }),
+            getDiagnostics: () => ({ endpoint: null, lastCheckedAt: null, lastError: null, networkRequestsMade: 0, dataTransfer: "none" as const }),
+            refresh,
+        } satisfies KnowledgeEngineClient;
+        const application = new VaultCoachApplication({
+            chatService: {
+                getMessages: () => [], appendUserMessage: async () => undefined,
+                streamAssistantTurn: async () => ({ text: "", sources: [], retrievalModeUsed: "keyword", rewriteResult: { originalQuery: "", rewrittenQuery: "", useRewrite: false } }),
+                resetConversation: () => undefined,
+            },
+            knowledgeEngineClient: client,
+        } as unknown as VaultCoachApplicationDependencies);
+
+        expect(application.engine.getAvailability()).toMatchObject({ mode: "lite", status: "available" });
+        await expect(application.engine.refresh()).resolves.toMatchObject({ reason: "lite-default" });
+        expect(refresh).toHaveBeenCalledOnce();
+        expect(application.progress.isAvailable()).toBe(false);
     });
 
     it("publishes semantic graph state immediately when a rebuild starts and again when it finishes", async () => {
