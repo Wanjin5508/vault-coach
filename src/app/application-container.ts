@@ -4,6 +4,8 @@ import { DeterministicGraphBuilder } from "../domain/graph/deterministic-graph-b
 import { ExamEngine } from "../exam/exam-engine";
 import { ExamSessionStore } from "../exam/exam-session-store";
 import { EXAM_EVALUATION_PROMPT_VERSION, ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
+import { ExamEvaluationRouter, type ExamEvaluator } from "../domain/exam/exam-evaluation-router";
+import { ObjectiveExamEvaluationService } from "../domain/exam/objective-exam-evaluation-service";
 import {
     getAssessmentSessionIdFromPath,
     getAssessmentSessionPath,
@@ -16,6 +18,7 @@ import { ObsidianGraphSourceReader } from "../infrastructure/obsidian/obsidian-g
 import { JsonGraphStore } from "../infrastructure/storage/json-graph-store";
 import { JsonSemanticGraphStore } from "../infrastructure/storage/json-semantic-graph-store";
 import { JsonMasteryStore } from "../infrastructure/storage/json-mastery-store";
+import { JsonReviewActionStore } from "../infrastructure/storage/json-review-action-store";
 import { StorageFootprintReporter } from "../infrastructure/storage/storage-footprint-reporter";
 import { LongTermMemoryService } from "../memory/memory-service";
 import { VaultCoachPersistentStore } from "../persistent-store";
@@ -30,6 +33,10 @@ import { LearningGraphQueryService } from "./learning-graph/learning-graph-query
 import { ServiceLearningGraphSource } from "./learning-graph/learning-graph-source";
 import { MasteryService } from "./mastery/mastery-service";
 import { ProgressService } from "./progress/progress-service";
+import { RecommendationService } from "./recommendation/recommendation-service";
+import { LiteEngineClient } from "./engine/lite-engine-client";
+import type { KnowledgeEngineClient } from "./engine/knowledge-engine-types";
+import { AdaptiveExamPlanner } from "./exam/adaptive-exam-planner";
 import { VaultCoachApplication } from "./vault-coach-application";
 import type { TranslationKey } from "../i18n";
 import type { KnowledgeIndexViewState } from "./application-api";
@@ -69,7 +76,7 @@ export interface ApplicationContainerServices {
     ragEngine: AdvancedRagEngine;
     chatService: ChatService;
     examEngine: ExamEngine;
-    examEvaluationService: ExamEvaluationService;
+    examEvaluationService: ExamEvaluator;
     examSessionStore: ExamSessionStore;
     assessmentSessionStore: AssessmentSessionStore;
     assessmentEventFactory: AssessmentEventFactory;
@@ -82,6 +89,9 @@ export interface ApplicationContainerServices {
     learningGraphQueryService: LearningGraphQueryService;
     masteryService: MasteryService;
     progressService: ProgressService;
+    recommendationService: RecommendationService;
+    knowledgeEngineClient: KnowledgeEngineClient;
+    adaptiveExamPlanner: AdaptiveExamPlanner;
 }
 
 /**
@@ -115,11 +125,15 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         () => chatService.getMessagesForMemory(),
         ragEngine,
     );
-    const examEvaluationService = new ExamEvaluationService(
+    const freeResponseExamEvaluationService = new ExamEvaluationService(
         new LocalModelClient(
             () => dependencies.getSettings(),
             () => dependencies.getCloudApiKey(),
         ),
+    );
+    const examEvaluationService: ExamEvaluator = new ExamEvaluationRouter(
+        freeResponseExamEvaluationService,
+        new ObjectiveExamEvaluationService(),
     );
     const examSessionStore = new ExamSessionStore(
         dependencies.app,
@@ -162,9 +176,26 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         store: new JsonMasteryStore(dependencies.app.vault.adapter),
         getCapacityAssessment: () => semanticGraphService.getCapacityAssessment(),
     });
+    let reviewActionSequence = 0;
+    const recommendationService = new RecommendationService({
+        learningGraph: learningGraphQueryService,
+        mastery: masteryService,
+        actionStore: new JsonReviewActionStore(dependencies.app.vault.adapter),
+        createEventId: () => createReviewActionEventId(reviewActionSequence++),
+    });
+    // VC-L8 intentionally composes only the offline fallback. A future Local
+    // client is injected here after explicit settings, loopback handshake,
+    // consent, and protocol compatibility work are complete in KE-7.
+    const knowledgeEngineClient = new LiteEngineClient();
     const progressService = new ProgressService({
         catalogReader: learningGraphQueryService,
         masteryReader: masteryService,
+        assessmentSessionStore,
+        recommendationReader: recommendationService,
+    });
+    const adaptiveExamPlanner = new AdaptiveExamPlanner({
+        learningGraph: learningGraphQueryService,
+        mastery: masteryService,
         assessmentSessionStore,
     });
     let assessmentEventSequence = 0;
@@ -221,6 +252,9 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         learningGraphQueryService,
         masteryService,
         progressService,
+        recommendationService,
+        knowledgeEngineClient,
+        adaptiveExamPlanner,
     });
     application = applicationInstance;
 
@@ -245,6 +279,9 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             learningGraphQueryService,
             masteryService,
             progressService,
+            recommendationService,
+            knowledgeEngineClient,
+            adaptiveExamPlanner,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();
@@ -261,6 +298,16 @@ function createAssessmentEventId(sequence: number): string {
     }
 
     return `assessment-event-${Date.now().toString(36)}-${sequence.toString(36)}`;
+}
+
+function createReviewActionEventId(sequence: number): string {
+    const randomValues = new Uint32Array(2);
+    if (window.crypto?.getRandomValues) {
+        window.crypto.getRandomValues(randomValues);
+        return `review-action-${randomValues[0]?.toString(36) ?? "0"}-${randomValues[1]?.toString(36) ?? "0"}-${sequence.toString(36)}`;
+    }
+
+    return `review-action-${Date.now().toString(36)}-${sequence.toString(36)}`;
 }
 
 function createExamEvaluationMetadata(settings: VaultCoachSettings): ExamEvaluationMetadata {

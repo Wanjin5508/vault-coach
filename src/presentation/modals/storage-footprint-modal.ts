@@ -66,6 +66,7 @@ export class StorageFootprintModal extends Modal {
             "semantic-facts": "storageFootprint.category.semanticFacts",
             "semantic-embeddings": "storageFootprint.category.semanticEmbeddings",
             mastery: "storageFootprint.category.mastery",
+            "recommendation-actions": "storageFootprint.category.recommendationActions",
             assessments: "storageFootprint.category.assessments",
             "exam-reports": "storageFootprint.category.examReports",
         };

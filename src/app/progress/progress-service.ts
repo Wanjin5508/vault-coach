@@ -2,6 +2,7 @@ import type { AssessmentSessionStore } from "../../domain/assessment/assessment-
 import type { ExamHistoryItem } from "../../domain/exam/exam-types";
 import type { LearningGraphConceptCatalog } from "../../domain/learning-graph/learning-graph-types";
 import type { MasterySnapshotV1, MasteryStateView } from "../../domain/mastery/mastery-types";
+import type { RecommendationSnapshot } from "../../domain/recommendation/recommendation-types";
 import {
     PROGRESS_SNAPSHOT_SCHEMA_VERSION,
     type ProgressAssessmentSummary,
@@ -25,6 +26,7 @@ export interface ProgressServiceDependencies {
     catalogReader: ProgressCatalogReader;
     masteryReader: ProgressMasteryReader;
     assessmentSessionStore: Pick<AssessmentSessionStore, "listHistory">;
+    recommendationReader?: { getSnapshot(): Promise<RecommendationSnapshot> };
     getNow?(): number;
 }
 
@@ -107,7 +109,10 @@ export class ProgressService {
             catalogResult.catalog,
             catalogResult.summary,
         );
-        const assessments = await readAssessmentHistory(this.dependencies.assessmentSessionStore);
+        const [assessments, recommendations] = await Promise.all([
+            readAssessmentHistory(this.dependencies.assessmentSessionStore),
+            readRecommendations(this.dependencies.recommendationReader),
+        ]);
 
         return {
             schemaVersion: PROGRESS_SNAPSHOT_SCHEMA_VERSION,
@@ -115,10 +120,32 @@ export class ProgressService {
             graph: catalogResult.summary,
             mastery,
             assessments,
-            // M7 owns RecommendationService. This stable empty value avoids a
-            // future Dashboard API shape change.
-            recommendations: [],
+            recommendations,
         };
+    }
+}
+
+async function readRecommendations(
+    reader: ProgressServiceDependencies["recommendationReader"],
+): Promise<ProgressSnapshot["recommendations"]> {
+    if (!reader) return [];
+    try {
+        return (await reader.getSnapshot()).primary.map((item) => ({
+            id: item.id,
+            kind: item.kind,
+            label: item.label,
+            targetConceptIds: [...item.targetConceptIds],
+            sourceChunkIds: [...item.sourceChunkIds],
+            priority: item.priority,
+            reasonCodes: [...item.reasonCodes],
+            actionState: item.actionState,
+            suggestedAction: item.suggestedAction,
+            ...(item.suggestedExamMode ? { suggestedExamMode: item.suggestedExamMode } : {}),
+        }));
+    } catch {
+        // Recommendations supplement the dashboard; a corrupt action log must
+        // not hide graph, mastery, or assessment facts already available.
+        return [];
     }
 }
 
@@ -295,6 +322,8 @@ function cloneSnapshot(snapshot: ProgressSnapshot): ProgressSnapshot {
         recommendations: snapshot.recommendations.map((recommendation) => ({
             ...recommendation,
             targetConceptIds: [...recommendation.targetConceptIds],
+            sourceChunkIds: [...recommendation.sourceChunkIds],
+            reasonCodes: [...recommendation.reasonCodes],
         })),
     };
 }

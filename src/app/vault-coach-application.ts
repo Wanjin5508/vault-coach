@@ -1,5 +1,5 @@
 import type { ChatService } from "./chat/chat-service";
-import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeIndexViewState, LearningGraphApplicationApi, MasteryApplicationApi, ProgressApplicationApi, SemanticGraphApplicationApi, VaultCoachApplicationApi } from "./application-api";
+import type { ChatApplicationApi, ExamApplicationApi, GraphApplicationApi, IndexApplicationApi, KnowledgeEngineApplicationApi, KnowledgeIndexViewState, LearningGraphApplicationApi, MasteryApplicationApi, ProgressApplicationApi, RecommendationApplicationApi, SemanticGraphApplicationApi, VaultCoachApplicationApi } from "./application-api";
 import type { ApplicationEvent, ApplicationEventListener } from "./application-events";
 import type { AssessmentEventFactory } from "../domain/assessment/assessment-event-factory";
 import { getQuestionIdsNeedingAssessmentEvents } from "../domain/assessment/assessment-event-fingerprint";
@@ -12,7 +12,7 @@ import {
     type AssessmentSessionStore,
 } from "../domain/assessment/assessment-types";
 import type { ExamEngine } from "../exam/exam-engine";
-import type { ExamEvaluationService } from "../domain/exam/exam-evaluation-service";
+import type { ExamEvaluator } from "../domain/exam/exam-evaluation-router";
 import type { ExamSessionStore, MarkdownExamHistoryRecord } from "../exam/exam-session-store";
 import type { ExamEvaluationMetadata, ExamGenerationOptions, ExamHistoryItem, ExamScopeSelection, ExamSession } from "../domain/exam/exam-types";
 import type { KnowledgeGraphService } from "./graph/knowledge-graph-service";
@@ -22,16 +22,21 @@ import type { LearningGraphQuery } from "../domain/learning-graph/learning-graph
 import type { LearningGraphQueryService } from "./learning-graph/learning-graph-query-service";
 import type { MasteryService } from "./mastery/mastery-service";
 import type { ProgressService } from "./progress/progress-service";
+import type { AdaptiveExamPlanner } from "./exam/adaptive-exam-planner";
+import type { RecommendationService } from "./recommendation/recommendation-service";
+import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
 import {
     PROGRESS_SNAPSHOT_SCHEMA_VERSION,
     type ProgressSnapshot,
     type ProgressStateView,
 } from "./progress/progress-types";
+import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendation/recommendation-types";
+import type { KnowledgeEngineClient } from "./engine/knowledge-engine-types";
 
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
     examEngine: ExamEngine;
-    examEvaluationService: ExamEvaluationService;
+    examEvaluationService: ExamEvaluator;
     examSessionStore: ExamSessionStore;
     assessmentSessionStore: AssessmentSessionStore;
     assessmentEventFactory: AssessmentEventFactory;
@@ -55,6 +60,9 @@ export interface VaultCoachApplicationDependencies {
     learningGraphQueryService?: LearningGraphQueryService;
     masteryService?: MasteryService;
     progressService?: ProgressService;
+    adaptiveExamPlanner?: AdaptiveExamPlanner;
+    recommendationService?: RecommendationService;
+    knowledgeEngineClient?: KnowledgeEngineClient;
 }
 
 /** Application facade with grouped use-case APIs and no Obsidian UI dependency. */
@@ -67,6 +75,8 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
     readonly learningGraph: LearningGraphApplicationApi;
     readonly mastery: MasteryApplicationApi;
     readonly progress: ProgressApplicationApi;
+    readonly recommendations: RecommendationApplicationApi;
+    readonly engine: KnowledgeEngineApplicationApi;
     private readonly listeners: Set<ApplicationEventListener> = new Set();
 
     constructor(private readonly dependencies: VaultCoachApplicationDependencies) {
@@ -108,6 +118,8 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         this.learningGraph = this.createLearningGraphApi();
         this.mastery = this.createMasteryApi();
         this.progress = this.createProgressApi();
+        this.recommendations = this.createRecommendationApi();
+        this.engine = this.createKnowledgeEngineApi();
     }
 
     subscribe(listener: ApplicationEventListener): () => void {
@@ -142,6 +154,18 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 await dependencies.ensureKnowledgeBaseReady();
                 return dependencies.examEngine.analyzeScope(dependencies.normalizeSelection(selection), options);
             },
+            previewAdaptivePlan: async (request: AdaptiveExamPlanRequest): Promise<AdaptiveExamPlanResult> => {
+                const planner = dependencies.adaptiveExamPlanner;
+                if (!planner) {
+                    return {
+                        status: "unavailable",
+                        reasonCode: "no-effective-concepts",
+                        message: "自适应考试规划暂不可用；仍可按所选范围生成普通考试。",
+                    };
+                }
+                await dependencies.ensureKnowledgeBaseReady();
+                return planner.preview({ ...request, selection: dependencies.normalizeSelection(request.selection) });
+            },
             createSession: async (selection, count, options: ExamGenerationOptions = {}) => {
                 await dependencies.ensureKnowledgeBaseReady();
                 const normalized = dependencies.normalizeSelection(selection);
@@ -153,6 +177,25 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 const effectiveCount = snapshot.estimatedMaxQuestions > 0
                     ? Math.min(count, snapshot.estimatedMaxQuestions)
                     : count;
+                if (options.adaptivePlan) {
+                    const planner = dependencies.adaptiveExamPlanner;
+                    const analysis = options.analysis;
+                    if (!planner || !analysis) {
+                        throw new Error("自适应考试计划不可用，请返回并重新分析。");
+                    }
+                    const plannedQuestionCount = options.adaptivePlan.targets
+                        .reduce((total, target) => total + target.expectedQuestionCount, 0);
+                    const current = plannedQuestionCount === effectiveCount && await planner.isCurrent(options.adaptivePlan, {
+                        selection: normalized,
+                        analysis,
+                        questionCount: effectiveCount,
+                        examMode: options.examMode ?? options.adaptivePlan.examMode,
+                        targetMode: options.adaptivePlan.targetMode,
+                    });
+                    if (!current) {
+                        throw new Error("知识状态已变化，请返回并重新分析后生成考试。");
+                    }
+                }
                 return dependencies.examEngine.createExamSession(
                     label,
                     normalized,
@@ -308,12 +351,48 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         };
     }
 
+    private createRecommendationApi(): RecommendationApplicationApi {
+        const service = this.dependencies.recommendationService;
+        return {
+            isAvailable: () => service !== undefined,
+            getSnapshot: async (): Promise<RecommendationSnapshot> => {
+                if (!service) return createUnavailableRecommendationSnapshot();
+                return service.getSnapshot();
+            },
+            recordAction: async (recommendationId: string, action: ReviewAction, deferUntil?: number): Promise<void> => {
+                if (!service) throw new Error("Recommendation service is unavailable.");
+                await service.recordAction(recommendationId, action, deferUntil);
+                this.dependencies.progressService?.invalidate();
+                this.emit({ type: "recommendations-changed" });
+            },
+            exportMarkdown: async (): Promise<string> => {
+                if (!service) return "# VaultCoach study plan\n\nStudy recommendations are unavailable.\n";
+                return createRecommendationsMarkdown(await service.getSnapshot());
+            },
+        };
+    }
+
+    private createKnowledgeEngineApi(): KnowledgeEngineApplicationApi {
+        const client = this.dependencies.knowledgeEngineClient;
+        return {
+            getAvailability: () => client ? cloneEngineAvailability(client.getAvailability()) : unavailableEngineAvailability(),
+            getDiagnostics: () => client ? { ...client.getDiagnostics() } : unavailableEngineDiagnostics(),
+            refresh: async (signal?: AbortSignal) => {
+                if (!client) return unavailableEngineAvailability();
+                return cloneEngineAvailability(await client.refresh(signal));
+            },
+        };
+    }
+
     /**
      * Persists structured facts before their disposable Markdown projection.
      * Draft saving retains the legacy report-only behaviour for compatibility.
      */
     private async saveExamSession(session: ExamSession): Promise<ExamSession> {
         const dependencies = this.dependencies;
+        if (session.adaptivePlan && session.adaptivePlan.examMode !== session.examMode) {
+            throw new Error("考试模式与自适应考试计划不一致，无法保存。");
+        }
         if (!session.evaluation) {
             const saved = await dependencies.examSessionStore.save(session);
             this.emit({ type: "exam-history-changed" });
@@ -419,6 +498,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
 
     private invalidateProgress(): void {
         this.dependencies.progressService?.invalidate();
+        this.dependencies.recommendationService?.invalidate();
     }
 }
 
@@ -473,6 +553,40 @@ function createUnavailableProgressSnapshot(): ProgressSnapshot {
     };
 }
 
+function createUnavailableRecommendationSnapshot(): RecommendationSnapshot {
+    return {
+        algorithmVersion: "recommendation/unavailable",
+        generatedAt: Date.now(),
+        primary: [],
+        queue: [],
+    };
+}
+
+/** Markdown is an export projection only; recommendation facts stay in JSON. */
+function createRecommendationsMarkdown(snapshot: RecommendationSnapshot): string {
+    const open = snapshot.primary;
+    const lines = [
+        "# VaultCoach study plan",
+        "",
+        `Generated: ${new Date(snapshot.generatedAt).toISOString()}`,
+        `Algorithm: ${snapshot.algorithmVersion}`,
+        "",
+    ];
+    if (open.length === 0) {
+        lines.push("No open recommendations are available.");
+        return `${lines.join("\n")}\n`;
+    }
+    lines.push("## Next steps", "");
+    for (const item of open) {
+        lines.push(`- [ ] **${escapeMarkdown(item.label)}** — ${item.reasonCodes.join(", ")}`);
+    }
+    return `${lines.join("\n")}\n`;
+}
+
+function escapeMarkdown(value: string): string {
+    return value.replace(/[\\`*_{}<>]/g, "\\$&");
+}
+
 function unavailableProgressState(): ProgressStateView {
     return {
         hasSnapshot: false,
@@ -481,6 +595,33 @@ function unavailableProgressState(): ProgressStateView {
         lastError: "Progress service is unavailable.",
         generatedAt: null,
     };
+}
+
+function unavailableEngineAvailability(): import("./engine/knowledge-engine-types").KnowledgeEngineAvailability {
+    return {
+        mode: "lite",
+        status: "unavailable",
+        protocolVersion: 1,
+        capabilities: [],
+        reason: "not-configured",
+        detail: "Knowledge Engine client is unavailable; Vault Coach Lite remains available.",
+    };
+}
+
+function unavailableEngineDiagnostics(): import("./engine/knowledge-engine-types").KnowledgeEngineDiagnostics {
+    return {
+        endpoint: null,
+        lastCheckedAt: null,
+        lastError: "Knowledge Engine client is unavailable.",
+        networkRequestsMade: 0,
+        dataTransfer: "none",
+    };
+}
+
+function cloneEngineAvailability(
+    availability: import("./engine/knowledge-engine-types").KnowledgeEngineAvailability,
+): import("./engine/knowledge-engine-types").KnowledgeEngineAvailability {
+    return { ...availability, capabilities: [...availability.capabilities] };
 }
 
 function mergeConceptBindings(

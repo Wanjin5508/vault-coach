@@ -5,6 +5,7 @@ import type {
     ExamQuestionType,
     ExamSession,
 } from "../exam/exam-types";
+import type { AdaptiveTargetMode } from "../adaptive-exam/adaptive-exam-types";
 
 /** Increment when the persisted assessment-session document changes incompatibly. */
 export const ASSESSMENT_SESSION_SCHEMA_VERSION = 1;
@@ -30,6 +31,14 @@ export interface AssessmentEvent {
         provider: string;
         model: string;
         promptVersion: string;
+        /** Additive audit detail; it never changes Mastery weighting. */
+        kind?: "model" | "deterministic";
+    };
+    /** Audit-only linkage. Mastery continues to consume conceptIds and sources. */
+    adaptive?: {
+        planId: string;
+        targetMode: AdaptiveTargetMode;
+        plannedTargetConceptIds: string[];
     };
     supersedesEventId?: string;
 }

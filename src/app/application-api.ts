@@ -27,6 +27,9 @@ import type { ConceptMasteryState, MasterySnapshotV1, MasteryStateView } from ".
 import type { ProgressSnapshot, ProgressStateView } from "./progress/progress-types";
 import type { SourceInventoryDiff, SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 import type { StorageFootprint } from "../domain/index-lifecycle/storage-footprint";
+import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
+import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendation/recommendation-types";
+import type { KnowledgeEngineAvailability, KnowledgeEngineDiagnostics } from "./engine/knowledge-engine-types";
 
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
@@ -40,6 +43,7 @@ export interface ExamApplicationApi {
     getFileOptions(folderPaths: string[]): ExamFileOption[];
     getScopeSnapshot(selection: ExamScopeSelection): ExamScopeSnapshot;
     analyzeScope(selection: ExamScopeSelection, options?: ExamGenerationOptions): Promise<ExamScopeAnalysisResult>;
+    previewAdaptivePlan(request: AdaptiveExamPlanRequest): Promise<AdaptiveExamPlanResult>;
     createSession(selection: ExamScopeSelection, count: number, options?: ExamGenerationOptions): Promise<ExamSession>;
     submitSession(session: ExamSession, answers: string[]): Promise<ExamSession>;
     saveSession(session: ExamSession): Promise<ExamSession>;
@@ -127,6 +131,29 @@ export interface ProgressApplicationApi {
     getSnapshot(): Promise<ProgressSnapshot>;
 }
 
+/**
+ * M7 recommendation facade. It exposes disposable recommendations and the
+ * small durable action log separately, so presentation never writes storage
+ * files or changes mastery/graph facts directly.
+ */
+export interface RecommendationApplicationApi {
+    isAvailable(): boolean;
+    getSnapshot(): Promise<RecommendationSnapshot>;
+    recordAction(recommendationId: string, action: ReviewAction, deferUntil?: number): Promise<void>;
+    exportMarkdown(): Promise<string>;
+}
+
+/**
+ * Read-only Engine seam. VC-L8 exposes diagnostics without making any
+ * service a prerequisite for Lite workflows or allowing presentation to call
+ * an arbitrary URL.
+ */
+export interface KnowledgeEngineApplicationApi {
+    getAvailability(): KnowledgeEngineAvailability;
+    getDiagnostics(): KnowledgeEngineDiagnostics;
+    refresh(signal?: AbortSignal): Promise<KnowledgeEngineAvailability>;
+}
+
 export interface VaultCoachApplicationApi {
     chat: ChatApplicationApi;
     exam: ExamApplicationApi;
@@ -136,4 +163,6 @@ export interface VaultCoachApplicationApi {
     learningGraph: LearningGraphApplicationApi;
     mastery: MasteryApplicationApi;
     progress: ProgressApplicationApi;
+    recommendations: RecommendationApplicationApi;
+    engine: KnowledgeEngineApplicationApi;
 }

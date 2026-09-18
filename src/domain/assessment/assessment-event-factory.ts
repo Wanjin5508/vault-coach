@@ -89,10 +89,27 @@ export class AssessmentEventFactory {
                 provider: evaluation.evaluator.modelProvider,
                 model: evaluation.evaluator.modelName,
                 promptVersion: evaluation.evaluator.promptVersion,
+                ...(evaluation.evaluator.evaluatorKind ? { kind: evaluation.evaluator.evaluatorKind } : {}),
             },
+            ...this.createAdaptiveAudit(session, question),
         };
 
         return supersedesEventId ? { ...event, supersedesEventId } : event;
+    }
+
+    private createAdaptiveAudit(session: ExamSession, question: ExamQuestion): Pick<AssessmentEvent, "adaptive"> {
+        const plan = session.adaptivePlan;
+        if (!plan || !question.plannedTargetConceptIds) return {};
+        const plannedTargetConceptIds = question.plannedTargetConceptIds
+            .filter((conceptId) => question.conceptIds.includes(conceptId) && plan.targetConceptIds.includes(conceptId))
+            .sort((left, right) => left.localeCompare(right));
+        return plannedTargetConceptIds.length > 0 ? {
+            adaptive: {
+                planId: plan.planId,
+                targetMode: plan.targetMode,
+                plannedTargetConceptIds,
+            },
+        } : {};
     }
 
     private createConceptBindings(session: ExamSession): AssessmentConceptBinding[] {

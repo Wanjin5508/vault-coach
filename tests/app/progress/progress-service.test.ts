@@ -109,6 +109,39 @@ describe("ProgressService", () => {
         expect(snapshot.recommendations).toEqual([]);
     });
 
+    it("projects only the bounded open recommendation list without coupling Progress to action storage", async () => {
+        const service = new ProgressService({
+            catalogReader: { getConceptCatalog: () => createCatalog(["concept:rag"]) },
+            masteryReader: {
+                getState: () => createMasteryState({ stateCount: 1 }),
+                getSnapshot: () => createSnapshot([createConceptState("concept:rag", "weak", 1)]),
+            },
+            assessmentSessionStore: { listHistory: async () => [] },
+            recommendationReader: {
+                getSnapshot: async () => ({
+                    algorithmVersion: "recommendation/v1",
+                    generatedAt: 100,
+                    primary: [{
+                        id: "recommendation:concept:rag", kind: "review-concept", label: "RAG", targetConceptIds: ["concept:rag"],
+                        sourceChunkIds: ["rag#1"], priority: 500, reasonCodes: ["weak-mastery"], masteryScore: 0.2,
+                        confidence: 0.8, lastAssessedAt: 1, nextReviewAt: null, suggestedAction: "practice-exam",
+                        suggestedExamMode: "simple", actionState: "open",
+                    }],
+                    queue: [],
+                }),
+            },
+            getNow: () => 100,
+        });
+
+        const snapshot = await service.getSnapshot();
+
+        expect(snapshot.recommendations).toEqual([expect.objectContaining({
+            id: "recommendation:concept:rag",
+            reasonCodes: ["weak-mastery"],
+            suggestedExamMode: "simple",
+        })]);
+    });
+
     it("caches completed reads, protects the cache from caller mutation, and rebuilds lazily after invalidation", async () => {
         let historyReadCount = 0;
         const listHistory = vi.fn(async () => {

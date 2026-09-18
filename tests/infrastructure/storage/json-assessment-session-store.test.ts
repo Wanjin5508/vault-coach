@@ -102,6 +102,36 @@ function createDocument(sessionId = "session-1", savedAt = 100): AssessmentSessi
 }
 
 describe("JsonAssessmentSessionStore", () => {
+    it("round-trips additive adaptive plan and evaluator audit fields", async () => {
+        const adapter = new InMemoryAssessmentStorageAdapter();
+        const store = new JsonAssessmentSessionStore(adapter);
+        const document = createDocument();
+        document.examSession.examMode = "simple";
+        document.examSession.adaptivePlan = {
+            planId: "adaptive-exam:1",
+            algorithmVersion: "adaptive-exam/v1",
+            inputFingerprint: "fingerprint",
+            targetMode: "diagnostic",
+            examMode: "simple",
+            scopeSignature: "scope",
+            targetConceptIds: ["exam-topic:json"],
+            reasonCodesByConceptId: { "exam-topic:json": ["unassessed"] },
+            appliedFallbacks: [],
+        };
+        const event = document.assessmentEvents[0];
+        if (!event) throw new Error("Expected fixture assessment event.");
+        event.evaluator.kind = "deterministic";
+        event.adaptive = {
+            planId: "adaptive-exam:1",
+            targetMode: "diagnostic",
+            plannedTargetConceptIds: ["exam-topic:json"],
+        };
+
+        await store.save(document);
+
+        await expect(store.read(document.sessionId)).resolves.toEqual(document);
+    });
+
     it("writes a validated versioned session document and rebuildable index through temporary files", async () => {
         const adapter = new InMemoryAssessmentStorageAdapter();
         const store = new JsonAssessmentSessionStore(adapter);

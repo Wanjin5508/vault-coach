@@ -22,6 +22,16 @@ function createBlueprint(topic = "  Retrieval   Strategy "): ExamBlueprint {
     };
 }
 
+function createSimpleBlueprint(): ExamBlueprint {
+    return {
+        ...createBlueprint(),
+        items: [{
+            ...createBlueprint().items[0]!,
+            answerForm: "single-choice",
+        }],
+    };
+}
+
 function createChunks(): IndexedChunk[] {
     return [
         {
@@ -146,5 +156,63 @@ describe("ExamQuestionGenerator provenance", () => {
             "concept:reranking",
             "concept:retrieval",
         ]);
+    });
+
+    it("carries only source-proven adaptive targets into a generated question", async () => {
+        const generator = createGenerator(JSON.stringify({ questions: [] }));
+        const blueprint: ExamBlueprint = {
+            ...createBlueprint(),
+            items: [{
+                ...createBlueprint().items[0]!,
+                plannedTargetConceptIds: ["concept:retrieval", "concept:not-proven"],
+            }],
+        };
+
+        const result = await generator.generateQuestions(
+            blueprint,
+            createChunks(),
+            undefined,
+            undefined,
+            new Map([
+                ["chunk-1", ["concept:retrieval"]],
+                ["chunk-2", ["concept:reranking"]],
+            ]),
+        );
+
+        expect(result.questions[0]).toMatchObject({
+            conceptIds: ["concept:reranking", "concept:retrieval"],
+            plannedTargetConceptIds: ["concept:retrieval"],
+        });
+    });
+
+    it("keeps a simple-mode multiple-choice question locally scoreable", async () => {
+        const generator = createGenerator(JSON.stringify({
+            questions: [{
+                blueprint_item_id: "bp-search",
+                question: "检索策略中哪项用于语义召回？",
+                reference_answer: "向量检索用于语义召回。",
+                rubric: "本题按 100 分制评分；选择正确得 100 分。",
+                options: [
+                    { id: "option-a", text: "关键词检索" },
+                    { id: "option-b", text: "向量检索" },
+                    { id: "option-c", text: "重排" },
+                ],
+                correct_option_id: "option-b",
+                source_chunk_ids: ["chunk-1"],
+                evidence_excerpt_ids: ["E1"],
+            }],
+        }));
+
+        const result = await generator.generateQuestions(createSimpleBlueprint(), createChunks());
+
+        expect(result.questions[0]).toMatchObject({
+            answerForm: "single-choice",
+            correctOptionId: "option-b",
+            options: [
+                { id: "option-a", text: "关键词检索" },
+                { id: "option-b", text: "向量检索" },
+                { id: "option-c", text: "重排" },
+            ],
+        });
     });
 });

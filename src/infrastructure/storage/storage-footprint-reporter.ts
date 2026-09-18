@@ -4,6 +4,7 @@ import {
     EXAM_RESULTS_DIR_PATH,
     GRAPH_SNAPSHOT_PATH,
     MASTERY_DIR_PATH,
+    RECOMMENDATIONS_DIR_PATH,
     SEMANTIC_GRAPH_DIR_PATH,
     SEMANTIC_GRAPH_MANIFEST_PATH,
 } from "../../constants";
@@ -45,6 +46,7 @@ export class StorageFootprintReporter {
             ]),
             this.collect("semantic-embeddings", [`${SEMANTIC_GRAPH_DIR_PATH}/embeddings`]),
             this.collect("mastery", [MASTERY_DIR_PATH]),
+            this.collect("recommendation-actions", [RECOMMENDATIONS_DIR_PATH]),
             this.collect("assessments", [ASSESSMENTS_DIR_PATH]),
             this.collect("exam-reports", [EXAM_RESULTS_DIR_PATH]),
         ]);

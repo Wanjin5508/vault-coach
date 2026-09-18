@@ -20,6 +20,7 @@ import type { KnowledgeBaseStats } from "../domain/documents/document-types";
 import type { KnowledgeIndexBusyState } from "../app/index/index-types";
 import type { VaultCoachSettings } from "../app/config/settings-types";
 import type { SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
+import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
 
 /**
  * UI 层和设置页能调用的插件能力。
@@ -63,6 +64,7 @@ export interface VaultCoachPluginApi {
     getExamFileOptions(selectedFolderPaths: string[]): ExamFileOption[];
     getExamScopeSnapshot(selection: ExamScopeSelection): ExamScopeSnapshot;
     analyzeExamScope(selection: ExamScopeSelection, options?: ExamGenerationOptions): Promise<ExamScopeAnalysisResult>;
+    previewAdaptiveExamPlan(request: AdaptiveExamPlanRequest): Promise<AdaptiveExamPlanResult>;
     createExamSession(
         selection: ExamScopeSelection,
         questionCount: number,

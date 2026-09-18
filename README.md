@@ -22,7 +22,7 @@ Notes are useful only when you can revisit, test, and connect them. Vault Coach 
 1. **Find and explain** — ask questions over your Markdown notes and text PDFs; inspect the source behind an answer.
 2. **Practise and assess** — generate an exam from a vault, folder, or chosen files; submit answers and keep structured results.
 3. **Connect concepts** — extract evidence-backed concept and relationship candidates, then decide what is actually true in Concept review.
-4. **Navigate learning** — explore confirmed knowledge in a Learning Map and see evidence-backed mastery states in the Learning dashboard.
+4. **Navigate learning** — explore confirmed knowledge in a Learning Map, see evidence-backed mastery states, and act on local study recommendations in the Learning dashboard.
 5. **Keep control of data** — choose a local model, a self-hosted endpoint, or an OpenAI-compatible provider. Model calls occur only for the features and provider you configure.
 
 ## What you can do
@@ -48,7 +48,12 @@ Exam mode turns selected knowledge into deliberate practice instead of another c
 - Scope exams to the material you are studying now
 - Persist include/exclude choices for the session
 - Filter low-value material such as TODOs, logs, link indexes, stubs, and drafts
-- Generate a coverage-aware question set and score answers with feedback
+- Choose **Simple** mode for single-choice and true/false questions with deterministic on-device 100/0 scoring
+- Choose **Challenge** mode for a bounded content-aware mix of supported objective and free-response formats
+- Choose an adaptive target—**Diagnostic**, **Weak review**, **Prerequisites**, or **Mixed**—to decide what to practise without changing answer format or scoring
+- Analyze the selected material before generation; the preview uses only confirmed Concepts, confirmed prerequisite relations, Mastery, saved assessment evidence, and exact source chunks
+- Analysis locks scope, files, question count, exam mode, and adaptive target until you select **Back to settings**; if those facts change before generation, reanalyze instead of silently changing the plan
+- Fall back cleanly to a scoped exam when no traceable adaptive target is available; this flow never writes to the knowledge graph
 - Save structured assessment records locally and export readable Markdown reports when needed
 
 <!-- Screenshot recommendation: show the exam setup with scope selector, file manager, estimated capacity, and the Generate test button. -->
@@ -83,7 +88,9 @@ Pending or rejected candidates remain out of the Learning Map, so a visual conne
 
 ### Follow evidence-based mastery
 
-The **Learning dashboard** summarizes confirmed concepts, assessment coverage, mastery distribution, and local data health. Mastery is derived from saved structured exam events and confirmed Concept bindings—not from a guess that a note was merely opened.
+The **Learning dashboard** summarizes confirmed concepts, assessment coverage, mastery distribution, local data health, and up to five evidence-backed next steps. Mastery is derived from saved structured exam events and confirmed Concept bindings—not from a guess that a note was merely opened.
+
+Recommendations are deterministic local projections of confirmed source-backed Concepts, Mastery, saved assessments, and confirmed prerequisites. You can open their sources, start a source-scoped exam, complete, defer, dismiss, or restore an item, and copy the current plan as Markdown. Those actions are stored locally under `.vault-coach/recommendations/`; they never alter scores, Mastery, or graph facts. An optional Simple/Challenge suggestion is only a hint—you still choose the final mode in exam setup.
 
 Use **Rebuild concept mastery** after taking exams or after changing the effective Concept graph. The resulting snapshot is rebuildable; saved exam sessions remain the durable learning record.
 
@@ -177,10 +184,10 @@ Tips:
 
 1. Switch to **Exam mode**.
 2. Choose the full knowledge base, one or more folders, or a source-scoped exam started from Learning Map.
-3. Select **Manage files** to include/exclude individual files.
-4. Run **Analyze exam scope** when you want to inspect the eligible material.
-5. Choose a question count and select **Generate test**.
-6. Submit answers, review the result, then use **Save result** or **Export**.
+3. Select **Manage files** to include/exclude individual files, then choose an adaptive target, **Simple** or **Challenge** mode, and a question count.
+4. Select **Analyze exam scope** to inspect eligible material and the source-backed adaptive plan. Once analysis completes, the scope, files, question count, smart-filter setting, exam mode, and adaptive target are locked.
+5. Select **Generate test**. To change the target, mode, or setup instead, select **Back to settings** first; this discards the completed analysis. If the vault facts change, analyze again rather than reusing the plan.
+6. Submit answers, review the result, then use **Save result** or **Export**. Simple-mode answers are scored locally from their answer key; free-response answers retain the configured model-based evaluation path.
 
 Saved assessment facts live in `.vault-coach/assessments/`. They are local vault data and are kept when you rebuild an index or refresh a graph.
 
@@ -194,6 +201,12 @@ Saved assessment facts live in `.vault-coach/assessments/`. They are local vault
 6. Use **Open learning map** to explore the confirmed result.
 
 Use semantic graph rebuilding deliberately: it may send indexed Section excerpts to your chosen chat model and short concept text to your selected embedding provider. The exact destination depends on your provider settings.
+
+### Large vaults and Knowledge Engine Local
+
+Lite keeps semantic work bounded: a vault with up to 300 semantic input windows builds locally by default; 301–500 requires an acknowledgement; above 500, Lite keeps existing facts readable but does not start a new local semantic rebuild. This protects the Obsidian process without blocking Ask, exams, saved assessments, Learning Map, or recommendations.
+
+For larger workloads, **Knowledge Engine Local** is the planned optional Docker service. This release contains only its offline compatibility seam: it makes no Engine network request, sends no Vault data, and requires no Docker. A future Engine connection will be explicit, loopback-only, version-negotiated, and limited to user-authorized revisioned data. See [Knowledge Engine requirements](./kb/knowledge-engine/01-需求规格.md) and [architecture](./kb/knowledge-engine/02-架构设计.md).
 
 ### Work with Learning Map and dashboard
 
@@ -243,7 +256,7 @@ Vault Coach has no hidden telemetry. It writes its working data inside the curre
 Network behavior is controlled by your model settings:
 
 - A local Ollama configuration keeps model requests on the local endpoint you configure.
-- An OpenAI-compatible provider may receive the text required for the feature you explicitly run: for example, retrieved context for Q&A, exam material and answers for scoring, or Section excerpts for semantic extraction.
+- An OpenAI-compatible provider may receive the text required for the feature you explicitly run: for example, retrieved context for Q&A, Challenge-mode exam generation or free-response scoring, or Section excerpts for semantic extraction. Simple-mode objective scoring is local.
 - The deterministic structural graph and source-inventory comparison do not call a model or network service.
 
 Treat `.vault-coach/` as private vault data. It can include note excerpts, filenames, headings, answers, feedback, graph evidence, and model metadata. Do not commit it to a public repository unless you have reviewed its contents.
@@ -252,7 +265,7 @@ Treat `.vault-coach/` as private vault data. It can include note excerpts, filen
 
 - PDF support is for PDFs with a native text layer. OCR for scanned PDFs is not included.
 - Complex PDF tables, diagrams, formulas, and multi-column layouts may need manual verification.
-- Exam generation and scoring are study aids produced by your configured model, not authoritative grading.
+- Challenge-mode generation and free-response scoring are study aids produced by your configured model, not authoritative grading. Simple-mode objective scoring is deterministic from the generated answer key, so answer-key quality still depends on the source material and generation step.
 - Concept extraction quality depends on the source material and selected model; review is intentional, not a failure mode.
 - Large knowledge bases may pause new local semantic work to protect the Obsidian UI. Existing indexing, Q&A, exams, and confirmed graph reads remain available.
 

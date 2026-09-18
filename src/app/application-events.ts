@@ -4,6 +4,7 @@ export type ApplicationEvent =
     | { type: "graph-state-changed" }
     | { type: "semantic-graph-state-changed" }
     | { type: "mastery-state-changed" }
+    | { type: "recommendations-changed" }
     | { type: "conversation-changed" }
     | { type: "exam-history-changed" };
 

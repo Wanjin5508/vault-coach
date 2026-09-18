@@ -99,3 +99,6 @@ export const SEMANTIC_GRAPH_MANIFEST_PATH = `${SEMANTIC_GRAPH_DIR_PATH}/semantic
 // 可由 Assessment Session 与有效概念目录重建的掌握度派生快照。
 export const MASTERY_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/mastery`;
 export const MASTERY_SNAPSHOT_PATH = `${MASTERY_DIR_PATH}/mastery-snapshot-v1.json`;
+// User-authored review actions are durable facts; recommendations themselves remain disposable.
+export const RECOMMENDATIONS_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/recommendations`;
+export const REVIEW_ACTIONS_PATH = `${RECOMMENDATIONS_DIR_PATH}/review-actions-v1.json`;

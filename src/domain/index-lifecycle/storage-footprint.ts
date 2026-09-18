@@ -6,6 +6,7 @@ export type StorageFootprintCategory =
     | "semantic-facts"
     | "semantic-embeddings"
     | "mastery"
+    | "recommendation-actions"
     | "assessments"
     | "exam-reports";
 

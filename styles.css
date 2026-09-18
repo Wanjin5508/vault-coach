@@ -460,6 +460,59 @@
     gap: var(--size-2-3);
 }
 
+.vault-coach-progress-recommendations {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+    min-width: 0;
+    padding: var(--size-4-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    background: var(--background-secondary);
+}
+
+.vault-coach-progress-recommendations-header,
+.vault-coach-progress-recommendation-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--size-2-3);
+}
+
+.vault-coach-progress-recommendations-header {
+    justify-content: space-between;
+}
+
+.vault-coach-progress-recommendations-header h3 {
+    margin: 0;
+    font-size: var(--font-ui-medium);
+}
+
+.vault-coach-progress-recommendation-list {
+    display: grid;
+    gap: var(--size-2-3);
+}
+
+.vault-coach-progress-recommendation {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-2);
+    padding: var(--size-2-3);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary-alt);
+}
+
+.vault-coach-progress-recommendation-history summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
+
+.vault-coach-progress-recommendation-history .vault-coach-progress-recommendation-list {
+    margin-top: var(--size-2-3);
+}
+
 .vault-coach-retrieval-group {
     display: inline-flex;
     align-items: center;
@@ -1410,6 +1463,48 @@
     width: 80px;
 }
 
+.vault-coach-exam-mode-section {
+    gap: 6px;
+}
+
+.vault-coach-exam-mode-option,
+.vault-coach-exam-choice {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+    cursor: pointer;
+}
+
+.vault-coach-exam-mode-option:has(input:checked),
+.vault-coach-exam-choice:has(input:checked) {
+    border-color: var(--interactive-accent);
+    background: var(--background-modifier-hover);
+}
+
+.vault-coach-exam-mode-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.vault-coach-exam-mode-title {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-weight: 650;
+}
+
+.vault-coach-exam-mode-description {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    line-height: 1.4;
+}
+
 .vault-coach-exam-toggle {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -1766,6 +1861,18 @@
     min-height: 120px;
     resize: vertical;
     box-sizing: border-box;
+}
+
+.vault-coach-exam-choice-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.vault-coach-exam-choice {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    line-height: 1.45;
 }
 
 .vault-coach-exam-score-card {
