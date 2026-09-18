@@ -1,7 +1,7 @@
 {
 	"id": "vault-coach",
 	"name": "Vault Coach",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"minAppVersion": "1.11.4",
 	"description": "Local-first Q&A and exam practice across Markdown notes and PDFs, with cited answers, AI scoring, saved records, and Ollama or OpenAI-compatible models.",
 	"author": "Wanjin5508",
