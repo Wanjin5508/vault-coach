@@ -1,4 +1,9 @@
-/** Types owned by the document and index domain. */
+/**
+ * 文档解析与知识索引之间的领域契约。
+ *
+ * `ParsedDocument` 保留解析器输出，`IndexedChunk` 是可检索的规范化单元，
+ * `KnowledgeBaseFileRecord` 记录增量同步所需的来源指纹。展示层不应依赖解析器内部格式。
+ */
 
 export type KnowledgeDocumentType = "markdown" | "pdf" | "zotero";
 
@@ -75,6 +80,7 @@ export interface ParsedDocumentBlock {
     extractionQuality?: number;
 }
 
+/** 单个文档的解析结果；警告允许部分成功，不代表整个文档不可索引。 */
 export interface ParsedDocument {
     documentId: string;
     documentType: KnowledgeDocumentType;
@@ -110,6 +116,10 @@ export interface PdfExtractionReport {
     >;
 }
 
+/**
+ * 检索和引用使用的最小索引单元。
+ * `id` 必须在相同来源和分块配置下保持稳定，`searchableText` 可以包含规范化后的检索文本。
+ */
 export interface IndexedChunk {
     id: string;
     documentId: string;
@@ -125,6 +135,7 @@ export interface IndexedChunk {
     extractionQuality?: number;
 }
 
+/** 增量索引的来源记录；`chunkIds` 是替换或删除旧 chunk 的依据。 */
 export interface KnowledgeBaseFileRecord {
     documentId?: string;
     documentType?: KnowledgeDocumentType;
@@ -146,6 +157,7 @@ export interface KnowledgeBaseStats {
     scopeDescription: string;
 }
 
+/** 一次增量同步的结果；`affectedFiles` 是下游图和语义任务的失效依据。 */
 export interface KnowledgeBaseSyncResult {
     stats: KnowledgeBaseStats;
     changedChunks: IndexedChunk[];
@@ -153,7 +165,7 @@ export interface KnowledgeBaseSyncResult {
     affectedFiles: string[];
 }
 
-/** Keyword-search result produced by the document index. */
+/** 文档索引产生的关键词检索结果。 */
 export interface KeywordSearchHit {
     chunk: IndexedChunk;
     score: number;

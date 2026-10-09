@@ -1,6 +1,6 @@
 /**
- * Local-only facts used to decide whether semantic graph work is safe to run
- * inside the Obsidian plugin process. None of these values are persisted.
+ * 用于判断语义图任务能否安全运行在 Obsidian 插件进程内的本地事实。
+ * 这些值只参与运行时决策，不进行持久化。
  */
 export interface GraphCapacityInput {
     fileCount: number | null;
@@ -9,9 +9,9 @@ export interface GraphCapacityInput {
     sectionCount: number | null;
     structuralEdgeCount: number | null;
     indexedTextBytes: number | null;
-    /** Number of Section windows that would each require semantic model extraction. */
+    /** 需要分别执行语义模型抽取的 Section 窗口数。 */
     semanticInputCount: number | null;
-    /** Characters across the Section windows sent to semantic extraction. */
+    /** 将发送给语义抽取模型的全部 Section 窗口字符数。 */
     semanticInputCharacters: number | null;
     extractionCount: number | null;
     conceptCount: number | null;

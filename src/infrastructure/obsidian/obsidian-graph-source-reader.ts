@@ -66,8 +66,9 @@ interface IndexedGraphDocument {
 }
 
 /**
- * Converts live Obsidian metadata and the current document index into pure graph
- * source facts. It does not construct graph nodes, write files, or invoke a model.
+ * 将 Obsidian 实时元数据和当前文档索引转换为纯图来源事实。
+ *
+ * 本适配器不构建图节点、不写文件，也不调用模型。
  */
 export class ObsidianGraphSourceReader {
     constructor(

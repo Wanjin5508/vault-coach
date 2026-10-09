@@ -12,8 +12,8 @@ export type { MarkdownExamHistoryRecord } from "../infrastructure/storage/markdo
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
 /**
- * Backward-compatible application facade for Markdown exam reports.
- * Assessment JSON remains separate and will be composed by the next step.
+ * Markdown 考试报告的向后兼容应用门面。
+ * Assessment JSON 继续独立保存，并由后续步骤完成组合。
  */
 export class ExamSessionStore {
     private readonly reports: MarkdownExamReportStore;

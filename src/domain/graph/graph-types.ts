@@ -1,12 +1,12 @@
 import type { DocumentLocator, KnowledgeDocumentType } from "../documents/document-types";
 
-/** Increment only when a persisted graph snapshot becomes incompatible. */
+/** 仅当持久化图快照发生不兼容变更时递增。 */
 export const GRAPH_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 
-/** Node types that can be created without semantic or model inference. */
+/** 无需语义或模型推断即可创建的节点类型。 */
 export type DeterministicKnowledgeNodeType = "document" | "section" | "tag";
 
-/** Edges whose existence can be proven directly from the local Vault structure. */
+/** 可由本地 Vault 结构直接证明存在的边类型。 */
 export type DeterministicKnowledgeEdgeType =
     | "contains"
     | "links_to"
@@ -53,7 +53,7 @@ export type GraphEdgeOrigin =
     | "obsidian-embed"
     | "obsidian-tag";
 
-/** A local, inspectable fact explaining why a deterministic edge exists. */
+/** 解释确定性边为何存在的本地可检查事实。 */
 export interface GraphSourceLocation {
     sourceFilePath: string;
     sourceDocumentId: string;
@@ -83,7 +83,7 @@ export interface GraphSnapshotStats {
     edgeCount: number;
 }
 
-/** The persisted, reproducible fact set for the deterministic graph MVP. */
+/** 确定性图 MVP 的持久化、可复现事实集合。 */
 export interface GraphSnapshotV1 {
     schemaVersion: typeof GRAPH_SNAPSHOT_SCHEMA_VERSION;
     nodes: KnowledgeGraphNode[];
@@ -91,7 +91,7 @@ export interface GraphSnapshotV1 {
     stats: GraphSnapshotStats;
 }
 
-/** Obsidian-free input consumed later by DeterministicGraphBuilder. */
+/** 供 `DeterministicGraphBuilder` 使用且不依赖 Obsidian 的输入。 */
 export interface GraphSourceDocument {
     documentId: string;
     filePath: string;
@@ -130,7 +130,7 @@ export interface GraphSourceTag {
     endColumn?: number;
 }
 
-/** A paired Vault rename retained until graph edges have been migrated safely. */
+/** 在图边安全迁移完成前保留的一对 Vault 重命名信息。 */
 export interface GraphRename {
     oldPath: string;
     newPath: string;

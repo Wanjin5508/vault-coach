@@ -21,8 +21,8 @@ export interface SectionExtractionInput {
 }
 
 /**
- * Builds model inputs strictly from chunks directly owned by an M2 Section.
- * Child Section chunks are never copied into their parent's prompt.
+ * 仅使用 M2 Section 直接拥有的 chunk 构建模型输入。
+ * 子 Section 的 chunk 不得复制到父级提示词中。
  */
 export function createSectionExtractionInputs(
     snapshot: GraphSnapshotV1,

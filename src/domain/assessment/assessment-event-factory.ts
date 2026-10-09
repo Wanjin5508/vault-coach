@@ -5,16 +5,16 @@ import type {
     AssessmentEventCreationResult,
 } from "./assessment-types";
 
+/** 注入事件标识生成器，使纯工厂无需依赖随机数或宿主环境。 */
 export interface AssessmentEventFactoryDependencies {
     createEventId(): string;
 }
 
 /**
- * Converts a scored exam session into immutable assessment evidence.
+ * 将已评分考试会话转换为不可变的 Assessment 证据。
  *
- * The factory intentionally has no clock, model, storage, or Obsidian dependency:
- * evaluation time and provenance are already part of the evaluated session, while
- * callers explicitly inject deterministic event IDs.
+ * 该工厂不依赖时钟、模型、存储或 Obsidian。评估时间和来源已经包含在已评估会话中，
+ * 确定性事件 ID 由调用方显式注入。
  */
 export class AssessmentEventFactory {
     constructor(private readonly dependencies: AssessmentEventFactoryDependencies) {}
@@ -30,7 +30,7 @@ export class AssessmentEventFactory {
         );
     }
 
-    /** Creates evidence for a selected subset of questions in an evaluated session. */
+    /** 为已评估会话中选定的问题子集创建证据。 */
     createForQuestionIds(
         session: ExamSession,
         questionIds: readonly string[],

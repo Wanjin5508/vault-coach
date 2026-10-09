@@ -15,7 +15,7 @@ import type { VaultCoachSettings } from "../app/config/settings-types";
 import { generateParsedJsonAnswer, normalizeWhitespace, throwIfAborted } from "./exam-utils";
 import { ExamCandidateValidation, ExamQuestionValidator } from "./exam-question-validator";
 
-/** Bump only when the question-generation prompt contract changes. */
+/** 仅当问题生成提示词契约发生变化时递增。 */
 export const EXAM_QUESTION_GENERATION_PROMPT_VERSION = "exam-question-generation/v2";
 
 /**
@@ -51,9 +51,9 @@ export interface ExamQuestionGenerationResult {
 }
 
 /**
- * A per-exam read-only index from deterministic text chunk IDs to effective
- * semantic Concept IDs. The generator intentionally has no graph-service
- * dependency; the application composition root supplies this optional fact.
+ * 单次考试使用的只读索引，将确定性文字 chunk ID 映射到有效语义 Concept ID。
+ *
+ * 生成器不依赖图服务；该可选事实由应用组合根提供。
  */
 export type ExamConceptIdsByChunk = ReadonlyMap<string, readonly string[]>;
 
@@ -411,7 +411,7 @@ export class ExamQuestionGenerator {
         return values.length > 0 ? Array.from(new Set(values)) : [...fallback];
     }
 
-    /** Normalizes model choice payloads while preserving stable option IDs. */
+    /** 归一化模型选择题载荷，同时保留稳定选项 ID。 */
     private normalizeChoiceOptions(rawValue: unknown): ExamChoiceOption[] {
         if (!Array.isArray(rawValue)) return [];
         const options: ExamChoiceOption[] = rawValue.map((value: unknown, index: number) => {
@@ -535,7 +535,7 @@ export class ExamQuestionGenerator {
         };
     }
 
-    /** A source-bound local fallback that remains objectively scoreable. */
+    /** 绑定来源且仍可进行客观评分的本地降级问题。 */
     private buildDeterministicObjectiveCandidate(
         item: ExamBlueprintItem,
         sourceChunkIds: string[],
@@ -770,9 +770,9 @@ export class ExamQuestionGenerator {
     }
 
     /**
-     * A question receives only concepts proven by its own source chunks. An
-     * empty result preserves the M1 provisional topic ID for Vaults without a
-     * semantic graph or without extracted concept evidence.
+     * 每个问题只接收其自身来源 chunk 能够证明的 Concept。
+     *
+     * 结果为空时保留 M1 临时主题 ID，以兼容没有语义图或尚无已抽取概念证据的 Vault。
      */
     private resolveConfirmedConceptIds(
         sourceChunkIds: readonly string[],
@@ -786,7 +786,7 @@ export class ExamQuestionGenerator {
         return conceptIds.length > 0 ? conceptIds : [this.createProvisionalConceptId(topic, blueprintItemId)];
     }
 
-    /** Creates metadata once for a generation run so every question shares the same provenance context. */
+    /** 每次生成只创建一次元数据，使所有问题共享同一来源上下文。 */
     private createGenerationMetadata(): ModelPromptMetadata & { generatedAt: number } {
         const settings: VaultCoachSettings = this.getSettings();
         return {
@@ -800,8 +800,8 @@ export class ExamQuestionGenerator {
     }
 
     /**
-     * Compatibility fallback for Vaults with no confirmed Concept evidence.
-     * New questions prefer stable concept:* IDs resolved by source chunk.
+     * 面向没有已确认 Concept 证据的 Vault 的兼容降级路径。
+     * 新问题优先使用根据来源 chunk 解析的稳定 `concept:*` ID。
      */
     private createProvisionalConceptId(topic: string, blueprintItemId: string): string {
         const normalizedTopic: string = normalizeWhitespace(topic.normalize("NFKC")).toLowerCase();

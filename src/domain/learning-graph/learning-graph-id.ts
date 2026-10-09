@@ -1,3 +1,8 @@
+/**
+ * 学习图标识和稳定排序工具。
+ *
+ * 结构边与语义边使用不同命名空间，避免合并投影时发生碰撞；比较器保证可重复输出。
+ */
 import type { LearningGraphEdge, LearningGraphNode } from "./learning-graph-types";
 
 export function createLearningGraphSemanticEdgeId(relationId: string): string {

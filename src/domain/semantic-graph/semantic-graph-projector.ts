@@ -10,7 +10,7 @@ import type {
     UserSemanticDecision,
 } from "./semantic-graph-types";
 
-/** Projects immutable model candidates plus append-only user decisions into the effective graph. */
+/** 将不可变模型候选与只追加用户决策投影为有效图。 */
 export class SemanticGraphProjector {
     project(state: SemanticGraphState): EffectiveSemanticGraph {
         const activeDecisions = this.getActiveDecisions(state.decisions);
@@ -22,9 +22,8 @@ export class SemanticGraphProjector {
         const membersByCanonicalId = new Map<string, SemanticConcept[]>();
         for (const concept of state.concepts) {
             const canonicalId = resolve(concept.id);
-            // A historical merge may reference a source concept that no longer
-            // exists. Preserve the existing inactive behaviour instead of
-            // inventing a new canonical node.
+            // 历史合并可能引用已经不存在的来源 Concept。应保留现有非活动行为，
+            // 不能凭空创建新的规范节点。
             if (!conceptsById.has(canonicalId)) continue;
             const members = membersByCanonicalId.get(canonicalId) ?? [];
             members.push(concept);
@@ -89,9 +88,9 @@ export class SemanticGraphProjector {
     }
 
     /**
-     * Selects display-only relations from pending candidates. These records do
-     * not become part of the effective graph and never write a user decision.
-     * A rejection or a manual confirmation always takes precedence.
+     * 从待处理候选中选择仅用于展示的关系。
+     *
+     * 这些记录不会进入有效图，也不会写入用户决策；拒绝或人工确认始终具有更高优先级。
      */
     projectAutoDisplayRelations(
         state: SemanticGraphState,
@@ -134,7 +133,7 @@ export class SemanticGraphProjector {
         });
     }
 
-    /** User governance always takes priority over automatic presentation grouping. */
+    /** 用户治理始终优先于自动展示分组。 */
     private buildDecisionRedirects(decisions: readonly UserSemanticDecision[]): Map<string, string> {
         const redirects = new Map<string, string>();
         for (const decision of decisions) {
@@ -147,22 +146,18 @@ export class SemanticGraphProjector {
     }
 
     /**
-     * Section-scoped extraction records are preserved in storage so their model
-     * output and provenance stay independently auditable. For the effective
-     * Learning Map, however, an exact normalized name is one display concept:
-     * all of its source-backed members contribute evidence to the same node.
+     * 按 Section 划分的抽取记录保留在存储中，使模型输出和来源可以独立审计。
+     * 在有效 Learning Map 中，归一化名称精确相同的记录作为一个展示 Concept，
+     * 所有有来源成员共同向该节点提供证据。
      *
-     * This is deliberately narrower than similarity/alias matching. Similar or
-     * differently named concepts remain distinct until the user explicitly
-     * merges them, while same-name concepts cannot make later files disappear
-     * behind the first file that happened to be processed.
+     * 该规则有意比相似度或别名匹配更严格。相似或名称不同的 Concept 在用户显式合并前
+     * 始终保持独立；名称相同的 Concept 则不能因处理顺序而让后续文件来源消失。
      */
     private addExactNameRedirects(concepts: readonly SemanticConcept[], redirects: Map<string, string>): void {
         const membersByName = new Map<string, SemanticConcept[]>();
         for (const concept of concepts) {
             const resolvedId = this.resolveRedirect(concept.id, redirects);
-            // A manual merge has already selected the semantic identity. Do not
-            // re-group a redirected member by its former source-local name.
+            // 人工合并已经确定语义身份，不得再按重定向成员原来的来源局部名称重新分组。
             if (resolvedId !== concept.id) continue;
             const members = membersByName.get(concept.normalizedName) ?? [];
             members.push(concept);
@@ -206,10 +201,10 @@ export class SemanticGraphProjector {
     }
 
     /**
-     * A user merge or an exact normalized-name match makes multiple
-     * source-backed concepts one effective display node. It retains every
-     * member's provenance. Similarity relations never call this path, so a
-     * candidate cannot manufacture evidence automatically.
+     * 用户合并或归一化名称精确匹配，会把多个有来源 Concept 组成一个有效展示节点，
+     * 同时保留每个成员的来源。
+     *
+     * 相似度关系不得调用此路径，因此候选关系不能自动制造证据。
      */
     private withMergedEvidence(
         canonical: SemanticConcept,

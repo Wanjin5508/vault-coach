@@ -6,7 +6,7 @@ const NODE_RADIUS = 6;
 const REHEAT_LAYOUT_STEPS = 18;
 const MAX_LAYOUT_PAIR_OPERATIONS = 4_500_000;
 
-/** Fixed graph-canvas palette; it intentionally does not inherit a vault theme accent. */
+/** 图画布使用固定配色，避免 Vault 主题强调色改变关系类型的既定语义。 */
 const COLORS = {
     background: "#15171c",
     grid: "rgba(132, 145, 168, 0.16)",
@@ -37,7 +37,7 @@ export interface LearningGraphRendererOptions {
     onLayoutChanged?(pinnedPositions: Readonly<Record<string, LearningGraphPinnedPosition>>): void;
 }
 
-/** Only user-pinned coordinates are persisted; the rest remains deterministic. */
+/** 仅持久化用户固定的坐标；其余节点位置始终由确定性布局计算。 */
 export interface LearningGraphPinnedPosition {
     x: number;
     y: number;
@@ -69,10 +69,10 @@ interface LayoutContext {
 }
 
 /**
- * A Canvas renderer that emulates the useful interaction model of Obsidian's
- * graph without coupling VaultCoach to its private GraphView implementation.
- * It settles a deterministic layout before first paint: a graph should remain
- * readable while users inspect it, rather than visibly fly into place.
+ * 使用 Canvas 实现接近 Obsidian 图视图的交互体验，但不依赖其私有 `GraphView` 实现。
+ *
+ * 首次绘制前完成确定性布局，避免节点在用户查看过程中飞动，保证同一输入得到稳定、
+ * 可比较的视图。
  */
 export class LearningGraphRenderer {
     private readonly canvas: HTMLCanvasElement;
@@ -80,7 +80,7 @@ export class LearningGraphRenderer {
     private readonly positions: Map<string, LearningGraphPosition>;
     private readonly degrees: ReadonlyMap<string, number>;
     private readonly layoutContext: LayoutContext;
-    /** Logical Canvas viewport in CSS pixels; updated with the graph container. */
+    /** 以 CSS 像素表示的 Canvas 逻辑视口，随图容器尺寸同步更新。 */
     private viewportWidth = WIDTH;
     private viewportHeight = HEIGHT;
     private resizeObserver: ResizeObserver | null = null;
@@ -140,9 +140,8 @@ export class LearningGraphRenderer {
 
     reheat(): void {
         if (this.destroyed) return;
-        // Explicitly requested re-layout is intentionally a small synchronous
-        // correction.  It avoids a large, attention-grabbing animation after
-        // reopening a View while still resolving a dragged dense cluster.
+        // 用户显式请求重新布局时只执行小幅同步修正。这样既能疏散拖拽形成的密集簇，
+        // 又不会在重新打开 View 后播放干扰注意力的大幅动画。
         simulate(this.positions, this.options.edges, this.layoutContext, REHEAT_LAYOUT_STEPS);
         this.fit();
     }
@@ -276,9 +275,8 @@ export class LearningGraphRenderer {
         this.context.save();
         this.context.translate(this.transform.x, this.transform.y);
         this.context.scale(this.transform.scale, this.transform.scale);
-        // Hover is a temporary exploration focus. It must take precedence over
-        // an earlier click so a user can compare another neighbourhood without
-        // losing their selected node in the inspector.
+        // 悬停是临时探索焦点，应优先于先前点击，使用户可以比较其他邻域，
+        // 同时保留检查器中已选节点的稳定状态。
         const activeNodeId = this.hoveredNodeId ?? this.selectedNodeId;
         const neighbours = this.getNeighbourIds(activeNodeId);
         for (const edge of this.options.edges) this.drawEdge(edge, activeNodeId);
@@ -290,9 +288,8 @@ export class LearningGraphRenderer {
         const context = this.context;
         context.save();
         context.fillStyle = COLORS.grid;
-        // A sparse dot field offers orientation without competing with graph
-        // edges; full square grid lines made dense candidate maps look like a
-        // debugging overlay rather than an Obsidian-style graph.
+        // 稀疏点阵提供空间参照且不干扰关系边。完整方格线会让密集候选图更像调试覆盖层，
+        // 不符合 Obsidian 图视图的视觉预期。
         for (let x = 14; x <= this.viewportWidth; x += 28) {
             for (let y = 14; y <= this.viewportHeight; y += 28) {
                 context.fillRect(x, y, 1, 1);
@@ -326,9 +323,8 @@ export class LearningGraphRenderer {
         context.lineTo(targetX, targetY);
         context.stroke();
         context.setLineDash([]);
-        // A screen full of candidate arrowheads is visual noise. Direction is
-        // always shown for learning facts; automatic candidates reveal it when
-        // focused or selected and remain inspectable in the side panel.
+        // 大量候选箭头会产生视觉噪声。学习事实始终显示方向；自动候选仅在聚焦或选中时
+        // 显示箭头，其方向仍可在侧边检查器中查看。
         if (edge.directed && (edge.trust !== "automatic" || adjacent || selected)) {
             context.fillStyle = muted ? COLORS.edgeMuted : edgeColor(edge);
             drawArrow(context, targetX, targetY, angle, selected ? 8 : 6);
@@ -367,8 +363,7 @@ export class LearningGraphRenderer {
             context.arc(position.x + radius - 2, position.y - radius + 2, 2, 0, Math.PI * 2);
             context.fill();
         }
-        // Labels fade in across a zoom range instead of appearing abruptly.
-        // Active neighbourhood labels remain immediately readable at any zoom.
+        // 标签随缩放区间渐显，避免突然跳变；活动邻域标签在任意缩放级别都必须立即可读。
         const zoomLabelAlpha = smoothStep(0.82, 1.5, this.transform.scale);
         const contextual = selected || hovered || neighbour;
         const showLabel = contextual || zoomLabelAlpha > 0;
@@ -376,10 +371,8 @@ export class LearningGraphRenderer {
             context.shadowBlur = 0;
             context.globalAlpha = (muted ? 0.26 : 1) * (contextual ? 1 : zoomLabelAlpha);
             context.fillStyle = muted ? COLORS.mutedText : COLORS.text;
-            // Match the on-canvas label to the CSS font used by the legend.
-            // It is converted from CSS pixels to the current Canvas world
-            // coordinates before the graph transform is applied, so neither
-            // graph zoom nor a narrow Obsidian pane changes its screen size.
+            // 画布标签与图例使用同一 CSS 字号。应用图变换前先将 CSS 像素换算为当前 Canvas
+            // 世界坐标，使图缩放或 Obsidian 窄面板都不会改变标签的屏幕尺寸。
             const legendFontSize = this.legendFontSizeInWorldUnits();
             context.font = `650 ${legendFontSize / Math.max(0.1, this.transform.scale)}px Inter, ui-sans-serif, system-ui, sans-serif`;
             context.textAlign = "center";
@@ -394,19 +387,18 @@ export class LearningGraphRenderer {
     }
 
     private legendFontSizeInWorldUnits(): number {
-        // The legend is declared as 0.78rem in styles.css.  Read the active
-        // root size so users who increase Obsidian's interface font continue
-        // to see matching labels rather than a second, unrelated scale.
+        // 图例在 styles.css 中定义为 0.78rem。读取当前根字号，确保用户调大 Obsidian
+        // 界面字体后，画布标签仍与图例一致，不产生第二套无关比例。
         const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
         const displayWidth = Math.max(1, this.canvas.getBoundingClientRect().width);
         return rootFontSize * 0.78 * (this.viewportWidth / displayWidth);
     }
 
     /**
-     * Keep the backing store and logical coordinate system equal to the CSS
-     * viewport. CSS may make the graph taller than its initial 23:16 shape;
-     * drawing into a matching backing store preserves circular nodes and gives
-     * `fit()` genuinely more vertical view space instead of stretching pixels.
+     * 使 backing store 和逻辑坐标系与 CSS 视口保持一致。
+     *
+     * CSS 可能把图容器拉得高于初始 23:16 比例；同步 backing store 可保持节点为正圆，
+     * 并让 `fit()` 获得真实的纵向空间，而不是拉伸像素。
      */
     private syncCanvasSize(): boolean {
         const rect = this.canvas.getBoundingClientRect();
@@ -491,7 +483,7 @@ export class LearningGraphRenderer {
     }
 }
 
-/** Pure deterministic layout for tests, screenshots, and frozen initial views. */
+/** 供测试、截图和稳定首屏使用的纯确定性布局。 */
 export function createLearningGraphForceLayout(
     nodes: readonly LearningGraphNode[],
     edges: readonly Pick<LearningGraphEdge, "sourceNodeId" | "targetNodeId">[],
@@ -499,14 +491,13 @@ export function createLearningGraphForceLayout(
     return createLearningGraphLayout(nodes, edges).positions;
 }
 
-/** Degree is a first-class visual signal: hub nodes are deliberately larger. */
+/** 节点度数是核心视觉信号，因此枢纽节点会有意放大。 */
 export function learningGraphNodeRadiusForDegree(degree: number): number {
-    // A hub should read as a hub at overview zoom.  The previous 18px cap was
-    // too subtle once the graph contained many automatic candidate edges.
+    // 枢纽节点在总览缩放级别也必须清晰可辨；自动候选边增多后，原 18px 上限无法表达差异。
     return NODE_RADIUS + Math.min(32, Math.sqrt(Math.max(0, degree)) * 6.4);
 }
 
-/** Validates persisted UI coordinates without trusting workspace state blindly. */
+/** 校验持久化 UI 坐标，避免盲目信任工作区状态。 */
 export function normalizeLearningGraphPinnedPositions(
     value: unknown,
     availableNodeIds?: readonly string[],
@@ -525,8 +516,8 @@ export function normalizeLearningGraphPinnedPositions(
 }
 
 /**
- * Trackpads emit many small wheel deltas. Scaling from the delta magnitude
- * avoids turning every tiny gesture into the old fixed 12% zoom jump.
+ * 触控板会产生大量微小滚轮增量。按增量幅度计算缩放比例，可避免每次轻微手势都触发
+ * 固定 12% 的突兀缩放。
  */
 export function learningGraphZoomMultiplier(deltaY: number, deltaMode = 0, pageHeight = HEIGHT): number {
     const pixels = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * pageHeight : deltaY;
@@ -545,9 +536,8 @@ function createLearningGraphLayout(
 
 function settledLayoutSteps(nodeCount: number): number {
     const pairs = Math.max(1, (nodeCount * Math.max(0, nodeCount - 1)) / 2);
-    // Each step has one repulsion and two collision passes. This keeps the
-    // opening cost bounded at the 500-node local ceiling without weakening the
-    // 150-node overview that users see most often.
+    // 每一步执行一次斥力和两次碰撞处理。在 500 节点本地上限内保持首屏成本有界，
+    // 同时不降低用户最常见的 150 节点总览质量。
     return clamp(Math.floor(MAX_LAYOUT_PAIR_OPERATIONS / (pairs * 3)), 20, 150);
 }
 
@@ -630,10 +620,8 @@ function createGalaxyCenters(hubIds: readonly string[]): Map<string, { x: number
     for (let index = 0; index < hubIds.length; index += 1) {
         const hubId = hubIds[index];
         if (!hubId) continue;
-        // High-degree hubs are sorted first and begin near the centre.  The
-        // remaining communities follow a sunflower spiral through one broad
-        // disk, so a full map reads as one native-style graph cloud rather
-        // than as a ring of remote, unrelated constellations.
+        // 高度数枢纽优先排序并从中心附近开始布局。其余社区沿向日葵螺旋分布在同一宽圆盘内，
+        // 使完整地图呈现为统一的原生图云，而不是一圈彼此疏离的星座。
         const ratio = hubIds.length === 1 ? 0 : Math.sqrt(index / Math.max(1, hubIds.length - 1));
         const radius = maximumRadius * ratio;
         const angle = goldenAngle * index + (hash(hubId) % 17) * 0.021;
@@ -702,9 +690,8 @@ function selectCommunityHubs(
         if (hubs.length >= target) break;
         if (hubs.length === 0 || hubs.every((hub) => !withinTwoHops(candidate, hub, neighbours))) hubs.push(candidate);
     }
-    // A very dense component may put all high-degree nodes within two hops.
-    // Fill remaining seeds deterministically rather than collapsing it into
-    // one giant star.
+    // 高密度连通分量可能让所有高度数节点都处于两跳以内。其余种子必须按确定性规则补齐，
+    // 避免整个分量坍缩成一个巨型星形结构。
     for (const candidate of ordered) {
         if (hubs.length >= target) break;
         if (!hubs.includes(candidate)) hubs.push(candidate);
@@ -803,14 +790,12 @@ function simulate(
             if (position.pinned) continue;
             const community = layout.communities.get(nodeId);
             if (community) {
-                // Community centres form a loose circular cloud. This is an
-                // attraction in world coordinates, not a rectangular boundary:
-                // users can pan anywhere and Fit graph reframes it.
+                // 社区中心形成松散圆形云。该约束是世界坐标中的吸引力，而不是矩形边界；
+                // 用户仍可自由平移，Fit graph 会重新取景。
                 position.vx += (community.centerX - position.x) * 0.0028;
                 position.vy += (community.centerY - position.y) * 0.0028;
             }
-            // A very weak global gravity reins in disconnected source nodes
-            // after collision resolution without forcing any hard boundary.
+            // 碰撞处理后使用极弱全局引力约束孤立来源节点，但不设置硬边界。
             position.vx -= position.x * 0.00065;
             position.vy -= position.y * 0.00065;
             position.vx *= 0.79;
@@ -839,16 +824,13 @@ function visualNodeRadius(degree: number): number {
 }
 
 function layoutNodeRadius(degree: number): number {
-    // Reserve extra whitespace around hubs so arrow fans do not turn into a
-    // single unreadable knot. This invisible radius is intentionally larger
-    // than the rendered node circle.
+    // 为枢纽周围预留额外空白，避免扇形箭头汇成不可读的结。该不可见半径有意大于节点圆。
     return visualNodeRadius(degree) + 18 + Math.min(24, Math.sqrt(Math.max(0, degree)) * 3.4);
 }
 
 function resolveCollisions(positions: Map<string, LearningGraphPosition>, degrees: ReadonlyMap<string, number>): void {
     const points = Array.from(positions.entries());
-    // A direct positional pass makes the collision constraint dependable even
-    // for a star graph where springs pull many leaves toward one hub.
+    // 直接位置修正使碰撞约束在星形图中仍可靠，即使弹簧力会把大量叶节点拉向同一枢纽。
     for (let pass = 0; pass < 2; pass += 1) {
         for (let leftIndex = 0; leftIndex < points.length; leftIndex += 1) {
             const [leftId, left] = points[leftIndex] ?? [];

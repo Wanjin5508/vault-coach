@@ -9,7 +9,7 @@ import { GRAPH_SNAPSHOT_SCHEMA_VERSION } from "../../domain/graph/graph-types";
 import type { GraphSnapshotV1 } from "../../domain/graph/graph-types";
 import type { GraphStore } from "../../domain/graph/graph-store";
 
-/** Minimal Vault adapter surface required to persist one recoverable graph snapshot. */
+/** 持久化可恢复图快照所需的最小 Vault 适配器接口。 */
 export interface GraphStorageAdapter {
     exists(path: string): Promise<boolean>;
     read(path: string): Promise<string>;
@@ -20,11 +20,10 @@ export interface GraphStorageAdapter {
 }
 
 /**
- * Vault-adapter implementation for the deterministic graph source of truth.
+ * 确定性图事实来源的 Vault 适配器实现。
  *
- * Graph facts are reconstructible, but never silently replace a valid snapshot
- * with malformed JSON. A temporary file is validated before replacement and a
- * backup is retained long enough to restore a failed replacement.
+ * 图事实虽然可重建，但畸形 JSON 绝不能静默替换有效快照。临时文件通过校验后才能替换，
+ * 同时保留足以在替换失败时恢复的备份。
  */
 export class JsonGraphStore implements GraphStore {
     private readonly integrity = new GraphIntegrityService();

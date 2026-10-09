@@ -23,7 +23,7 @@ import type {
     SectionGraphNode,
 } from "./graph-types";
 
-/** Validates every invariant required before a deterministic graph snapshot is persisted. */
+/** 在确定性图快照持久化前，校验全部必要不变量。 */
 export class GraphIntegrityService {
     check(snapshot: GraphSnapshotV1): GraphIntegrityReport {
         const issues: GraphIntegrityIssue[] = [];

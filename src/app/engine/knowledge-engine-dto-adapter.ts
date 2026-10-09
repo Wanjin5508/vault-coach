@@ -1,16 +1,22 @@
+/**
+ * Vault Coach 到可选 Knowledge Engine 的版本化变更协议。
+ *
+ * 适配器只接受最小、已授权且可验证的负载；这些 DTO 不携带传输配置或认证信息。
+ */
 import { KNOWLEDGE_ENGINE_PROTOCOL_VERSION } from "./knowledge-engine-types";
 
 export const KNOWLEDGE_CHANGE_SCHEMA_VERSION = 1 as const;
 export type KnowledgeChangeKind = "content-change" | "confirmed-graph-facts" | "assessment-evidence" | "knowledge-profile-candidate";
 export type KnowledgeChangeOperation = "upsert" | "delete";
 
+/** Engine 侧回溯来源所需的最小定位信息，不包含绝对文件系统路径。 */
 export interface EngineSourceLocatorV1 {
     filePath: string;
     heading?: string;
     chunkId?: string;
 }
 
-/** Raw section text is allowed only when a future caller obtained explicit consent. */
+/** 只有调用方已获得用户明确同意时，才允许携带 Section 原文。 */
 export interface ContentChangePayloadV1 {
     sourceLocator: EngineSourceLocatorV1;
     content: string | null;
@@ -29,7 +35,7 @@ export interface ConfirmedGraphRelationPayloadV1 {
     sourceConceptId: string;
     targetConceptId: string;
     type: string;
-    /** Only a confirmed/user-governed relation can cross this boundary. */
+    /** 只有已确认或经过用户治理的关系才能跨越此边界。 */
     trust: "confirmed" | "user";
     evidenceChunkIds: readonly string[];
 }
@@ -39,7 +45,7 @@ export interface ConfirmedGraphFactsPayloadV1 {
     relations: readonly ConfirmedGraphRelationPayloadV1[];
 }
 
-/** Minimal evidence for batch computation; answers, rubrics, and note text are excluded. */
+/** 批量计算所需的最小证据；不得包含答案、评分标准或笔记正文。 */
 export interface AssessmentEvidencePayloadV1 {
     eventId: string;
     conceptId: string | null;
@@ -61,6 +67,10 @@ export type KnowledgeChangePayloadV1 =
     | AssessmentEvidencePayloadV1
     | KnowledgeProfileCandidatePayloadV1;
 
+/**
+ * 单个来源修订的幂等变更信封。删除操作的 `payload` 必须为空，
+ * 更新操作的负载必须与 `kind` 匹配。
+ */
 export interface KnowledgeChangeV1 {
     schemaVersion: typeof KNOWLEDGE_CHANGE_SCHEMA_VERSION;
     protocolVersion: typeof KNOWLEDGE_ENGINE_PROTOCOL_VERSION;
@@ -86,9 +96,9 @@ export interface CreateKnowledgeChangeInput {
 }
 
 /**
- * Creates a safe, transport-neutral V1 change. The adapter intentionally
- * rejects unsanctioned content and non-confirmed graph relations before any
- * future Local client can serialize or transmit the data.
+ * 创建安全且与传输协议无关的 V1 变更对象。
+ *
+ * 在未来的 Local 客户端序列化或传输数据前，适配器必须拒绝未经授权的内容和未确认图关系。
  */
 export function createKnowledgeChangeV1(input: CreateKnowledgeChangeInput): KnowledgeChangeV1 {
     validateIdentity("workspaceId", input.workspaceId);
@@ -115,6 +125,7 @@ export function createKnowledgeChangeV1(input: CreateKnowledgeChangeInput): Know
     };
 }
 
+/** 为同一工作区、来源和修订生成稳定的重试去重键。 */
 export function createKnowledgeEngineIdempotencyKey(change: Pick<KnowledgeChangeV1, "workspaceId" | "sourceId" | "revision">): string {
     return `${change.workspaceId}:${change.sourceId}:${change.revision}`;
 }

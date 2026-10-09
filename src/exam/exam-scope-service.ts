@@ -22,11 +22,10 @@ import {
 } from "./exam-scope-rules";
 
 /**
- * Sort vault paths by JavaScript code units rather than the host locale.
+ * 按 JavaScript 代码单元排序 Vault 路径，而不是使用宿主区域设置。
  *
- * `localeCompare()` produces different Chinese ordering under different ICU
- * builds, which makes scope selection and generated exam input nondeterministic
- * across developer machines and CI runners.
+ * 不同 ICU 构建中的 `localeCompare()` 可能产生不同中文排序，导致开发机和 CI runner
+ * 的范围选择及考试输入不确定。
  */
 function compareStablePaths(leftPath: string, rightPath: string): number {
     if (leftPath === rightPath) {
@@ -283,7 +282,7 @@ export class ExamScopeService {
         };
     }
 
-    /** Resolve indexed file paths included by the requested folders. */
+    /** 解析指定目录包含的已索引文件路径。 */
     private resolveFilePathsForFolders(folderPaths: string[]): string[] {
         const normalizedFolderPaths: string[] = folderPaths
             .map((folderPath: string) => normalizeVaultPath(folderPath))
@@ -305,7 +304,7 @@ export class ExamScopeService {
             .sort(compareStablePaths);
     }
 
-    /** Build a file option together with its permanent exclusion reason. */
+    /** 构建文件选项及其永久排除原因。 */
     private buildFileOption(filePath: string): ExamFileOption {
         const normalizedPath: string = normalizeVaultPath(filePath);
         const permanentExcludeReason: string | null = this.getPermanentExcludeReason(normalizedPath);
@@ -325,7 +324,7 @@ export class ExamScopeService {
         };
     }
 
-    /** Determine whether a file must always be excluded from exam generation. */
+    /** 判断文件是否必须始终排除在考试生成之外。 */
     private getPermanentExcludeReason(filePath: string): string | null {
         if (isVaultCoachHiddenPath(filePath)) {
             return "VaultCoach hidden directory";
@@ -369,12 +368,12 @@ export class ExamScopeService {
         return null;
     }
 
-    /** Convert a caller-provided list of file paths into canonical lookup keys. */
+    /** 将调用方提供的文件路径列表转换为规范查询 key。 */
     private normalizePathSet(filePaths: readonly string[]): Set<string> {
         return new Set(filePaths.map((filePath: string) => normalizeVaultPath(filePath)));
     }
 
-    /** Whether a path represents a Markdown document. */
+    /** 判断路径是否表示 Markdown 文档。 */
     private isMarkdownPath(filePath: string): boolean {
         return filePath.toLowerCase().endsWith(".md");
     }

@@ -20,9 +20,9 @@ export interface VaultCoachHeaderState {
 }
 
 /**
- * A compact, popover-based top-level header shared by the Ask and Exam modes.
- * The study surface stays visible by default; diagnostics and destructive
- * index actions are intentionally one click away.
+ * Ask 与 Exam 模式共享的紧凑顶层标题栏，附加操作通过弹出层提供。
+ *
+ * 学习主界面默认保持可见；诊断和破坏性索引操作有意放在二级入口，降低误触风险。
  */
 export class VaultCoachHeader {
     private openPanel: HeaderPanel = null;

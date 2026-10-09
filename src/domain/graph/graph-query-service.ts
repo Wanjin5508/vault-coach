@@ -7,10 +7,9 @@ import type {
 } from "./graph-types";
 
 /**
- * Pure, read-only access to deterministic graph facts.
+ * 确定性图事实的纯只读访问服务。
  *
- * Every returned value is cloned so a future presentation consumer cannot
- * mutate the persisted snapshot retained by the application service.
+ * 所有返回值都经过克隆，防止展示层消费者修改应用服务持有的持久化快照。
  */
 export class GraphQueryService {
     getNode(snapshot: GraphSnapshotV1, nodeId: string): KnowledgeGraphNode | null {
@@ -44,6 +43,7 @@ export class GraphQueryService {
     }
 }
 
+/** 深拷贝快照中的可变数组和定位对象，隔离领域缓存与调用方。 */
 export function cloneGraphSnapshot(snapshot: GraphSnapshotV1): GraphSnapshotV1 {
     return {
         schemaVersion: snapshot.schemaVersion,

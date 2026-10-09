@@ -36,10 +36,10 @@ export interface ProgressDashboardModel {
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
 /**
- * Converts the Progress read model into bounded, display-ready facts.
+ * 将 Progress 只读模型转换为有界、可直接展示的事实。
  *
- * In particular, null coverage remains "Not calculated" instead of 0%, so
- * the Dashboard never turns missing evidence into a negative learner result.
+ * 覆盖率为 `null` 时必须继续显示“尚未计算”，不能显示为 0%，
+ * 避免 Dashboard 把缺失证据误写为学习者的负面结果。
  */
 export function createProgressDashboardModel(
     snapshot: ProgressSnapshot,

@@ -15,7 +15,7 @@ import type { SectionExtractionInput, SectionExcerpt } from "./section-extractio
 export const CONCEPT_EXTRACTION_PROMPT_VERSION = "semantic-concept-extraction/v1";
 export const CONCEPT_RELATION_PROMPT_VERSION = "semantic-relation-extraction/v1";
 
-/** Validates strictly structured model output before it can enter persistence. */
+/** 在模型输出进入持久化前，严格校验其结构和字段约束。 */
 export class ConceptExtractionService {
     constructor(private readonly gateway: JsonGenerationGateway) {}
 

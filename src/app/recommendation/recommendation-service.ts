@@ -1,3 +1,9 @@
+/**
+ * 推荐用例的应用层编排。
+ *
+ * 服务从学习图、掌握度和用户操作事实即时派生建议，并只在内存中缓存快照。
+ * 写入用户操作后必须使缓存失效，避免展示层读取过期状态。
+ */
 import { buildRecommendations } from "../../domain/recommendation/recommendation-planner";
 import { RECOMMENDATION_ALGORITHM_VERSION, RECOMMENDATION_POLICY } from "../../domain/recommendation/recommendation-policy";
 import type { Recommendation, RecommendationSnapshot, ReviewAction, ReviewActionStore } from "../../domain/recommendation/recommendation-types";
@@ -5,6 +11,7 @@ import type { LearningGraphConceptCatalog } from "../../domain/learning-graph/le
 import type { MasterySnapshotV1 } from "../../domain/mastery/mastery-types";
 import type { ConfirmedPrerequisite } from "../../domain/adaptive-exam/adaptive-exam-types";
 
+/** 推荐编排只读取领域事实，并通过操作日志端口写入用户决策。 */
 export interface RecommendationServiceDependencies {
     learningGraph: { getConceptCatalog(): LearningGraphConceptCatalog; getConfirmedPrerequisites(): readonly ConfirmedPrerequisite[]; };
     mastery: { getSnapshot(): MasterySnapshotV1 | null; };
@@ -13,6 +20,7 @@ export interface RecommendationServiceDependencies {
     now?(): number;
 }
 
+/** 管理建议快照缓存和用户操作事务，不拥有推荐算法或持久化实现。 */
 export class RecommendationService {
     private dirty = true;
     private snapshot: RecommendationSnapshot | null = null;

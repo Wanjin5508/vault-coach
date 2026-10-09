@@ -15,9 +15,10 @@ interface AssessmentEventFingerprintFields {
 }
 
 /**
- * Produces the stable identity of one evaluation result. It intentionally uses
- * evaluator time and prompt version so a genuine re-evaluation produces a new
- * immutable event while a repeated save of the same result remains idempotent.
+ * 生成单次评估结果的稳定标识。
+ *
+ * 指纹包含评估时间和提示词版本，使真实的重新评估产生新的不可变事件，
+ * 同一结果的重复保存则保持幂等。
  */
 export function createAssessmentEvaluationFingerprint(
     sessionId: string,
@@ -37,7 +38,7 @@ export function createAssessmentEvaluationFingerprint(
     });
 }
 
-/** Creates the equivalent fingerprint from already-persisted assessment facts. */
+/** 根据已持久化的 Assessment 事实生成等价指纹。 */
 export function createAssessmentEventFingerprint(event: AssessmentEvent): string {
     return serializeFingerprint({
         sessionId: event.sessionId,
@@ -54,9 +55,9 @@ export function createAssessmentEventFingerprint(event: AssessmentEvent): string
 }
 
 /**
- * Returns only questions whose evaluated result has not yet been persisted.
- * Incomplete evaluation data is deliberately left for AssessmentEventFactory
- * to reject before any persistence occurs.
+ * 仅返回评估结果尚未持久化的问题。
+ *
+ * 不完整评估数据继续交由 `AssessmentEventFactory` 在任何持久化发生前拒绝。
  */
 export function getQuestionIdsNeedingAssessmentEvents(
     session: ExamSession,

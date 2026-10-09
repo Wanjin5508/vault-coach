@@ -81,7 +81,7 @@ export class ExamEngine {
         return this.scopeService.getScopeSnapshot(selection);
     }
 
-    /** Whether the selected scope contains any rule-eligible document chunks. */
+    /** 所选范围是否包含至少一个符合规则的文档 chunk。 */
     hasEligibleChunks(selection: ExamScopeSelection): boolean {
         return this.scopeService.getChunksForScope(selection).length > 0;
     }
@@ -443,9 +443,8 @@ export class ExamEngine {
 }
 
 /**
- * Carries a plan's selected effective Concept IDs forward without teaching the
- * blueprint/model layer about graph services. Every item already has sources
- * restricted to the plan evidence set.
+ * 将方案选定的有效 Concept ID 继续传递，但不让蓝图或模型层感知图服务。
+ * 每个题目项的来源已经被限制在方案证据集合内。
  */
 function attachAdaptiveTargets(
     blueprint: import("../domain/exam/exam-types").ExamBlueprint,

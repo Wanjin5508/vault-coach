@@ -16,7 +16,7 @@ export interface SourceListOptions {
     openSource(source: AnswerSource): Promise<void>;
 }
 
-/** Renders the reusable source disclosure list below an assistant answer. */
+/** 在助手回答下方渲染可复用的来源披露列表。 */
 export async function renderSourceList(options: SourceListOptions): Promise<void> {
     const detailsEl: HTMLDetailsElement = options.containerEl.createEl("details", {
         cls: "vault-coach-source-details",

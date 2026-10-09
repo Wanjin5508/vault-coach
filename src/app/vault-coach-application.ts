@@ -33,6 +33,10 @@ import {
 import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendation/recommendation-types";
 import type { KnowledgeEngineClient } from "./engine/knowledge-engine-types";
 
+/**
+ * 根应用门面需要的服务和宿主回调。
+ * 可选服务表示分阶段启用的能力；对应门面必须返回明确的不可用状态，不能越过边界自行构造实现。
+ */
 export interface VaultCoachApplicationDependencies {
     chatService: ChatService;
     examEngine: ExamEngine;
@@ -65,7 +69,7 @@ export interface VaultCoachApplicationDependencies {
     knowledgeEngineClient?: KnowledgeEngineClient;
 }
 
-/** Application facade with grouped use-case APIs and no Obsidian UI dependency. */
+/** 按用例分组的应用门面，不依赖 Obsidian UI。 */
 export class VaultCoachApplication implements VaultCoachApplicationApi {
     readonly chat: ChatApplicationApi;
     readonly exam: ExamApplicationApi;
@@ -131,13 +135,13 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         this.listeners.clear();
     }
 
-    /** Allows non-UI coordinators to publish an index state change. */
+    /** 允许非 UI 协调器发布索引状态变更。 */
     notifyIndexStateChanged(): void {
         this.invalidateProgress();
         this.emit({ type: "index-state-changed" });
     }
 
-    /** Publishes checkpoint progress from the semantic service to open views. */
+    /** 将语义服务的检查点进度发布给已打开的 View。 */
     notifySemanticGraphStateChanged(): void {
         this.emit({ type: "semantic-graph-state-changed" });
     }
@@ -261,9 +265,8 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
         return {
             rebuild: async (signal) => {
                 const rebuilding = service.rebuildAll(signal);
-                // SemanticIndexCoordinator enters busy state synchronously before
-                // its first await. Publish it now so every open workspace can
-                // show a single, non-clickable build-in-progress state.
+                // `SemanticIndexCoordinator` 会在首次 await 前同步进入 busy 状态。
+                // 此处立即发布，使所有已打开工作区显示一致且不可重复点击的构建中状态。
                 this.emit({ type: "semantic-graph-state-changed" });
                 try {
                     await rebuilding;
@@ -385,8 +388,8 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
     }
 
     /**
-     * Persists structured facts before their disposable Markdown projection.
-     * Draft saving retains the legacy report-only behaviour for compatibility.
+     * 先持久化结构化事实，再生成可重建的 Markdown 投影。
+     * 草稿保存继续保留旧版“仅报告”行为，以维持兼容性。
      */
     private async saveExamSession(session: ExamSession): Promise<ExamSession> {
         const dependencies = this.dependencies;
@@ -440,8 +443,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
             try {
                 await dependencies.masteryService.syncForSession(document);
             } catch (error: unknown) {
-                // This cache is derived from already-persisted Assessment facts.
-                // It must never turn a successful exam save into a failed one.
+                // 该缓存来自已经持久化的 Assessment 事实，不得让已成功的考试保存变成失败。
                 console.error("[VaultCoachApplication] 掌握度增量计算失败，Assessment 证据已保留。", error);
                 dependencies.masteryService.markDirty("掌握度增量计算失败，需要稍后重新计算。");
             }
@@ -562,7 +564,7 @@ function createUnavailableRecommendationSnapshot(): RecommendationSnapshot {
     };
 }
 
-/** Markdown is an export projection only; recommendation facts stay in JSON. */
+/** Markdown 仅作为导出投影；推荐事实继续保存在 JSON 中。 */
 function createRecommendationsMarkdown(snapshot: RecommendationSnapshot): string {
     const open = snapshot.primary;
     const lines = [

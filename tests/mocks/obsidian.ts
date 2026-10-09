@@ -1,7 +1,7 @@
 /**
- * Minimal Obsidian runtime substitute for unit tests.
+ * 单元测试使用的最小 Obsidian 运行时替身。
  *
- * Production bundling continues to externalize the real `obsidian` module.
+ * 生产构建继续将真实 `obsidian` 模块声明为 external。
  */
 export class App {}
 

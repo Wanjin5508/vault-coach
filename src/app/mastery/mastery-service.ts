@@ -14,6 +14,7 @@ import {
     type MasteryStore,
 } from "../../domain/mastery/mastery-types";
 
+/** 掌握度协调器的读取、持久化和容量门禁端口。 */
 export interface MasteryServiceDependencies {
     assessmentSessionStore: AssessmentSessionStore;
     catalogReader: MasteryConceptCatalogReader;
@@ -22,6 +23,7 @@ export interface MasteryServiceDependencies {
     getNow?(): number;
 }
 
+/** 一次证据同步的结果；`updated: false` 时保留现有快照并通过 `reason` 说明降级原因。 */
 export interface MasterySyncResult {
     updated: boolean;
     recalculatedConceptIds: string[];
@@ -29,9 +31,9 @@ export interface MasterySyncResult {
 }
 
 /**
- * Application-level coordinator for the rebuildable M4B mastery cache.
- * It never writes Assessment evidence and an incremental exam update only
- * recalculates Concepts directly touched by that session's explicit bindings.
+ * 可重建 M4B 掌握度缓存的应用层协调器。
+ *
+ * 本服务不得写入 Assessment 证据。考试增量更新只重算本次会话通过显式绑定直接涉及的 Concept。
  */
 export class MasteryService {
     private readonly engine = new MasteryEngine();
@@ -80,7 +82,7 @@ export class MasteryService {
         return state ? cloneState(state) : null;
     }
 
-    /** Marks existing numbers as stale without deleting the last readable cache. */
+    /** 将现有数值标记为过期，但保留最后一个可读缓存。 */
     markDirty(reason: string | null = null): void {
         this.dirty = true;
         if (reason) this.lastError = reason;
@@ -123,9 +125,9 @@ export class MasteryService {
     }
 
     /**
-     * Called after evidence JSON is safely written. A capacity/source problem is
-     * intentionally non-fatal here: saving an Exam must remain independent from
-     * this disposable calculation.
+     * 在证据 JSON 安全写入后调用。
+     *
+     * 容量或来源问题在此不得升级为致命错误；Exam 保存必须与该可重建计算保持独立。
      */
     async syncForSession(document: AssessmentSessionDocumentV1): Promise<MasterySyncResult> {
         if (!this.isCalculationAllowed()) {
@@ -148,8 +150,7 @@ export class MasteryService {
         return this.run(async () => {
             const allAssessments = await this.listAssessments();
             const analysis = this.engine.analyze({ catalog, assessments: allAssessments });
-            // Include superseded events from this session too, so a re-evaluation
-            // can remove its prior contribution from the same Concept state.
+            // 同时读取本会话已被替代的事件，使重新评估能够从同一 Concept 状态中移除旧贡献。
             const sessionResolution = this.resolver.resolve(toAssessmentInputs([document]), catalog);
             const affectedConceptIds = Array.from(new Set(sessionResolution.resolved.map((item) => item.conceptId)))
                 .sort((left, right) => left.localeCompare(right));

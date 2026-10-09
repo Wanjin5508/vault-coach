@@ -1,7 +1,7 @@
 /**
- * A cheap, local-only description of the files that supplied a knowledge index.
- * It deliberately uses file metadata rather than document contents so plugin
- * startup can reject stale caches without scanning or uploading the Vault.
+ * 对知识索引来源文件的低成本、本地描述。
+ *
+ * 使用文件元数据而非文档内容，使插件启动时无需扫描或上传 Vault 即可拒绝过期缓存。
  */
 export const SOURCE_INVENTORY_SCHEMA_VERSION = 1 as const;
 

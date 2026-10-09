@@ -42,7 +42,7 @@ interface NormalizedGraphSourceDocument {
     tags: GraphSourceTag[];
 }
 
-/** Nodes and edges contributed by one or more source files during an incremental update. */
+/** 增量更新期间由一个或多个来源文件贡献的节点和边。 */
 export interface GraphBuildFragment {
     nodes: KnowledgeGraphNode[];
     edges: KnowledgeGraphEdge[];
@@ -56,7 +56,7 @@ interface SourcePosition {
     endColumn?: number;
 }
 
-/** Reports a source contract violation before an invalid graph can be persisted. */
+/** 在无效图进入持久化前报告来源契约违规。 */
 export class GraphBuildError extends Error {
     constructor(message: string) {
         super(message);
@@ -65,10 +65,9 @@ export class GraphBuildError extends Error {
 }
 
 /**
- * Builds structural Vault facts from Obsidian-free source documents.
+ * 根据不依赖 Obsidian 的来源文档构建 Vault 结构事实。
  *
- * The builder has no host, filesystem, clock, or model dependency. Its result
- * is sorted and integrity-checked before it is returned to the application layer.
+ * 构建器不依赖宿主、文件系统、时钟或模型。结果在返回应用层前必须完成排序和完整性校验。
  */
 export class DeterministicGraphBuilder {
     private readonly integrityService = new GraphIntegrityService();
@@ -97,11 +96,10 @@ export class DeterministicGraphBuilder {
     }
 
     /**
-     * Builds only the graph facts emitted by `sources`.
+     * 仅构建 `sources` 直接产生的图事实。
      *
-     * `knownDocuments` allows changed files to keep links to unchanged documents
-     * without rereading those files. Callers must merge and integrity-check the
-     * returned fragment with their existing snapshot before persisting it.
+     * `knownDocuments` 让变更文件无需重新读取未变更文件，也能保留指向它们的链接。
+     * 调用方必须先将返回片段与现有快照合并并执行完整性校验，之后才能持久化。
      */
     buildFragment(
         sources: readonly GraphSourceDocument[],
@@ -231,7 +229,7 @@ export class DeterministicGraphBuilder {
             const parentSections = section.headingPath.length > 0
                 ? sectionsByHeadingPath.get(createHeadingPathKey(parentHeadingPath)) ?? []
                 : [];
-            // Repeated parent headings cannot be linked without inventing an occurrence relationship.
+            // 重复父标题无法在不虚构出现次序关系的前提下建立可靠链接，因此保持未连接。
             const sourceNodeId = parentSections.length === 1
                 ? parentSections[0]!.id
                 : document.document.id;
@@ -327,7 +325,7 @@ export class DeterministicGraphBuilder {
     }
 }
 
-/** Convenience function for callers that do not need to retain a builder instance. */
+/** 供无需保留构建器实例的调用方使用的便捷入口。 */
 export function buildGraphSnapshot(sources: readonly GraphSourceDocument[]): GraphSnapshotV1 {
     return new DeterministicGraphBuilder().build(sources);
 }

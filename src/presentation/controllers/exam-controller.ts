@@ -57,7 +57,7 @@ export type ExamControllerEvent =
 export type ExamControllerListener = (event: ExamControllerEvent) => void | Promise<void>;
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
-/** Owns exam state and coordinates all asynchronous exam use cases. */
+/** 管理考试状态并协调全部异步考试用例。 */
 export class ExamController {
     private readonly listeners: Set<ExamControllerListener> = new Set();
     private activeAbortController: AbortController | null = null;
@@ -115,9 +115,9 @@ export class ExamController {
     }
 
     /**
-     * Starts the existing manual Exam workflow with exactly the source files
-     * selected by another feature (currently Learning Map). This is a visible,
-     * editable file scope, not an adaptive Exam target or a graph mutation.
+     * 使用其他功能（当前为 Learning Map）明确选择的来源文件启动现有手工 Exam 流程。
+     *
+     * 这是可见、可编辑的文件范围，不是自适应 Exam 目标，也不会修改图事实。
      */
     prepareSourceScopedExam(filePaths: readonly string[]): boolean {
         if (this.state.busy) return false;
@@ -136,15 +136,13 @@ export class ExamController {
             : allFiles;
         this.state.session = null;
         this.state.phase = "setup";
-        // Prefer the deepest directory containing every source. The visible
-        // folder selection now tells the same story as the source-file scope;
-        // only root/disjoint sources fall back to the full-vault option.
+        // 优先选择包含全部来源的最深目录，使可见目录选择与来源文件范围保持一致。
+        // 只有根目录或互不相交的来源才降级为完整 Vault 选项。
         this.state.selectedScopeIds = new Set<string>(narrowestSourceFolder ? [narrowestSourceFolder.id] : ["__all__"]);
         this.state.excludedFilePaths = new Set(scopedFiles
             .filter((file) => !sourcePaths.has(file.filePath))
             .map((file) => file.filePath));
-        // The source has already been selected deliberately from graph
-        // evidence, so smart content profiling must not silently remove it.
+        // 来源已经根据图证据被用户明确选择，因此智能内容分析不得静默移除它。
         this.state.forceIncludedFilePaths = sourcePaths;
         this.state.showFileManager = true;
         this.state.fileSearchText = "";
@@ -328,8 +326,7 @@ export class ExamController {
                         targetMode: this.state.adaptiveTargetMode,
                     });
                 } catch (error: unknown) {
-                    // Planning is optional and must never discard a completed
-                    // scope analysis or block the existing scope-only exam flow.
+                    // 规划是可选能力，不得丢弃已完成的范围分析，也不得阻断现有仅范围考试流程。
                     console.error("[VaultCoachExamController] 自适应考试规划失败", error);
                     this.state.adaptivePlanResult = {
                         status: "unavailable",
@@ -589,9 +586,9 @@ export class ExamController {
     }
 
     /**
-     * Discards the completed analysis and reopens setup controls. A learner
-     * must take this explicit step before changing the scope, count, or mode
-     * used to produce the current analysis.
+     * 丢弃已完成分析并重新打开设置控件。
+     *
+     * 学习者必须先执行该显式动作，才能修改生成当前分析时使用的范围、题数或模式。
      */
     returnToSetup(): void {
         if (this.state.busy || !this.state.analysis) return;

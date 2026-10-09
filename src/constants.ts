@@ -10,8 +10,8 @@
 export const VIEW_TYPE_VAULT_COACH = "value-coach-view";
 export const VIEW_TYPE_CONCEPT_REVIEW = "vault-coach-concept-review";
 export const VIEW_TYPE_LEARNING_MAP = "vault-coach-learning-map";
-// Learning dashboard is a main-workspace view. Keep this identifier stable so
-// Obsidian can restore a closed or split workspace leaf across restarts.
+// Learning Dashboard 属于主工作区 View。该标识必须保持稳定，使 Obsidian 重启后能够恢复
+// 已关闭或拆分的工作区叶片状态。
 export const VIEW_TYPE_PROGRESS = "vault-coach-progress";
 
 
@@ -93,12 +93,12 @@ export const ASSESSMENT_INDEX_PATH = `${ASSESSMENTS_DIR_PATH}/index-v1.json`;
 // 可由当前知识范围重建的版本化结构图谱快照；不写入插件运行时状态或 Assessment 事实。
 export const GRAPH_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/graph`;
 export const GRAPH_SNAPSHOT_PATH = `${GRAPH_DIR_PATH}/graph-snapshot-v1.json`;
-// Semantic graph facts stay outside the deterministic M2 structure snapshot.
+// 语义图事实必须与确定性 M2 结构快照分开存储。
 export const SEMANTIC_GRAPH_DIR_PATH = `${GRAPH_DIR_PATH}/semantic`;
 export const SEMANTIC_GRAPH_MANIFEST_PATH = `${SEMANTIC_GRAPH_DIR_PATH}/semantic-manifest-v1.json`;
 // 可由 Assessment Session 与有效概念目录重建的掌握度派生快照。
 export const MASTERY_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/mastery`;
 export const MASTERY_SNAPSHOT_PATH = `${MASTERY_DIR_PATH}/mastery-snapshot-v1.json`;
-// User-authored review actions are durable facts; recommendations themselves remain disposable.
+// 用户创建的复习动作属于持久事实；推荐结果本身保持可重建。
 export const RECOMMENDATIONS_DIR_PATH = `${VAULT_COACH_HIDDEN_DIR_PATH}/recommendations`;
 export const REVIEW_ACTIONS_PATH = `${RECOMMENDATIONS_DIR_PATH}/review-actions-v1.json`;

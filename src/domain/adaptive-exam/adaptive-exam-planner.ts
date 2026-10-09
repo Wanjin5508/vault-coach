@@ -19,8 +19,9 @@ interface RankedConcept {
 }
 
 /**
- * Pure, deterministic target selection. It does not access time, storage,
- * models, graph services, or DOM; callers must provide every planning fact.
+ * 纯函数、确定性的目标选择器。
+ *
+ * 本服务不访问时间、存储、模型、图服务或 DOM；调用方必须显式提供全部规划事实。
  */
 export function buildAdaptiveExamPlan(input: AdaptiveExamPlanningInput): AdaptiveExamPlan {
     const issues = validateAdaptiveExamPlanningInput(input);

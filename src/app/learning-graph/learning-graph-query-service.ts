@@ -7,8 +7,8 @@ import { LearningGraphProjectionService } from "./learning-graph-projection-serv
 import type { LearningGraphSource } from "./learning-graph-source";
 
 /**
- * The only M4A query service. It builds adjacency once per bounded query and
- * uses BFS for expansion; it never compares every pair of graph nodes.
+ * M4A 唯一查询服务。每次有界查询只构建一次邻接表，并使用 BFS 扩展；
+ * 不允许对全部图节点执行两两比较。
  */
 export class LearningGraphQueryService {
     private readonly projector = new LearningGraphProjectionService();
@@ -39,8 +39,8 @@ export class LearningGraphQueryService {
     }
 
     /**
-     * Domain-facing catalog for Mastery. It deliberately bypasses renderer
-     * budgets but still exposes only M3 effective Concepts.
+     * 面向 Mastery 的领域概念目录。该目录不受渲染预算限制，
+     * 但仍只暴露 M3 中的有效 Concept。
      */
     getConceptCatalog(): LearningGraphConceptCatalog {
         const snapshot = this.source.getStructuralSnapshot();
@@ -74,9 +74,10 @@ export class LearningGraphQueryService {
     }
 
     /**
-     * Builds one bounded, read-only provenance index for an Exam generation.
-     * It maps only exact text-index chunk IDs to current effective Concepts;
-     * topic labels, graph traversal, embeddings, and candidates are excluded.
+     * 为一次 Exam 生成构建有界、只读的来源索引。
+     *
+     * 仅把文字索引中的精确 chunk ID 映射到当前有效 Concept；不得使用主题标签、
+     * 图遍历、embedding 或候选关系进行推断。
      */
     getConceptIdsByChunk(): ReadonlyMap<string, readonly string[]> {
         const catalog = this.getConceptCatalog();
@@ -96,9 +97,9 @@ export class LearningGraphQueryService {
     }
 
     /**
-     * Returns only effective, directed prerequisite relations.  This is a
-     * domain read model for adaptive exams: it never includes pending
-     * candidates, display-only automatic relations, or inferred edges.
+     * 仅返回有效且有方向的先修关系。
+     *
+     * 该领域只读模型供自适应考试使用，绝不包含待确认候选、仅展示的自动关系或推断边。
      */
     getConfirmedPrerequisites(): readonly ConfirmedPrerequisite[] {
         const snapshot = this.source.getStructuralSnapshot();
@@ -113,7 +114,7 @@ export class LearningGraphQueryService {
             .sort((left, right) => left.relationId.localeCompare(right.relationId));
     }
 
-    /** A stable source revision used to reject stale adaptive exam plans. */
+    /** 用于拒绝过期自适应考试方案的稳定来源版本。 */
     getRevision(): string {
         return this.source.getLearningMapRevision();
     }

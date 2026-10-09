@@ -46,7 +46,7 @@ import type { AssessmentSessionStore } from "../domain/assessment/assessment-typ
 import type { VectorStore } from "../domain/retrieval/retrieval-types";
 import type { StorageFootprint } from "../domain/index-lifecycle/storage-footprint";
 
-/** Host callbacks needed to connect application services to the Obsidian plugin lifecycle. */
+/** 将应用服务接入 Obsidian 插件生命周期所需的最小宿主回调。 */
 export interface ApplicationContainerDependencies {
     app: App;
     pluginId: string;
@@ -69,7 +69,7 @@ export interface ApplicationContainerDependencies {
     getStorageFootprint(): Promise<StorageFootprint>;
 }
 
-/** Concrete services retained for the legacy plugin adapter during incremental migration. */
+/** 渐进迁移期间仅供旧插件适配器使用的具体服务集合。 */
 export interface ApplicationContainerServices {
     knowledgeBase: VaultKnowledgeBase;
     vectorStore: VectorStore;
@@ -95,11 +95,10 @@ export interface ApplicationContainerServices {
 }
 
 /**
- * Composition boundary for application services.
+ * 应用服务的组合根。
  *
- * Obsidian-bound infrastructure is created here exactly once. Presentation code
- * only receives the grouped application facade, while the legacy plugin can use
- * `services` until the compatibility adapter is introduced in the next step.
+ * 与 Obsidian 绑定的基础设施只在此创建一次。展示层只接收分组后的应用门面；
+ * 兼容适配器迁移完成前，旧插件入口可暂时使用 `services`。
  */
 export interface ApplicationContainer {
     application: VaultCoachApplication;
@@ -107,6 +106,10 @@ export interface ApplicationContainer {
     dispose(): Promise<void>;
 }
 
+/**
+ * 创建应用组合根。每个有状态服务在一次插件生命周期内只实例化一次，
+ * 并由返回对象的 `dispose` 按依赖顺序统一释放。
+ */
 export function createApplicationContainer(dependencies: ApplicationContainerDependencies): ApplicationContainer {
     const persistentStore = new VaultCoachPersistentStore(dependencies.app, dependencies.pluginId);
     const storageFootprintReporter = new StorageFootprintReporter(dependencies.app.vault.adapter, persistentStore);
@@ -183,9 +186,8 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         actionStore: new JsonReviewActionStore(dependencies.app.vault.adapter),
         createEventId: () => createReviewActionEventId(reviewActionSequence++),
     });
-    // VC-L8 intentionally composes only the offline fallback. A future Local
-    // client is injected here after explicit settings, loopback handshake,
-    // consent, and protocol compatibility work are complete in KE-7.
+    // VC-L8 仅装配离线降级实现。只有 KE-7 完成显式设置、回环握手、用户同意和协议兼容后，
+    // 才能在此注入未来的 Local 客户端。
     const knowledgeEngineClient = new LiteEngineClient();
     const progressService = new ProgressService({
         catalogReader: learningGraphQueryService,

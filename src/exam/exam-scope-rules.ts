@@ -1,6 +1,6 @@
 import { VAULT_COACH_HIDDEN_DIR_PATH } from "../constants";
 
-/** Normalize a vault-relative path without relying on Obsidian runtime APIs. */
+/** 在不依赖 Obsidian 运行时 API 的情况下归一化 Vault 相对路径。 */
 export function normalizeVaultPath(path: string): string {
     return path
         .trim()
@@ -9,14 +9,14 @@ export function normalizeVaultPath(path: string): string {
         .replace(/^\/+|\/+$/g, "");
 }
 
-/** Whether a path belongs to VaultCoach's internal runtime directory. */
+/** 判断路径是否属于 Vault Coach 内部运行目录。 */
 export function isVaultCoachHiddenPath(path: string): boolean {
     const normalizedPath: string = normalizeVaultPath(path);
     return normalizedPath === VAULT_COACH_HIDDEN_DIR_PATH
         || normalizedPath.startsWith(`${VAULT_COACH_HIDDEN_DIR_PATH}/`);
 }
 
-/** Returns every parent directory of a vault-relative file path. */
+/** 返回 Vault 相对文件路径的全部父目录。 */
 export function getParentFolderPaths(filePath: string): string[] {
     const pathParts: string[] = normalizeVaultPath(filePath).split("/");
     pathParts.pop();
@@ -32,7 +32,7 @@ export function getParentFolderPaths(filePath: string): string[] {
     return folderPaths;
 }
 
-/** Whether a file is inside the requested vault-relative folder. */
+/** 判断文件是否位于指定 Vault 相对目录内。 */
 export function isFileInFolder(filePath: string, folderPath: string): boolean {
     const normalizedFolderPath: string = normalizeVaultPath(folderPath);
     if (normalizedFolderPath.length === 0) {
@@ -42,7 +42,7 @@ export function isFileInFolder(filePath: string, folderPath: string): boolean {
     return normalizeVaultPath(filePath).startsWith(`${normalizedFolderPath}/`);
 }
 
-/** Find the first user-configured exclude pattern that matches a file path. */
+/** 返回第一个匹配文件路径的用户排除规则。 */
 export function findMatchingExamExcludeRule(filePath: string, configuredPatterns: string): string | null {
     const normalizedPath: string = normalizeVaultPath(filePath);
     const patterns: string[] = configuredPatterns
@@ -60,7 +60,7 @@ export function findMatchingExamExcludeRule(filePath: string, configuredPatterns
     return null;
 }
 
-/** Determine whether a file path matches a simple vault-relative glob. */
+/** 判断文件路径是否匹配简化的 Vault 相对 glob。 */
 export function matchesExamExcludePattern(filePath: string, pattern: string): boolean {
     if (pattern.length === 0) {
         return false;
@@ -80,7 +80,7 @@ export function matchesExamExcludePattern(filePath: string, pattern: string): bo
     return new RegExp(`^${escapedPattern}$`).test(filePath);
 }
 
-/** Strip non-body Markdown syntax before checking whether a note has usable text. */
+/** 检查笔记是否包含可用正文前，移除非正文 Markdown 语法。 */
 export function cleanExamMarkdownText(markdown: string): string {
     return markdown
         .replace(/^---[\s\S]*?---\s*/m, "")
@@ -97,8 +97,8 @@ export function cleanExamMarkdownText(markdown: string): string {
 }
 
 /**
- * Deterministic content-quality classification retained for future callers.
- * The current scope preserves the legacy threshold-only exclusion behavior.
+ * 为未来调用方保留的确定性内容质量分类。
+ * 当前范围继续保持旧版仅按阈值排除的行为。
  */
 export function detectLowQualityExamContentReason(rawText: string, cleanedText: string): string | null {
     const contentLines: string[] = cleanedText

@@ -13,15 +13,18 @@ import {
     type ProgressStateView,
 } from "./progress-types";
 
+/** Progress 聚合对学习图概念目录的只读端口。 */
 export interface ProgressCatalogReader {
     getConceptCatalog(): LearningGraphConceptCatalog;
 }
 
+/** Progress 聚合对掌握度状态和快照的只读端口。 */
 export interface ProgressMasteryReader {
     getState(): MasteryStateView;
     getSnapshot(): MasterySnapshotV1 | null;
 }
 
+/** Progress 快照构建所需的事实读取端口；所有来源都必须保持只读。 */
 export interface ProgressServiceDependencies {
     catalogReader: ProgressCatalogReader;
     masteryReader: ProgressMasteryReader;
@@ -31,9 +34,9 @@ export interface ProgressServiceDependencies {
 }
 
 /**
- * Composes existing application facts into a disposable, UI-safe Progress
- * read model. The service owns no persistence and never reads renderer
- * projections, semantic candidates, or Markdown report files.
+ * 将现有应用事实组合成可重建且可安全用于 UI 的 Progress 只读模型。
+ *
+ * 本服务不负责持久化，也不得读取渲染投影、语义候选或 Markdown 报告文件。
  */
 export class ProgressService {
     private snapshot: ProgressSnapshot | null = null;
@@ -65,9 +68,8 @@ export class ProgressService {
     }
 
     /**
-     * Invalidates only the disposable read model. The next explicit consumer
-     * read rebuilds it lazily, so startup and source-change events never scan
-     * the Vault or enumerate Assessment history on their own.
+     * 只使可重建只读模型失效。下次消费者显式读取时再惰性重建，
+     * 确保启动和来源变更事件不会自行扫描 Vault 或枚举 Assessment 历史。
      */
     invalidate(): void {
         this.revision += 1;
@@ -143,8 +145,7 @@ async function readRecommendations(
             ...(item.suggestedExamMode ? { suggestedExamMode: item.suggestedExamMode } : {}),
         }));
     } catch {
-        // Recommendations supplement the dashboard; a corrupt action log must
-        // not hide graph, mastery, or assessment facts already available.
+        // 推荐只补充 Dashboard。操作日志损坏时，不得隐藏已经可用的图、掌握度或 Assessment 事实。
         return [];
     }
 }

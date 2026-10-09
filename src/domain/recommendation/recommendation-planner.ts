@@ -1,7 +1,7 @@
 import { RECOMMENDATION_POLICY } from "./recommendation-policy";
 import type { Recommendation, RecommendationActionState, RecommendationKind, RecommendationPlanningConcept, RecommendationPlanningInput, RecommendationReasonCode } from "./recommendation-types";
 
-/** Pure, stable recommendation ranking. It has no storage, model, or UI dependency. */
+/** 纯函数、稳定的推荐排序，不依赖存储、模型或 UI。 */
 export function buildRecommendations(input: RecommendationPlanningInput): Recommendation[] {
     const concepts = input.concepts
         .map((concept) => ({ ...concept, sourceChunkIds: normalizeChunks(concept.sourceChunkIds) }))
@@ -102,9 +102,10 @@ function createPrerequisiteRecommendation(
 }
 
 /**
- * Local importance counts only confirmed prerequisite endpoints. It is a
- * bounded domain fact, not a renderer node size, force-layout position, or
- * embedding similarity. The per-relation bonus is capped in policy.
+ * 本地重要度只统计已确认先修关系的端点。
+ *
+ * 这是有界领域事实，不表示渲染节点尺寸、力导向布局位置或 embedding 相似度；
+ * 每条关系的加分受策略上限约束。
  */
 function buildLocalImportance(
     relations: readonly import("./recommendation-types").RecommendationPrerequisite[],
@@ -143,7 +144,7 @@ function getActionState(
         case "restored":
             return "open";
         case "deferred":
-            // A missing date intentionally means "snooze until I restore it".
+            // 日期缺失明确表示“保持暂停，直到用户主动恢复”，不能解释为立即到期。
             return event.deferUntil !== undefined && event.deferUntil <= now ? "open" : "deferred";
         case "dismissed":
             return "dismissed";

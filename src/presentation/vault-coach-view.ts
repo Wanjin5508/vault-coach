@@ -13,10 +13,9 @@ import { ExamView } from "./views/exam-view";
 import { ProgressView } from "./views/progress-view";
 
 /**
- * Obsidian ItemView shell for VaultCoach.
+ * Vault Coach 的 Obsidian `ItemView` 外壳。
  *
- * Business interactions are owned by feature controllers; this class only owns
- * the sidebar lifecycle, the top-level mode switch, and cross-feature refresh.
+ * 业务交互由各功能 Controller 管理；本类只负责侧边栏生命周期、顶层模式切换和跨功能刷新。
  */
 export class VaultCoachView extends ItemView {
     private readonly chatController: ChatController;
@@ -84,7 +83,7 @@ export class VaultCoachView extends ItemView {
         this.contentEl.removeClass("vault-coach-view");
     }
 
-    /** Refreshes the sidebar without interrupting an active Chat or Exam action. */
+    /** 刷新侧边栏，但不打断正在执行的 Chat 或 Exam 操作。 */
     refresh(): void {
         if (this.isInteractionBusy()) {
             this.hasDeferredRefresh = true;
@@ -94,7 +93,7 @@ export class VaultCoachView extends ItemView {
         this.render();
     }
 
-    /** Opens the ordinary Exam setup with a Learning Map source-file scope. */
+    /** 使用 Learning Map 的来源文件范围打开普通 Exam 设置。 */
     openSourceScopedExam(filePaths: readonly string[]): boolean {
         if (!this.examController.prepareSourceScopedExam(filePaths)) return false;
         this.activeInteractionMode = "exam";

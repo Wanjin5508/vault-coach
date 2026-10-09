@@ -15,7 +15,7 @@ import {
     type AssessmentSessionStore,
 } from "../../domain/assessment/assessment-types";
 
-/** Minimal Vault adapter surface required by Assessment JSON persistence. */
+/** Assessment JSON 持久化所需的最小 Vault 适配器接口。 */
 export interface AssessmentStorageAdapter {
     exists(path: string): Promise<boolean>;
     read(path: string): Promise<string>;
@@ -26,7 +26,7 @@ export interface AssessmentStorageAdapter {
     remove(path: string): Promise<void>;
 }
 
-/** Returns the canonical facts path for one validated Assessment Session ID. */
+/** 根据已校验的 Assessment Session ID 返回规范事实路径。 */
 export function getAssessmentSessionPath(sessionId: string): string {
     if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
         throw new Error(`无效的 Assessment Session ID：${sessionId}`);
@@ -35,7 +35,7 @@ export function getAssessmentSessionPath(sessionId: string): string {
     return normalizePath(`${ASSESSMENT_SESSIONS_DIR_PATH}/${sessionId}.json`);
 }
 
-/** Resolves only canonical Assessment Session paths, rejecting path traversal. */
+/** 仅解析规范 Assessment Session 路径，并拒绝路径穿越。 */
 export function getAssessmentSessionIdFromPath(path: string): string | null {
     const normalizedPath = normalizePath(path);
     const match = new RegExp(`^${ASSESSMENT_SESSIONS_DIR_PATH}/([a-zA-Z0-9_-]+)\\.json$`).exec(normalizedPath);
@@ -44,10 +44,10 @@ export function getAssessmentSessionIdFromPath(path: string): string | null {
 }
 
 /**
- * Obsidian Vault-adapter implementation of the M1 Assessment facts store.
+ * M1 Assessment 事实存储的 Obsidian Vault 适配器实现。
  *
- * Session JSON is the source of truth. `index-v1.json` is a rebuildable listing
- * cache and must never be allowed to overwrite or discard a session document.
+ * Session JSON 是事实来源。`index-v1.json` 只是可重建列表缓存，
+ * 绝不能覆盖或丢弃 Session 文档。
  */
 export class JsonAssessmentSessionStore implements AssessmentSessionStore {
     constructor(private readonly adapter: AssessmentStorageAdapter) {}
@@ -218,9 +218,8 @@ export class JsonAssessmentSessionStore implements AssessmentSessionStore {
             return;
         }
 
-        // Obsidian's adapter.rename() rejects an existing destination. Keep a
-        // recoverable copy of the old value before replacing it so a failed
-        // move cannot silently discard a session's evidence.
+        // Obsidian 的 `adapter.rename()` 会拒绝已存在目标。替换前先保留可恢复旧副本，
+        // 确保移动失败不会静默丢失会话证据。
         if (await this.adapter.exists(backupPath)) {
             await this.adapter.remove(backupPath);
         }

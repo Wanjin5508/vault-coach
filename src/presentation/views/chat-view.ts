@@ -12,7 +12,7 @@ import {
 import type { AnswerSource, AssistantAnswer } from "../../domain/retrieval/retrieval-types";
 import type { ChatMessage } from "../../app/chat/chat-types";
 
-/** Renders the Chat UI and converts DOM events into ChatController actions. */
+/** 渲染 Chat UI，并将 DOM 事件转换为 `ChatController` 动作。 */
 export class ChatView {
     private messageListEl: HTMLDivElement | null = null;
     private inputEl: HTMLTextAreaElement | null = null;

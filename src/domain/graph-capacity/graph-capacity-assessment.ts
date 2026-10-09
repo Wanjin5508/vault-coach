@@ -12,16 +12,20 @@ interface CapacityThresholds {
     serviceRequired: number;
 }
 
+export const LITE_SEMANTIC_AUTO_WINDOW_LIMIT = 400;
+export const LITE_SEMANTIC_MANUAL_WINDOW_LIMIT = 650;
+
 const THRESHOLDS: Record<GraphCapacityMetric, CapacityThresholds> = {
-    // One semantic input window needs at least one serial model request and
-    // often a second relation request. This is the primary Lite workload
-    // metric; raw file count alone does not predict a rebuild's duration.
-    // Lite's explicit local-build contract is based on the number of semantic
-    // model windows: 301–500 needs an acknowledgement, while >500 is refused.
-    "semantic-input-count": { warning: 300, servicePreferred: 500, serviceRequired: 500 },
-    // The remaining metrics are warning-only diagnostics. The explicit
-    // product contract is that a Vault with <=500 semantic windows can still
-    // be built locally after the user acknowledges the cost.
+    // 每个语义输入窗口至少需要一次串行模型请求，通常还需要第二次关系请求。
+    // 因此语义窗口数是 Lite 的主要工作量指标，原始文件数不能单独预测重建耗时。
+    // Lite 本地构建契约按语义模型窗口计数：401–650 需要用户确认，超过 650 拒绝执行。
+    "semantic-input-count": {
+        warning: LITE_SEMANTIC_AUTO_WINDOW_LIMIT,
+        servicePreferred: LITE_SEMANTIC_MANUAL_WINDOW_LIMIT,
+        serviceRequired: LITE_SEMANTIC_MANUAL_WINDOW_LIMIT,
+    },
+    // 其余指标仅用于诊断警告。产品契约明确规定：语义窗口不超过 650 时，
+    // 用户确认资源成本后仍可在本地构建。
     "semantic-input-characters": { warning: 10 * 1024 * 1024, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
     "chunk-count": { warning: 8_000, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
     "section-count": { warning: 1_000, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
@@ -38,8 +42,9 @@ const LEVELS: readonly Exclude<GraphCapacityLevel, "local">[] = [
 ];
 
 /**
- * Pure capacity policy. It does no Vault IO, model call, embedding, or graph
- * traversal; callers may feed it counts derived from their cached snapshot.
+ * 纯容量策略。
+ *
+ * 不执行 Vault I/O、模型调用、embedding 或图遍历；调用方可以传入缓存快照派生的计数。
  */
 export function assessGraphCapacity(input: GraphCapacityInput): GraphCapacityAssessment {
     const rawVectorBytes = estimateRawVectorBytes(input.vectorCount, input.vectorDimension);

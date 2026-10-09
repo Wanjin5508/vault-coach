@@ -10,7 +10,7 @@ import type {
     ExamSession,
 } from "./exam-types";
 
-/** Bump only when the evaluation prompt contract changes. */
+/** 仅当评估提示词契约发生变化时递增。 */
 export const EXAM_EVALUATION_PROMPT_VERSION = "exam-evaluation/v2";
 
 const ASSESSMENT_ERROR_CODES: ReadonlySet<AssessmentErrorCode> = new Set<AssessmentErrorCode>([
@@ -26,7 +26,7 @@ const ASSESSMENT_ERROR_CODES: ReadonlySet<AssessmentErrorCode> = new Set<Assessm
     "other",
 ]);
 
-/** Model payload for one evaluated question. */
+/** 单个已评估问题的模型载荷。 */
 interface ExamEvaluationItemPayload {
     id?: string;
     question_id?: string;
@@ -40,7 +40,7 @@ interface ExamEvaluationItemPayload {
     evaluation_confidence?: unknown;
 }
 
-/** Model payload for a complete exam evaluation. */
+/** 完整考试评估的模型载荷。 */
 interface ExamEvaluationPayload {
     score?: unknown;
     max_score?: unknown;
@@ -60,7 +60,7 @@ const EVALUATION_JSON_REPAIR_INSTRUCTIONS: readonly string[] = [
 ];
 
 /**
- * Scores an exam without mutating or persisting its session.
+ * 对考试进行评分，但不修改或持久化原会话。
  */
 export class ExamEvaluationService {
     private readonly jsonGateway: JsonGenerationGateway;
@@ -70,7 +70,7 @@ export class ExamEvaluationService {
     }
 
     /**
-     * Evaluate the submitted answers and return only the normalized result.
+     * 评估已提交答案，仅返回归一化结果。
      */
     async evaluate(
         session: ExamSession,
@@ -133,7 +133,7 @@ export class ExamEvaluationService {
         return this.normalizeEvaluation(payload, session.questions, userAnswers, evaluator);
     }
 
-    /** Normalize a model payload while preserving the current scoring contract. */
+    /** 在保持当前评分契约的前提下归一化模型载荷。 */
     private normalizeEvaluation(
         payload: ExamEvaluationPayload,
         questions: ExamQuestion[],
@@ -176,7 +176,7 @@ export class ExamEvaluationService {
         };
     }
 
-    /** JSON schema included in the evaluation prompt and repair prompt. */
+    /** 同时用于评估提示词和修复提示词的 JSON schema。 */
     private buildJsonSchemaDescription(): string {
         return [
             "{",
@@ -200,7 +200,7 @@ export class ExamEvaluationService {
         ].join("\n");
     }
 
-    /** Clamp scores to the stable integer 0–100 contract. */
+    /** 将分数限制在稳定的 0–100 整数契约内。 */
     private clampScore(value: unknown, min: number, max: number): number {
         if (typeof value !== "number" || !Number.isFinite(value)) {
             return min;
@@ -209,7 +209,7 @@ export class ExamEvaluationService {
         return Math.max(min, Math.min(max, Math.round(value)));
     }
 
-    /** Normalize a model string while retaining the existing fallback copy. */
+    /** 归一化模型字符串；无效时保留既有降级文案。 */
     private normalizeText(value: string | undefined, fallback: string): string {
         if (typeof value !== "string") {
             return fallback;
@@ -219,7 +219,7 @@ export class ExamEvaluationService {
         return trimmedValue.length > 0 ? trimmedValue : fallback;
     }
 
-    /** Normalizes model key-point fields without letting malformed values enter the domain. */
+    /** 归一化模型关键点字段，阻止畸形值进入领域层。 */
     private normalizeTextArray(value: unknown): string[] {
         const values: unknown[] = Array.isArray(value) ? value : [value];
         return Array.from(new Set(values
@@ -228,7 +228,7 @@ export class ExamEvaluationService {
             .filter((item: string) => item.length > 0)));
     }
 
-    /** Converts untrusted model labels to the closed assessment-error vocabulary. */
+    /** 将不可信模型标签转换为封闭的 Assessment 错误词表。 */
     private normalizeErrorCodes(value: unknown, isNoAnswer: boolean): AssessmentErrorCode[] {
         const values: unknown[] = Array.isArray(value)
             ? value
@@ -257,7 +257,7 @@ export class ExamEvaluationService {
         return Array.from(new Set(normalizedCodes));
     }
 
-    /** Evaluation confidence is a probability and must remain inside the closed 0–1 range. */
+    /** 评估置信度是概率值，必须保持在闭区间 0–1 内。 */
     private clampConfidence(value: unknown): number {
         if (typeof value !== "number" || !Number.isFinite(value)) {
             return 0;

@@ -8,7 +8,7 @@ export interface ConfirmActionModalOptions {
     onConfirm(): Promise<void>;
 }
 
-/** A small, version-compatible confirmation modal for locally destructive actions. */
+/** 用于本地破坏性操作的小型、版本兼容确认弹窗。 */
 export class ConfirmActionModal extends Modal {
     private submitting = false;
 

@@ -1,5 +1,6 @@
 import { Modal, type App } from "obsidian";
 import type { GraphCapacityAssessment } from "../../domain/graph-capacity/graph-capacity-types";
+import { LITE_SEMANTIC_AUTO_WINDOW_LIMIT, LITE_SEMANTIC_MANUAL_WINDOW_LIMIT } from "../../domain/graph-capacity/graph-capacity-assessment";
 import type { TranslationKey } from "../../i18n";
 
 type Translate = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
@@ -12,8 +13,8 @@ interface CapacityModalOptions {
 }
 
 /**
- * Makes the costly-but-allowed local build an explicit user decision, while
- * providing a clear blocking explanation once the Lite window budget is over.
+ * 对成本较高但仍允许的本地构建获取用户明确确认；超过 Lite 窗口预算时，
+ * 提供清晰的阻断原因。
  */
 class SemanticGraphCapacityModal extends Modal {
     private settled = false;
@@ -56,7 +57,7 @@ class SemanticGraphCapacityModal extends Modal {
     }
 }
 
-/** Returns true only when a manual semantic rebuild may proceed locally. */
+/** 仅当手工语义重建可以在本地继续时返回 `true`。 */
 export function requestSemanticGraphCapacityDecision(
     app: App,
     capacity: GraphCapacityAssessment,
@@ -68,12 +69,12 @@ export function requestSemanticGraphCapacityDecision(
     if (!capacity.allowManualSemanticBuild) {
         return openCapacityModal(app, {
             title: t("semanticCapacity.blockedTitle"),
-            description: t("semanticCapacity.blockedDescription", { count: windowCount ?? 0 }),
+            description: t("semanticCapacity.blockedDescription", { count: windowCount ?? 0, limit: LITE_SEMANTIC_MANUAL_WINDOW_LIMIT }),
             cancelLabel: t("semanticCapacity.close"),
         });
     }
 
-    if (windowCount !== undefined && windowCount > 300) {
+    if (windowCount !== undefined && windowCount > LITE_SEMANTIC_AUTO_WINDOW_LIMIT) {
         return openCapacityModal(app, {
             title: t("semanticCapacity.recommendTitle"),
             description: t("semanticCapacity.recommendDescription", { count: windowCount }),

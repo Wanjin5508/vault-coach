@@ -1,9 +1,16 @@
+/**
+ * 检索管线的跨层数据契约。
+ *
+ * `score` 只在其所属阶段内比较；关键词分数、向量相似度、融合分数和重排分数
+ * 不共享数值尺度。基础设施实现不得把向量存储的内部记录泄露给展示层。
+ */
 import type { DocumentLocator, IndexedChunk, KnowledgeDocumentType } from "../documents/document-types";
 
 export type { KeywordSearchHit } from "../documents/document-types";
 
 export type RetrievalMode = "keyword" | "vector" | "hybrid";
 
+/** 发送给回答生成器并最终展示给用户的可追溯来源。 */
 export interface AnswerSource {
     filePath: string;
     locator?: DocumentLocator;
@@ -102,6 +109,10 @@ export interface RerankResultItem {
     relevance_score: number;
 }
 
+/**
+ * 向量后端端口。实现必须接受重复初始化和幂等删除，并在 `close` 后释放持有资源。
+ * `search` 返回的 `score` 由后端定义，调用方应使用 `similarity` 表示统一的相似度语义。
+ */
 export interface VectorStore {
     initialize(): Promise<void>;
     upsert(records: VectorRecord[]): Promise<void>;

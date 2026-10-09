@@ -40,10 +40,12 @@ import { assessGraphCapacity } from "../../domain/graph-capacity/graph-capacity-
 import type { GraphCapacityAssessment, GraphCapacityInput } from "../../domain/graph-capacity/graph-capacity-types";
 import type { VectorIndexStats } from "../../domain/retrieval/retrieval-types";
 
+/** 语义概念向量生成端口；是否允许调用模型由应用设置和容量门禁共同决定。 */
 export interface SemanticEmbeddingGateway {
     embedTexts(texts: string[], options?: { allowWhenVectorRetrievalDisabled?: boolean }): Promise<number[][]>;
 }
 
+/** 语义图协调器使用的领域端口、设置读取器和状态通知回调。 */
 export interface SemanticGraphServiceDependencies {
     graphService: KnowledgeGraphService;
     documentIndex: DocumentIndexReader;
@@ -54,18 +56,20 @@ export interface SemanticGraphServiceDependencies {
     similarityIndex?: ConceptSimilarityIndex;
     getNow?(): number;
     getVectorIndexStats?(): Pick<VectorIndexStats, "vectorCount" | "dimension">;
-    /** Publishes in-memory progress without coupling this service to Obsidian UI. */
+    /** 发布内存中的执行进度，但不让应用服务依赖 Obsidian UI。 */
     onStateChanged?(): void;
 }
 
-/** Lite defaults. Opting in to large sources keeps the global capacity gate. */
+/** Lite 模式默认值。即使用户允许处理大文件，仍必须遵守全局容量门禁。 */
 export const SEMANTIC_GRAPH_LITE_MAX_MARKDOWN_CHARACTERS = 60_000;
 export const SEMANTIC_GRAPH_LITE_MAX_MARKDOWN_LINES = 1_500;
 export const SEMANTIC_GRAPH_LITE_MAX_PDF_BYTES = 20 * 1024 * 1024;
 
 /**
- * Coordinates optional model-backed semantic work while keeping M2 graph facts
- * and all Ask/Exam paths independent from failures in this service.
+ * 协调可选的模型语义处理任务。
+ *
+ * M2 图事实以及 Ask、Exam 主流程不得依赖本服务成功；语义处理失败时，
+ * 已有确定性事实和学习功能仍应保持可用。
  */
 export class SemanticGraphService {
     private readonly integrity = new SemanticGraphIntegrityService();
@@ -119,10 +123,10 @@ export class SemanticGraphService {
     }
 
     /**
-     * Reconciles persisted semantic facts with the current deterministic graph
-     * without calling an extraction or embedding model. It is used after an
-     * offline Vault change: stale records are removed, while the append-only
-     * user decision audit is retained for concepts that may reappear later.
+     * 在不调用抽取模型或 embedding 模型的情况下，将持久化语义事实与当前确定性图对齐。
+     *
+     * 该路径用于处理离线 Vault 变更：删除已经失效的派生记录，但保留只追加的用户决策
+     * 审计轨迹，以便相关概念以后重新出现时仍可追溯。
      */
     async reconcileWithCurrentSources(): Promise<void> {
         if (this.coordinator.isBusy()) throw new Error("语义概念图谱任务正在运行，暂时无法对齐来源。");
@@ -131,9 +135,8 @@ export class SemanticGraphService {
 
         const persisted = await this.dependencies.store.load();
         if (!persisted) {
-            // A first-ever text/graph build has nothing semantic to reconcile.
-            // Do not surface a misleading "source changed" warning merely
-            // because there was no previous source inventory.
+            // 首次构建文字索引和图时没有旧语义事实可对齐。缺少历史来源清单不代表来源发生变更，
+            // 因此不得向用户展示误导性的“来源已变更”警告。
             this.state = createEmptySemanticGraphState(this.now());
             await this.similarityIndex.clear();
             this.similarityInitialized = true;
@@ -198,11 +201,10 @@ export class SemanticGraphService {
     }
 
     /**
-     * Removes the user-governed overlay without repeating extraction or
-     * embedding.  This is the deliberate recovery path after a confirmed
-     * knowledge-domain replacement: source-derived records can be rebuilt,
-     * while obsolete confirmations, aliases, merges, and manual relations no
-     * longer influence the effective graph.
+     * 删除用户治理叠加层，但不重复执行抽取或 embedding。
+     *
+     * 这是用户确认更换知识领域后的恢复路径：来源派生记录仍可重建，旧的确认、别名、
+     * 合并和手工关系则不再影响有效图。
      */
     async resetGovernanceDecisions(): Promise<void> {
         if (this.coordinator.isBusy()) {
@@ -217,8 +219,7 @@ export class SemanticGraphService {
         this.assertIntegrity(next);
         await this.dependencies.store.save(next);
         this.state = next;
-        // Keep a source-reconciliation warning intact. Resetting manual
-        // governance does not mean every current Section was re-extracted.
+        // 保留来源对齐警告。重置人工治理并不代表当前所有 Section 已重新完成抽取。
     }
 
     getGovernanceImpact(): SemanticGovernanceImpact {
@@ -271,15 +272,15 @@ export class SemanticGraphService {
         };
     }
 
-    /** Stable read boundary for M4A/M4B; pending and rejected candidates stay out. */
+    /** 为 M4A/M4B 提供稳定读取边界；待确认和已拒绝候选不得进入结果。 */
     getEffectiveGraph(): EffectiveSemanticGraph {
         return deepClone(this.projector.project(this.state));
     }
 
     /**
-     * Display-only candidates for Learning Map. They are deliberately kept
-     * outside getEffectiveGraph(), so downstream learning facts remain based
-     * on explicit user decisions.
+     * 返回仅供 Learning Map 展示的候选关系。
+     *
+     * 这些候选不会进入 `getEffectiveGraph()`，确保下游学习事实始终基于用户明确决策。
      */
     getAutoDisplayRelations(): EffectiveSemanticGraph["relations"] {
         const settings = this.dependencies.getSettings();
@@ -292,11 +293,10 @@ export class SemanticGraphService {
     }
 
     /**
-     * A cheap cache revision for presentation projections.  `updatedAt` alone
-     * is insufficient because multiple decisions may happen in one clock tick.
-     * The policy portion also makes setting changes visible immediately, even
-     * when a caller only refreshes the view and does not explicitly invalidate
-     * the LearningGraphQueryService cache.
+     * 为展示投影生成低成本缓存版本。
+     *
+     * 同一时钟刻度内可能发生多次决策，因此不能只依赖 `updatedAt`。版本中同时包含策略信息，
+     * 使设置变更在仅刷新视图、未显式清除 `LearningGraphQueryService` 缓存时也能立即生效。
      */
     getLearningMapRevision(): string {
         const settings = this.dependencies.getSettings();
@@ -312,12 +312,11 @@ export class SemanticGraphService {
         ].join(":");
     }
 
-    /** A local-only policy result; it never scans the Vault or calls a model. */
+    /** 返回纯本地策略结果；该操作既不扫描 Vault，也不调用模型。 */
     getCapacityAssessment(): GraphCapacityAssessment {
         const snapshot = this.dependencies.graphService.getSnapshot();
-        // Older test doubles and third-party read adapters may predate file
-        // metadata. Missing metadata is reported as unknown, never treated as
-        // an empty or safe Vault.
+        // 旧测试替身和第三方读取适配器可能早于文件元数据字段。缺失元数据必须报告为 unknown，
+        // 不能被解释为空 Vault 或安全规模。
         const files = typeof this.dependencies.documentIndex.getFileRecords === "function"
             ? this.dependencies.documentIndex.getFileRecords()
             : null;
@@ -368,16 +367,15 @@ export class SemanticGraphService {
             ? []
             : this.state.candidates
                 .filter((candidate) => !rejected.has(candidate.fingerprint) && !confirmed.has(candidate.fingerprint))
-                // A candidate referring to a merged-away source concept is still
-                // retained in the decision log, but cannot be drawn as an edge in
-                // the effective review graph until it is re-proposed.
+                // 指向已被合并来源概念的候选仍保留在决策日志中，但在模型重新提出该关系前，
+                // 不得将其绘制为有效审查图中的边。
                 .filter((candidate) => effectiveConceptIds.has(candidate.sourceConceptId) && effectiveConceptIds.has(candidate.targetConceptId))
                 .sort(compareCandidatePriority);
         const visibleIds = this.getVisibleConceptIds(effective.concepts, effective.relations, pendingCandidates, query, limit);
         const maxRelationEdges = Math.max(1, limit * 2);
         const candidates = pendingCandidates
-            // The force graph only draws complete edges. Keeping both endpoints
-            // here prevents a "selected but invisible" candidate in its inspector.
+            // 力导向图只绘制端点完整的边。此处同时保留两个端点，避免检查器出现
+            // “已选中但图中不可见”的候选关系。
             .filter((candidate) => visibleIds.has(candidate.sourceConceptId) && visibleIds.has(candidate.targetConceptId))
             .slice(0, maxRelationEdges)
             .map(cloneCandidate);
@@ -572,9 +570,9 @@ export class SemanticGraphService {
     }
 
     /**
-     * Applies the Lite per-file guard before creating semantic windows. It
-     * deliberately does not affect the global capacity assessment: a Vault
-     * that is huge overall should still be directed to the Docker service.
+     * 在创建语义窗口前应用 Lite 单文件门禁。
+     *
+     * 单文件门禁不得改变全局容量评估；整体规模过大的 Vault 仍应引导至 Docker 服务。
      */
     private async createSourcePlan(
         snapshot: GraphSnapshotV1,
@@ -623,7 +621,7 @@ export class SemanticGraphService {
         };
     }
 
-    /** Avoid rebuilding every source window on each progress-driven UI refresh. */
+    /** 避免因进度驱动的 UI 刷新而反复重建全部来源窗口。 */
     private getSemanticInputCapacityStats(snapshot: GraphSnapshotV1): { count: number; characters: number } {
         const maxCharactersPerWindow = this.dependencies.getSettings().semanticGraphMaxSectionCharacters;
         const cached = this.semanticInputCapacityCache;
@@ -675,9 +673,8 @@ export class SemanticGraphService {
         ]));
         const batchSize = Math.max(1, this.dependencies.getSettings().semanticGraphMaxSectionsPerRun);
         const pendingSectionOrder = createFairSectionOrder(sectionsNeedingWork);
-        // Background sync remains bounded to avoid turning one large file edit
-        // into an unbounded automatic model job. An explicit rebuild exhausts
-        // the same queue in durable batches.
+        // 后台同步必须保持有界，避免一次大文件编辑触发无限制的自动模型任务。
+        // 用户显式重建时会以可持久化批次处理完同一队列。
         const sectionOrder = exhaustively
             ? pendingSectionOrder
             : pendingSectionOrder.slice(0, batchSize);
@@ -695,14 +692,11 @@ export class SemanticGraphService {
             failedSections,
         });
 
-        // Publish the denominator before the first model request. This lets
-        // the UI distinguish a large, active queue from a stuck build.
+        // 在首次模型请求前发布总任务数，使 UI 能区分“队列较大但仍在运行”和“构建卡住”。
         onProgress(buildProgress());
 
-        // A manual rebuild is exhaustive. `semanticGraphMaxSectionsPerRun`
-        // bounds one durable checkpoint, rather than silently dropping every
-        // Section after the first batch. The fair order prevents a large file
-        // from delaying all other files.
+        // 手工重建必须完整处理队列。`semanticGraphMaxSectionsPerRun` 只限制单个持久化检查点，
+        // 不能在首批之后静默丢弃其余 Section。公平排序可防止一个大文件长期阻塞其他文件。
         if (sectionOrder.length === 0) {
             await onCheckpoint(buildExtractions(), buildProgress());
         }
@@ -737,7 +731,7 @@ export class SemanticGraphService {
         };
     }
 
-    /** Persists a coherent, resumable source-derived graph after every batch. */
+    /** 每批完成后持久化一致、可恢复的来源派生图。 */
     private async persistExtractionCheckpoint(extractions: SemanticGraphState["extractions"]): Promise<void> {
         const concepts = buildConcepts(extractions);
         const conceptIds = new Set(concepts.map((concept) => concept.id));
@@ -830,7 +824,7 @@ export class SemanticGraphService {
                 }
             }
         } catch (error: unknown) {
-            // Similarity is optional. Rule and model candidates remain usable.
+            // 相似度索引属于可选能力；失败时规则候选和模型候选仍应可用。
             console.warn("[VaultCoach] Concept embedding 不可用；将仅保留规则和模型关系候选。", error);
             this.lastError = `Concept embedding 不可用：${describeError(error)}`;
         }
@@ -968,8 +962,7 @@ export class SemanticGraphService {
         };
         const addPair = (sourceConceptId: string, targetConceptId: string): void => {
             if (ids.size >= limit || !conceptIds.has(sourceConceptId) || !conceptIds.has(targetConceptId)) return;
-            // An edge matters only when both endpoints are visible. Do not use the
-            // final free slot for one half of a relationship pair.
+            // 只有两个端点都可见时，关系边才有展示价值。不得用最后一个可用名额只加入关系的一端。
             const newEndpoints = Number(!ids.has(sourceConceptId)) + Number(!ids.has(targetConceptId));
             if (newEndpoints > limit - ids.size) return;
             add(sourceConceptId);
@@ -991,9 +984,8 @@ export class SemanticGraphService {
                 }
             }
         } else {
-            // Start a default/search view with complete relation pairs instead of
-            // the alphabetically first concepts. This makes solid and dashed
-            // links visible even in a large vault while retaining a fixed budget.
+            // 默认视图和搜索视图优先选择完整关系对，而不是简单截取字母序最前的概念。
+            // 这样可在固定预算下，让大 Vault 中的实线和虚线关系仍然可见。
             for (const relation of relations) addPair(relation.sourceConceptId, relation.targetConceptId);
             for (const candidate of candidateEdges) addPair(candidate.sourceConceptId, candidate.targetConceptId);
         }
@@ -1084,9 +1076,9 @@ function groupRecordsBySection(records: readonly SemanticGraphState["extractions
 }
 
 /**
- * Interleaves Section work across documents in a deterministic order. A single
- * overview file can still have many Sections, but it cannot starve every other
- * document from the first checkpoint batches.
+ * 以确定顺序交错处理不同文档的 Section。
+ *
+ * 单个总览文件可以包含大量 Section，但不能独占首批检查点并使其他文档长期得不到处理。
  */
 function createFairSectionOrder(entries: readonly [string, SectionExtractionInput[]][]): string[] {
     const sectionIdsByDocument = new Map<string, string[]>();
@@ -1181,7 +1173,7 @@ function dedupeCandidates(candidates: readonly SemanticCandidate[]): SemanticCan
     return Array.from(byFingerprint.values()).sort((left, right) => left.fingerprint.localeCompare(right.fingerprint));
 }
 
-/** Deterministic order also defines which bounded local candidate edges are shown first. */
+/** 确定性顺序同时决定有界本地视图优先展示哪些候选边。 */
 function compareCandidatePriority(left: SemanticCandidate, right: SemanticCandidate): number {
     return right.confidence - left.confidence
         || left.origin.localeCompare(right.origin)
