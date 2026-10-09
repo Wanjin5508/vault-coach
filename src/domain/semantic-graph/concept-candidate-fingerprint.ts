@@ -1,3 +1,8 @@
+/**
+ * 语义图事实、候选和人工关系的稳定标识规则。
+ *
+ * 哈希只用于可重复标识和去重，不具备密码学安全性。无向关系在生成指纹前必须规范端点顺序。
+ */
 import type { SemanticRelationType } from "./semantic-graph-types";
 
 export function stableSemanticHash(value: string): string {

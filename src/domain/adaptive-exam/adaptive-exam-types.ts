@@ -1,7 +1,7 @@
 import type { ExamMode, ExamScopeAnalysisResult, ExamScopeSelection } from "../exam/exam-types";
 import type { MasteryLevel } from "../mastery/mastery-types";
 
-/** Why an adaptive plan is being requested. This is independent from ExamMode. */
+/** 请求自适应方案的原因；该语义与 `ExamMode` 相互独立。 */
 export type AdaptiveTargetMode = "diagnostic" | "weak-review" | "prerequisite" | "mixed";
 
 export type AdaptiveReasonCode =
@@ -32,7 +32,7 @@ export interface AdaptivePlanIssue {
     conceptId?: string;
 }
 
-/** Revisions used to reject a visible plan that became stale before generation. */
+/** 用于拒绝在生成前已经过期的可见方案的版本集合。 */
 export interface AdaptiveExamRevisions {
     indexRevision: string;
     effectiveGraphRevision: string;
@@ -40,13 +40,13 @@ export interface AdaptiveExamRevisions {
     assessmentRevision: string;
 }
 
-/** Already-resolved scope facts; the planner never scans the Vault itself. */
+/** 已解析的范围事实；规划器本身不得扫描 Vault。 */
 export interface AdaptiveExamScopeSnapshot {
     signature: string;
     eligibleChunkIds: readonly string[];
 }
 
-/** The smallest Mastery/coverage fact needed to rank a source-backed Concept. */
+/** 对有来源 Concept 排序所需的最小 Mastery/覆盖率事实。 */
 export interface AdaptivePlanningConcept {
     id: string;
     label: string;
@@ -59,7 +59,7 @@ export interface AdaptivePlanningConcept {
     nextReviewAt: number | null;
 }
 
-/** A confirmed directed prerequisite edge: prerequisite → dependent concept. */
+/** 已确认的有向先修边：先修概念 → 依赖概念。 */
 export interface ConfirmedPrerequisite {
     prerequisiteConceptId: string;
     targetConceptId: string;
@@ -96,7 +96,7 @@ export interface AdaptiveExamPlanDiagnostics {
     plannedQuestionCount: number;
 }
 
-/** A deterministic, disposable plan. It becomes auditable only when copied into a Session. */
+/** 确定性、可重建的方案；只有复制到 Session 后才成为可审计记录。 */
 export interface AdaptiveExamPlan {
     id: string;
     algorithmVersion: string;
@@ -112,7 +112,7 @@ export interface AdaptiveExamPlan {
     diagnostics: AdaptiveExamPlanDiagnostics;
 }
 
-/** Minimum immutable input required by ExamEngine after an adaptive preview is accepted. */
+/** 用户接受自适应预览后，`ExamEngine` 所需的最小不可变输入。 */
 export interface AdaptiveExamGenerationContext {
     planId: string;
     algorithmVersion: string;
@@ -126,7 +126,7 @@ export interface AdaptiveExamGenerationContext {
     appliedFallbacks: readonly AdaptiveReasonCode[];
 }
 
-/** Additive Session audit data. It intentionally excludes raw notes and complete Mastery snapshots. */
+/** 追加到 Session 的审计数据；不得包含笔记原文或完整 Mastery 快照。 */
 export interface AdaptivePlanAuditSnapshot {
     planId: string;
     algorithmVersion: string;
@@ -139,7 +139,7 @@ export interface AdaptivePlanAuditSnapshot {
     appliedFallbacks: AdaptiveReasonCode[];
 }
 
-/** Application request assembled from a locked controller analysis result. */
+/** 根据 Controller 已锁定的分析结果组装的应用层请求。 */
 export interface AdaptiveExamPlanRequest {
     selection: ExamScopeSelection;
     analysis: ExamScopeAnalysisResult;
@@ -153,6 +153,7 @@ export type AdaptiveExamPlanResult =
     | { status: "degraded"; plan: AdaptiveExamPlan; reasonCode: AdaptiveReasonCode }
     | { status: "unavailable"; reasonCode: "no-effective-concepts" | "no-source-backed-target"; message: string };
 
+/** 将规划结果复制为生成阶段的不可变输入，防止后续状态变化改写本次考试目标。 */
 export function createAdaptiveExamGenerationContext(plan: AdaptiveExamPlan): AdaptiveExamGenerationContext {
     return {
         planId: plan.id,
@@ -173,6 +174,7 @@ export function createAdaptiveExamGenerationContext(plan: AdaptiveExamPlan): Ada
     };
 }
 
+/** 提取随考试记录持久化的最小计划审计信息，不包含可重建的排序分数。 */
 export function createAdaptivePlanAuditSnapshot(context: AdaptiveExamGenerationContext): AdaptivePlanAuditSnapshot {
     const reasonCodesByConceptId: Record<string, AdaptiveReasonCode[]> = {};
     for (const target of context.targets) {

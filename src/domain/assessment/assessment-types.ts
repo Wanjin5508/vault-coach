@@ -7,11 +7,11 @@ import type {
 } from "../exam/exam-types";
 import type { AdaptiveTargetMode } from "../adaptive-exam/adaptive-exam-types";
 
-/** Increment when the persisted assessment-session document changes incompatibly. */
+/** 持久化 Assessment Session 文档发生不兼容变更时递增。 */
 export const ASSESSMENT_SESSION_SCHEMA_VERSION = 1;
 export const ASSESSMENT_INDEX_SCHEMA_VERSION = 1;
 
-/** Immutable evidence produced by one evaluated answer. */
+/** 单个已评估答案产生的不可变证据。 */
 export interface AssessmentEvent {
     id: string;
     eventType: "exam-answer";
@@ -31,10 +31,10 @@ export interface AssessmentEvent {
         provider: string;
         model: string;
         promptVersion: string;
-        /** Additive audit detail; it never changes Mastery weighting. */
+        /** 追加式审计详情；不得改变 Mastery 权重。 */
         kind?: "model" | "deterministic";
     };
-    /** Audit-only linkage. Mastery continues to consume conceptIds and sources. */
+    /** 仅用于审计的关联；Mastery 仍只消费 `conceptIds` 和来源。 */
     adaptive?: {
         planId: string;
         targetMode: AdaptiveTargetMode;
@@ -43,7 +43,7 @@ export interface AssessmentEvent {
     supersedesEventId?: string;
 }
 
-/** Human-readable mapping for M1 provisional topic IDs; it is not a graph node. */
+/** M1 临时主题 ID 的可读映射；该对象不是图节点。 */
 export interface AssessmentConceptBinding {
     id: string;
     label: string;
@@ -51,7 +51,7 @@ export interface AssessmentConceptBinding {
     kind: "provisional-topic";
 }
 
-/** Facts that will be persisted by the M1 JSON store in the following step. */
+/** 下一步由 M1 JSON 存储持久化的事实。 */
 export interface AssessmentSessionDocumentV1 {
     schemaVersion: typeof ASSESSMENT_SESSION_SCHEMA_VERSION;
     sessionId: string;
@@ -61,7 +61,7 @@ export interface AssessmentSessionDocumentV1 {
     conceptBindings: AssessmentConceptBinding[];
 }
 
-/** Compact session metadata used to list history without loading every full document. */
+/** 用于列出历史记录的紧凑会话元数据，避免加载每个完整文档。 */
 export interface AssessmentSessionIndexEntry {
     sessionId: string;
     sessionPath: string;
@@ -78,20 +78,20 @@ export interface AssessmentSessionIndexV1 {
     entries: AssessmentSessionIndexEntry[];
 }
 
-/** History item backed by an Assessment Session JSON source of truth. */
+/** 以 Assessment Session JSON 为事实来源的历史记录项。 */
 export interface AssessmentExamHistoryItem extends ExamHistoryItem {
     sessionId: string;
     sessionPath: string;
     reportPath: string | null;
 }
 
-/** Result returned by the pure event factory before any storage side effect occurs. */
+/** 纯事件工厂在产生任何存储副作用前返回的结果。 */
 export interface AssessmentEventCreationResult {
     events: AssessmentEvent[];
     conceptBindings: AssessmentConceptBinding[];
 }
 
-/** Domain port to be implemented by M1's JSON assessment-session store. */
+/** 由 M1 JSON Assessment Session 存储实现的领域端口。 */
 export interface AssessmentSessionStore {
     save(document: AssessmentSessionDocumentV1): Promise<void>;
     read(sessionId: string): Promise<AssessmentSessionDocumentV1 | null>;

@@ -141,7 +141,7 @@ export class ExamQuestionValidator {
         };
     }
 
-    /** Objective questions must be locally and uniquely scoreable. */
+    /** 客观题必须能够在本地得到唯一评分结果。 */
     private validateObjectiveContract(candidate: GeneratedExamQuestionCandidate, failureCodes: string[]): void {
         const answerForm: ExamAnswerForm | undefined = candidate.answerForm;
         if (answerForm !== "single-choice" && answerForm !== "true-false") return;

@@ -9,7 +9,7 @@ export interface LearningGraphFacts {
     edges: LearningGraphEdge[];
 }
 
-/** Converts M2 structural facts and M3 effective facts into one read-only graph. */
+/** 将 M2 结构事实与 M3 有效事实组合为单一只读图。 */
 export class LearningGraphProjectionService {
     build(
         snapshot: GraphSnapshotV1,
@@ -99,7 +99,7 @@ function collectStructuralContextIds(snapshot: GraphSnapshotV1, concepts: readon
         const section = byId.get(nodeId);
         if (section?.type === "section") nodeIds.add(section.documentId);
     }
-    // Include a Section's containing hierarchy, without walking the full graph.
+    // 补充 Section 所属层级，但不得遍历完整图。
     const parentsByTarget = new Map<string, string[]>();
     for (const edge of snapshot.edges) {
         if (edge.type !== "contains") continue;
@@ -117,7 +117,7 @@ function collectStructuralContextIds(snapshot: GraphSnapshotV1, concepts: readon
             queue.push(parentId);
         }
     }
-    // Tags are source context for the documents already reached above.
+    // 标签只作为上述已触达文档的来源上下文。
     for (const edge of snapshot.edges) {
         if (edge.type === "tagged_with" && nodeIds.has(edge.sourceNodeId)) nodeIds.add(edge.targetNodeId);
     }

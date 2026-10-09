@@ -20,20 +20,19 @@ export interface LearningMapControllerState {
     focusHistory: LearningGraphQuery[];
 }
 
-/** Presentation state for the bounded, read-only Learning Map explorer. */
+/** 有界、只读 Learning Map 浏览器的展示状态。 */
 export class LearningMapController {
     private query: LearningGraphQuery = {
         depth: 1,
-        // The renderer and query service enforce the local 500 / 2,000 hard
-        // ceiling. Prefer the complete bounded map by default so a normal
-        // vault is not silently split into an overview plus hidden nodes.
+        // 渲染器和查询服务共同执行本地 500 节点/2,000 边硬上限。默认优先显示有界完整图，
+        // 避免普通 Vault 被静默拆成总览和隐藏节点。
         maxNodes: LEARNING_GRAPH_MAX_NODES,
         maxEdges: LEARNING_GRAPH_MAX_EDGES,
     };
     /**
-     * Focus is exploration state, not a destructive filter. Keep a small
-     * in-memory history so a user can return to the exact previous bounded
-     * projection without retyping their search or losing relation filters.
+     * Focus 是探索状态，不是破坏性过滤。
+     *
+     * 保留小型内存历史，使用户无需重新输入搜索或丢失关系过滤，即可返回上一个有界投影。
      */
     private readonly focusHistory: LearningGraphQuery[] = [];
 
@@ -94,7 +93,7 @@ export class LearningMapController {
 
     getRelationTypes(): readonly SemanticRelationType[] { return this.query.relationTypes ?? []; }
 
-    /** Serializable leaf-local explorer state; it never contains graph facts. */
+    /** 可序列化的叶片局部浏览状态；其中不得包含图事实。 */
     getViewState(): LearningMapControllerState {
         return {
             version: LEARNING_MAP_VIEW_STATE_VERSION,
@@ -103,7 +102,7 @@ export class LearningMapController {
         };
     }
 
-    /** Ignores malformed or obsolete workspace state rather than breaking a leaf. */
+    /** 忽略畸形或过期工作区状态，避免导致叶片视图失效。 */
     restoreViewState(value: unknown): void {
         if (!isRecord(value) || value.version !== LEARNING_MAP_VIEW_STATE_VERSION) return;
         const query = sanitizeQuery(value.query);

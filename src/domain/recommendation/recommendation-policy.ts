@@ -1,3 +1,8 @@
+/**
+ * 建议排序的版本化策略参数。
+ *
+ * 所有权重只表达相对优先级；修改任何参数时必须同步评估算法版本和排序回归测试。
+ */
 export const RECOMMENDATION_ALGORITHM_VERSION = "recommendation/v1";
 export const RECOMMENDATION_POLICY = {
     maxPrimary: 5,

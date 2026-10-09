@@ -1,3 +1,8 @@
+/**
+ * 考试题型策略和规范化规则。
+ *
+ * 简单模式仅接受可确定评分的客观题；选项按 ID 和规范化文本去重，以保持评分输入稳定。
+ */
 import type { ExamAnswerForm, ExamChoiceOption, ExamMode, ExamQuestion } from "./exam-types";
 
 export type ObjectiveExamQuestion = ExamQuestion & {
@@ -27,6 +32,7 @@ export function isObjectiveQuestion(question: ExamQuestion): question is Objecti
         && typeof question.correctOptionId === "string";
 }
 
+/** 清理空选项，并保留每个 ID 和规范化文本第一次出现的顺序。 */
 export function normalizeObjectiveOptions(
     rawOptions: readonly ExamChoiceOption[] | undefined,
 ): ExamChoiceOption[] {

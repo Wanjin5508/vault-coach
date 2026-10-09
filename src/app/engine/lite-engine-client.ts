@@ -6,9 +6,10 @@ import {
 } from "./knowledge-engine-types";
 
 /**
- * Default Engine port implementation. It documents that Lite is already a
- * working local engine path, while guaranteeing no socket, fetch, Docker, or
- * background process is touched before a user deliberately enables Local.
+ * Engine 端口的默认实现。
+ *
+ * Lite 本身是可工作的本地执行路径；在用户主动启用 Local 前，不得访问 socket、fetch、
+ * Docker 或任何后台进程。
  */
 export class LiteEngineClient implements KnowledgeEngineClient {
     getAvailability(): KnowledgeEngineAvailability {

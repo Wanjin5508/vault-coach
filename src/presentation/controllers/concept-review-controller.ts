@@ -5,9 +5,9 @@ import type {
     SemanticRelationType,
 } from "../../domain/semantic-graph/semantic-graph-types";
 
-/** Presentation-only state for the local, bounded Concept review projection. */
+/** 局部、有界 Concept 审查投影的展示层状态。 */
 export class ConceptReviewController {
-    /** The canvas is intentionally a local graph, never a full-vault renderer. */
+    /** 画布只渲染局部图，不得成为完整 Vault 图渲染器。 */
     private query: ConceptReviewQuery = { includePending: true, limit: 36 };
 
     constructor(private readonly api: SemanticGraphApplicationApi) {}

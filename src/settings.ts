@@ -138,11 +138,10 @@ export class VaultCoachSettingTab extends PluginSettingTab {
     }
 
     /**
-     * Declarative settings for Obsidian 1.13.0 and later.
+     * 面向 Obsidian 1.13.0 及以上版本的声明式设置定义。
      *
-     * `display()` remains below as the compatibility path for older Obsidian
-     * versions supported by this plugin. Each definition mirrors the existing
-     * imperative setting, so settings search can index every user-facing name.
+     * `display()` 继续作为插件支持的旧 Obsidian 版本兼容路径。每个定义必须与现有命令式设置
+     * 保持一致，使设置搜索能够索引全部面向用户的名称。
      */
     getSettingDefinitions(): SettingDefinitionItem[] {
         return [
@@ -679,8 +678,8 @@ export class VaultCoachSettingTab extends PluginSettingTab {
     }
 
     /**
-     * Refresh provider-dependent definitions on Obsidian 1.13+ without
-     * requiring the newer `SettingTab.update()` API on older installations.
+     * 在 Obsidian 1.13 及以上版本刷新依赖 provider 的定义，
+     * 同时不要求旧安装提供较新的 `SettingTab.update()` API。
      */
     private refreshDeclarativeSettings(): void {
         const settingTab = this as unknown as Record<string, unknown>;
@@ -713,7 +712,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         this.renderAdvancedRagSection(containerEl);
     }
 
-    /** Optional model-backed feature kept separate so its privacy boundary is obvious. */
+    /** 单独渲染可选模型功能，使其隐私边界在设置页中保持明确。 */
     private renderSemanticGraphSection(containerEl: HTMLElement): void {
         new Setting(containerEl)
             .setHeading()

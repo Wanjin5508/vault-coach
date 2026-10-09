@@ -1,7 +1,7 @@
 import { stableGraphHash } from "../graph/graph-id";
 import type { AdaptiveExamPlanningInput, AdaptiveExamRevisions } from "./adaptive-exam-types";
 
-/** Stable JSON without relying on insertion order or host crypto APIs. */
+/** 生成稳定 JSON，不依赖属性插入顺序或宿主加密 API。 */
 export function canonicalSerialize(value: unknown): string {
     if (value === null || typeof value !== "object") return JSON.stringify(value);
     if (Array.isArray(value)) return `[${value.map((item) => canonicalSerialize(item)).join(",")}]`;

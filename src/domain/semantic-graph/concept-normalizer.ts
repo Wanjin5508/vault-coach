@@ -1,7 +1,7 @@
 /**
- * Conservative normalization defines exact term equality for display-level
- * provenance aggregation. Similarity and merely related aliases never imply a
- * merge without an explicit user decision.
+ * 保守归一化定义展示层来源聚合所需的术语精确相等规则。
+ *
+ * 相似度或仅相关的别名不能推导合并；合并必须来自用户明确决策。
  */
 export function normalizeConceptName(value: string): string {
     return value

@@ -126,7 +126,7 @@ export class VaultCoachPersistentStore {
         }
     }
 
-    /** Stable, read-only roots for the storage-footprint diagnostic. */
+    /** 供存储占用诊断使用的稳定、只读根目录集合。 */
     getDerivedDataPaths(): VaultCoachDerivedDataPaths {
         return {
             textSnapshotPath: this.getIndexSnapshotPath(),

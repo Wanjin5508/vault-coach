@@ -5,6 +5,7 @@ import type { LongTermMemoryService } from "../../memory/memory-service";
 import type { ChatMessage, StreamHandlers } from "./chat-types";
 import type { VaultCoachSettings } from "../config/settings-types";
 
+/** ChatService 运行单轮对话所需的应用端口和生命周期回调。 */
 export interface ChatServiceDependencies {
     ragEngine: AdvancedRagEngine;
     memoryService: LongTermMemoryService;
@@ -15,7 +16,7 @@ export interface ChatServiceDependencies {
     onGenerationFinished(): void;
 }
 
-/** Owns in-memory chat state and the assistant-turn use case. */
+/** 管理内存聊天状态并编排单轮助手对话用例。 */
 export class ChatService {
     private readonly getSettings: () => VaultCoachSettings;
     private messages: ChatMessage[] = [];

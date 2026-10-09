@@ -1,9 +1,7 @@
 /**
- * Future, opt-in boundary for an explicit calendar/reminder export.
+ * 未来日历或提醒导出的显式授权边界。
  *
- * Lite deliberately provides no implementation: it must never create a
- * third-party account, send a network request, or schedule a background task
- * merely because a recommendation was generated.
+ * Lite 不提供默认实现。生成推荐本身不得创建第三方账户、发送网络请求或安排后台任务。
  */
 export interface RecommendationReminderRequest {
     recommendationId: string;
@@ -12,6 +10,7 @@ export interface RecommendationReminderRequest {
     markdown: string;
 }
 
+/** 第三方提醒服务端口；实现必须在调用前完成显式授权和可用性检查。 */
 export interface RecommendationReminderCalendarAdapter {
     readonly id: string;
     isAvailable(): Promise<boolean>;

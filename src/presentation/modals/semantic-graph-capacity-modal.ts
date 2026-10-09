@@ -13,8 +13,8 @@ interface CapacityModalOptions {
 }
 
 /**
- * Makes the costly-but-allowed local build an explicit user decision, while
- * providing a clear blocking explanation once the Lite window budget is over.
+ * 对成本较高但仍允许的本地构建获取用户明确确认；超过 Lite 窗口预算时，
+ * 提供清晰的阻断原因。
  */
 class SemanticGraphCapacityModal extends Modal {
     private settled = false;
@@ -57,7 +57,7 @@ class SemanticGraphCapacityModal extends Modal {
     }
 }
 
-/** Returns true only when a manual semantic rebuild may proceed locally. */
+/** 仅当手工语义重建可以在本地继续时返回 `true`。 */
 export function requestSemanticGraphCapacityDecision(
     app: App,
     capacity: GraphCapacityAssessment,

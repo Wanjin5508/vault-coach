@@ -1,3 +1,9 @@
+/**
+ * 确定性知识图谱的规范化、标识和排序规则。
+ *
+ * 所有构建器、查询器和完整性检查必须复用本模块，避免相同 Vault 产生不同 ID 或序列化顺序。
+ * 哈希只用于稳定标识，不用于安全校验。
+ */
 import type {
     GraphSourceLocation,
     KnowledgeGraphEdge,
@@ -7,7 +13,7 @@ import type {
 
 const VAULT_COACH_HIDDEN_DIR = ".vault-coach";
 
-/** Produces a stable FNV-1a-style hash without depending on host APIs. */
+/** 生成稳定的 FNV-1a 风格哈希，不依赖宿主 API。 */
 export function stableGraphHash(value: string): string {
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
@@ -18,6 +24,7 @@ export function stableGraphHash(value: string): string {
     return `${value.length}:${(hash >>> 0).toString(16)}`;
 }
 
+/** 将宿主路径转换为无前导斜杠、无相对段的 Vault 内规范路径。 */
 export function normalizeGraphPath(value: unknown): string {
     const rawPath = typeof value === "string" ? value : "";
     const segments: string[] = [];
@@ -82,6 +89,7 @@ export function createGraphEdgeId(
     return `edge:${type}:${normalizeGraphText(sourceNodeId)}:${normalizeGraphText(targetNodeId)}`;
 }
 
+/** 判断路径是否属于插件内部数据目录；该目录不得进入用户知识图谱。 */
 export function isVaultCoachHiddenPath(path: string): boolean {
     const normalizedPath: string = normalizeGraphPath(path);
     return normalizedPath === VAULT_COACH_HIDDEN_DIR
@@ -139,6 +147,7 @@ export function sortAndDedupeGraphSources(sources: readonly GraphSourceLocation[
     return Array.from(sourcesByKey.values()).sort(compareGraphSourceLocations);
 }
 
+/** 检查来源是否已经去重并采用规范顺序，不会修改输入。 */
 export function isGraphSourceLocationsSorted(sources: readonly GraphSourceLocation[]): boolean {
     const canonicalSources = sortAndDedupeGraphSources(sources);
     return sources.length === canonicalSources.length

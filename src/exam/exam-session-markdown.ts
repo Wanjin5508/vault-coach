@@ -6,7 +6,7 @@ import { getQuestionAnswerForm, isObjectiveQuestion } from "../domain/exam/exam-
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
-/** Increment when the Markdown projection's own frontmatter contract changes. */
+/** Markdown 投影自身的 frontmatter 契约变化时递增。 */
 export const EXAM_MARKDOWN_PROJECTION_VERSION = 3;
 
 interface AssessmentProjectionMetadata {
@@ -15,9 +15,9 @@ interface AssessmentProjectionMetadata {
 }
 
 /**
- * Formats the existing, user-facing Markdown report. The optional metadata is
- * deliberately limited to frontmatter so a report remains a readable
- * projection and never becomes a second source of assessment facts.
+ * 格式化现有面向用户的 Markdown 报告。
+ *
+ * 可选元数据仅写入 frontmatter，使报告保持可读投影，不成为第二个 Assessment 事实来源。
  */
 export function formatExamSessionMarkdown(
     session: ExamSession,
@@ -131,9 +131,9 @@ function formatStoredAnswer(question: ExamQuestion, storedAnswer: string | undef
 }
 
 /**
- * Formats a stable, human-readable projection of an Assessment Session JSON
- * document. Assessment events and concept bindings intentionally stay in JSON:
- * this report is disposable and can be regenerated without changing facts.
+ * 将 Assessment Session JSON 文档格式化为稳定、可读的投影。
+ *
+ * Assessment 事件和 Concept 绑定继续保存在 JSON 中；报告可随时重建，且不改变事实。
  */
 export function formatAssessmentSessionMarkdown(
     document: AssessmentSessionDocumentV1,
@@ -165,7 +165,7 @@ export function parseExamHistoryItem(path: string, content: string, stat: Stat |
     };
 }
 
-/** Returns a current report's stable session ID, or null for legacy Markdown. */
+/** 返回当前报告的稳定 Session ID；旧版 Markdown 返回 `null`。 */
 export function parseExamHistorySessionId(content: string): string | null {
     const frontmatterMatch = /^---\s*$([\s\S]*?)^---\s*$/m.exec(content);
     const frontmatter = frontmatterMatch?.[1];

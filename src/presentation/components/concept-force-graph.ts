@@ -6,9 +6,8 @@ import type {
 import { isUndirectedRelation } from "../../domain/semantic-graph/concept-candidate-fingerprint";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-// This compact, near-vertical viewBox is deliberate: with an inspector beside
-// the graph, a 720px-wide coordinate system would scale labels down too far.
-// It resembles Obsidian's local graph while keeping names readable in a leaf.
+// 使用紧凑、接近竖向的 viewBox 是有意设计：图旁显示检查器时，720px 宽坐标系会让标签过小。
+// 当前比例在接近 Obsidian 局部图的同时，确保名称在叶片视图中仍可读。
 const WIDTH = 560;
 const HEIGHT = 760;
 const NODE_RADIUS = 13;
@@ -71,10 +70,10 @@ interface RenderedEdge {
 }
 
 /**
- * A deliberately small, dependency-free force graph for a local review
- * projection. It never receives the entire Vault graph: at most a few dozen
- * nodes are laid out, so its O(n²) visual repulsion is bounded and unrelated
- * to semantic ANN work.
+ * 面向局部审查投影的小型、无依赖力导向图。
+ *
+ * 本组件不会接收完整 Vault 图，只布局几十个以内的节点，因此 O(n²) 视觉斥力始终有界，
+ * 并且与语义 ANN 计算无关。
  */
 export class ConceptForceGraph {
     private readonly svg: SVGSVGElement;
@@ -177,8 +176,7 @@ export class ConceptForceGraph {
         circle.setAttribute("r", String(NODE_RADIUS));
         const label = createSvgElement("text");
         label.setAttribute("text-anchor", "middle");
-        // Alternating labels above/below the node reduces collisions in a
-        // dense local cluster without hiding a concept's name entirely.
+        // 标签在节点上下交替排列，减少密集局部簇中的碰撞，同时不完全隐藏 Concept 名称。
         label.setAttribute("y", String(position.y < HEIGHT / 2 ? -20 : 28));
         label.textContent = truncate(concept.displayName, 14);
         const title = createSvgElement("title");
@@ -359,7 +357,7 @@ export class ConceptForceGraph {
     }
 }
 
-/** Pure and testable local layout. At most the review-view node budget reaches this function. */
+/** 纯函数、可测试的局部布局；输入规模受审查视图节点预算限制。 */
 export function createForceLayout(
     concepts: readonly SemanticConcept[],
     edges: readonly Pick<GraphEdge, "sourceConceptId" | "targetConceptId">[],

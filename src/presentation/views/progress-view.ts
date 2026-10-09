@@ -2,10 +2,10 @@ import type { ProgressViewState } from "../controllers/progress-controller";
 import { translate } from "../../i18n";
 
 /**
- * Compact sidebar launcher for the main-workspace Learning dashboard.
+ * 主工作区 Learning Dashboard 的紧凑侧边栏入口。
  *
- * The sidebar remains a focused Ask/Practice surface: it contains no dashboard
- * metrics or graph renderer, only a lightweight route to the workspace View.
+ * 侧边栏继续专注于 Ask/Practice，不包含 Dashboard 指标或图渲染器，
+ * 只提供进入工作区 View 的轻量导航。
  */
 export class ProgressView {
     constructor(private readonly openWorkspace: () => Promise<void>) {}
@@ -24,6 +24,6 @@ export class ProgressView {
     }
 
     dispose(): void {
-        // The launcher owns no subscription or DOM outside the parent View.
+        // 入口组件不持有父 View 之外的订阅或 DOM。
     }
 }

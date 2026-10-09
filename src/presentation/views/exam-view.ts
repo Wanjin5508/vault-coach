@@ -16,7 +16,7 @@ import type { AdaptiveReasonCode, AdaptiveTargetMode } from "../../domain/adapti
 import { getQuestionAnswerForm, isObjectiveQuestion } from "../../domain/exam/exam-question-policy";
 import { ExamController, type ExamViewState } from "../controllers/exam-controller";
 
-/** Renders the exam interface and delegates every state change to ExamController. */
+/** 渲染考试界面，并将全部状态变更委派给 `ExamController`。 */
 export class ExamView {
     private answerEls: HTMLTextAreaElement[] = [];
     private examAreaEl: HTMLDivElement | null = null;
@@ -56,7 +56,7 @@ export class ExamView {
         this.pendingAreaScrollTop = null;
     }
 
-    /** Preserve the exam panel position across controller-driven full renders. */
+    /** 在 Controller 驱动的完整重渲染之间保留考试面板位置。 */
     preserveScrollPosition(): void {
         this.pendingAreaScrollTop = this.examAreaEl?.scrollTop ?? null;
     }

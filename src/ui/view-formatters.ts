@@ -1,3 +1,8 @@
+/**
+ * 展示层共享的纯格式化工具。
+ *
+ * 日期与时间始终使用宿主区域设置；错误摘要会折叠空白并限制长度，避免原始异常破坏布局。
+ */
 import type { TranslationKey } from "../i18n";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;

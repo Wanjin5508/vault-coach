@@ -5,7 +5,7 @@ export interface MasteryIntegrityReport {
     issues: string[];
 }
 
-/** Lightweight invariant checks before a derived snapshot reaches disk. */
+/** 派生快照写入磁盘前执行的轻量不变量检查。 */
 export class MasteryIntegrityService {
     check(snapshot: MasterySnapshotV1): MasteryIntegrityReport {
         const issues: string[] = [];

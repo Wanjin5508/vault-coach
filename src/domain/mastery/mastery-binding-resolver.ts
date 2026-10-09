@@ -18,9 +18,9 @@ export interface MasteryBindingResolution {
 }
 
 /**
- * Resolves only explicit IDs or a unique, normalized exact name/Alias match.
- * It intentionally has no embedding, fuzzy matching, or semantic-candidate
- * dependency: wrong mastery attribution is worse than an unknown concept.
+ * 只解析显式 ID，或归一化名称/别名的唯一精确匹配。
+ *
+ * 本解析器不依赖 embedding、模糊匹配或语义候选；错误归因掌握度比保留未知概念更危险。
  */
 export class MasteryBindingResolver {
     resolve(
@@ -100,11 +100,10 @@ export class MasteryBindingResolver {
     }
 
     /**
-     * Legacy Exam events used a provisional topic ID. When that topic cannot
-     * be matched exactly, the persisted source chunks are the only safe bridge
-     * to the current effective Concept catalog. This never uses fuzzy text or
-     * semantic similarity and never attributes evidence outside a question's
-     * own source chunks.
+     * 旧 Exam 事件使用临时主题 ID。主题无法精确匹配时，持久化来源 chunk 是连接当前有效
+     * Concept 目录的唯一安全桥梁。
+     *
+     * 该路径不使用文本模糊匹配或语义相似度，也不会把证据归因到问题自身来源 chunk 之外。
      */
     private resolveBySourceChunks(
         input: MasteryAssessmentInput,

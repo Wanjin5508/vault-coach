@@ -1,3 +1,8 @@
+/**
+ * 自适应考试规划的版本化策略参数。
+ *
+ * 调整阈值、权重或容量会改变计划结果，必须同步提升算法版本并更新确定性测试。
+ */
 export const ADAPTIVE_EXAM_ALGORITHM_VERSION = "adaptive-exam/v1";
 
 export const ADAPTIVE_EXAM_POLICY = {

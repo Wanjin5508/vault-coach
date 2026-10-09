@@ -32,8 +32,7 @@ describe("SemanticGraphService", () => {
 
         await service.rebuildAll();
 
-        // A second section in 00 must not prevent the first Section of 01 from
-        // entering the first two durable batches.
+        // 00 文件的第二个 Section 不得阻止 01 文件的首个 Section 进入前两个持久化批次。
         expect(extracted).toEqual([
             "00-overview.md:Overview one",
             "01-topic.md:Topic",
@@ -272,8 +271,8 @@ describe("SemanticGraphService", () => {
         if (!candidate) throw new Error("Expected a candidate to confirm.");
         await service.confirmCandidate(candidate.fingerprint);
 
-        // The same file's source Section changed while the plugin was offline.
-        // Its new input hash invalidates the old extraction without invoking a model.
+        // 插件离线期间，同一文件的来源 Section 已变化。新输入哈希应使旧抽取失效，
+        // 且该对齐过程不得调用模型。
         currentSnapshot = snapshot("section:doc:replacement");
         await service.reconcileWithCurrentSources();
 

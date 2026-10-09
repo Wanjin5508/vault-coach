@@ -2,7 +2,7 @@ import type { SemanticGraphBuildProgress } from "../../domain/semantic-graph/sem
 
 export type SemanticIndexProgress = SemanticGraphBuildProgress;
 
-/** Serialises optional model work without sharing the text/vector index controller. */
+/** 串行执行可选模型任务，且不与文字/向量索引共用控制器。 */
 export class SemanticIndexCoordinator {
     private controller: AbortController | null = null;
     private active = false;

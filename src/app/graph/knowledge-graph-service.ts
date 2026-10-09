@@ -33,7 +33,7 @@ export interface GraphSourceDiagnostic {
     link?: string;
 }
 
-/** Application port implemented by the Obsidian metadata adapter. */
+/** 由 Obsidian 元数据适配器实现的应用层端口。 */
 export interface GraphSourceReader {
     readAll(): {
         documents: GraphSourceDocument[];
@@ -45,7 +45,7 @@ export interface GraphSourceReader {
     };
 }
 
-/** Application port implemented by the pure deterministic graph builder. */
+/** 由纯确定性图构建器实现的应用层端口。 */
 export interface GraphSnapshotBuilder {
     build(sources: readonly GraphSourceDocument[]): GraphSnapshotV1;
     buildFragment(
@@ -57,6 +57,7 @@ export interface GraphSnapshotBuilder {
     };
 }
 
+/** 知识图服务的可观察状态；构建失败时仍可同时保留最后一个有效快照。 */
 export interface KnowledgeGraphState {
     dirty: boolean;
     hasSnapshot: boolean;
@@ -66,10 +67,10 @@ export interface KnowledgeGraphState {
 }
 
 /**
- * Coordinates graph source reads, pure construction, validation, and local persistence.
+ * 协调图来源读取、纯函数构建、完整性校验和本地持久化。
  *
- * It intentionally owns no Obsidian objects. A graph failure leaves the text index and
- * the previous valid graph snapshot intact, while exposing a dirty state for retry.
+ * 本服务不持有 Obsidian 对象。图构建失败时必须保留文字索引和上一个有效图快照，
+ * 同时暴露 dirty 状态供后续重试。
  */
 export class KnowledgeGraphService {
     private readonly integrityService = new GraphIntegrityService();
@@ -129,11 +130,10 @@ export class KnowledgeGraphService {
     }
 
     /**
-     * Replaces only facts contributed by changed files. A missing requested
-     * source means that file was deleted or moved out of the knowledge scope.
+     * 仅替换由变更文件贡献的事实。请求的来源不存在，表示文件已删除或移出知识范围。
      *
-     * A paired rename preserves links from unchanged documents by migrating
-     * their target endpoint and evidence path to the new document identity.
+     * 成对的重命名信息会把目标端点和证据路径迁移到新文档标识，
+     * 从而保留未变更文档指向该文件的链接。
      */
     async syncChangedFiles(
         syncResult: Pick<KnowledgeBaseSyncResult, "affectedFiles">,

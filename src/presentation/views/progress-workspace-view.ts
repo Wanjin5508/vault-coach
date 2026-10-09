@@ -13,10 +13,10 @@ export type ProgressRecommendationSourceOpener = (sourcePath: string) => Promise
 export type ProgressRecommendationExamStarter = (sourcePaths: readonly string[]) => Promise<void>;
 
 /**
- * Main-workspace shell for the Learning dashboard.
+ * Learning Dashboard 的主工作区外壳。
  *
- * It consumes a disposable ProgressSnapshot only after the user opens this
- * workspace. Graph rendering and Learning Map navigation remain separate.
+ * 只有用户打开该工作区后才读取可重建的 `ProgressSnapshot`。
+ * 图渲染与 Learning Map 导航继续保持独立。
  */
 export class ProgressWorkspaceView extends ItemView {
     private readonly controller: ProgressController;
@@ -81,8 +81,7 @@ export class ProgressWorkspaceView extends ItemView {
                 this.recommendationSnapshot = recommendations;
             }
         } catch {
-            // Keep operational error details out of locale-controlled UI. The
-            // retry action remains available and diagnostics stay in the console.
+            // 运行错误详情不进入受本地化控制的 UI；保留重试动作，详细诊断继续写入控制台。
             if (this.isCurrentRequest(requestRevision)) this.loadError = "load-failed";
         } finally {
             if (this.isCurrentRequest(requestRevision)) {

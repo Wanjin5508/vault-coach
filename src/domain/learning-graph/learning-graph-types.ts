@@ -2,17 +2,17 @@ import type { DocumentLocator } from "../documents/document-types";
 import type { DeterministicKnowledgeEdgeType, GraphSourceLocation } from "../graph/graph-types";
 import type { SemanticRelationType } from "../semantic-graph/semantic-graph-types";
 
-/** Default overview remains light; users can request the bounded full view. */
+/** 默认总览保持轻量；用户可主动请求有界完整视图。 */
 export const LEARNING_GRAPH_DEFAULT_MAX_NODES = 150;
 export const LEARNING_GRAPH_DEFAULT_MAX_EDGES = 300;
-/** Hard local Canvas ceiling. Larger vaults remain a Knowledge Engine concern. */
+/** 本地 Canvas 的硬上限；更大 Vault 由 Knowledge Engine 负责。 */
 export const LEARNING_GRAPH_MAX_NODES = 500;
 export const LEARNING_GRAPH_MAX_EDGES = 2_000;
 
 export type LearningGraphNodeKind = "concept" | "document" | "section" | "tag";
 export type LearningGraphRelationType = SemanticRelationType | DeterministicKnowledgeEdgeType;
 export type LearningGraphEdgeOrigin = "semantic" | "structural" | "user";
-/** Visual provenance only; it must not be used as a learning-fact decision. */
+/** 仅表示视觉来源，不得用于形成学习事实决策。 */
 export type LearningGraphEdgeTrust = "confirmed" | "automatic" | "structural";
 
 export interface LearningGraphConceptEvidence {
@@ -64,7 +64,7 @@ export interface LearningGraphQuery {
     filePath?: string;
     folderPath?: string;
     relationTypes?: SemanticRelationType[];
-    /** Hides display-only high-confidence candidates without changing facts. */
+    /** 隐藏仅用于展示的高置信候选，但不修改任何事实。 */
     includeAutomaticRelations?: boolean;
     includeStructuralContext?: boolean;
     depth?: 0 | 1 | 2;
@@ -85,7 +85,7 @@ export interface LearningGraphProjectionStats {
     truncationReasons: LearningGraphTruncationReason[];
 }
 
-/** A bounded, renderer-ready read model reconstructed from M2 + M3 facts. */
+/** 根据 M2 + M3 事实重建的有界、可直接渲染只读模型。 */
 export interface LearningGraphProjection {
     nodes: LearningGraphNode[];
     edges: LearningGraphEdge[];
@@ -96,8 +96,8 @@ export interface LearningGraphProjection {
 }
 
 /**
- * Unbounded semantic catalog for domain computation only. Unlike a renderer
- * projection, it contains no layout data, structural nodes, or candidates.
+ * 仅供领域计算使用的无渲染预算语义目录。
+ * 与渲染投影不同，其中不包含布局数据、结构节点或候选关系。
  */
 export interface LearningGraphConceptCatalogEntry {
     id: string;
@@ -105,9 +105,9 @@ export interface LearningGraphConceptCatalogEntry {
     aliases: string[];
     sourcePaths: string[];
     /**
-     * Exact index provenance for safe Exam → Concept and Assessment → Concept
-     * binding. It is not a renderer concern and must never be inferred from
-     * labels, embeddings, or graph neighbourhoods.
+     * 用于安全执行 Exam → Concept 和 Assessment → Concept 绑定的精确索引来源。
+     *
+     * 该信息不属于渲染职责，严禁根据标签、embedding 或图邻域推断。
      */
     sourceChunkIds: string[];
 }

@@ -19,6 +19,7 @@ import {
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
+/** 运行时访问 Obsidian 和插件 UI 的最小宿主边界。 */
 export interface VaultCoachRuntimeHost {
     app: App;
     pluginId: string;
@@ -34,11 +35,10 @@ interface IndexOperation {
 }
 
 /**
- * Owns the application services and all non-UI runtime state.
+ * 管理应用服务及全部非 UI 运行时状态。
  *
- * This class deliberately does not know about WorkspaceLeaf, ItemView, plugin
- * registration, or Settings UI. The plugin lifecycle forwards vault events and
- * supplies the small Obsidian notification/refresh adapters through its host.
+ * 本类不感知 `WorkspaceLeaf`、`ItemView`、插件注册或设置界面。
+ * 插件生命周期负责转发 Vault 事件，并通过 host 提供最小化的 Obsidian 通知与刷新适配器。
  */
 export class VaultCoachRuntime {
     private applicationContainer!: ApplicationContainer;

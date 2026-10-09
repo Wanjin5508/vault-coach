@@ -40,18 +40,17 @@ type ApplicationDelegatedMethod =
     | "deleteExamHistory";
 
 /**
- * Host capabilities that remain Obsidian-bound while the old presentation API
- * is still in use. Index operations with a Notice retain their existing host
- * implementation until a notification port is introduced.
+ * 旧展示 API 使用期间仍与 Obsidian 绑定的宿主能力。
+ *
+ * 在通知端口建立前，包含 Notice 的索引操作继续使用现有宿主实现。
  */
 export type LegacyPluginApiHost = Omit<VaultCoachPluginApi, ApplicationDelegatedMethod>;
 
 /**
- * Preserves the flat presentation API during the controller migration.
+ * Controller 迁移期间保留扁平展示 API。
  *
- * New use-case calls delegate to the grouped application facade. The remaining
- * host callbacks are UI or Obsidian lifecycle concerns and will move out of the
- * plugin in the later composition-root step.
+ * 新用例调用委派给分组后的应用门面。其余宿主回调属于 UI 或 Obsidian 生命周期职责，
+ * 将在后续组合根重构中移出插件入口。
  */
 export class LegacyPluginApiAdapter implements VaultCoachPluginApi {
     constructor(

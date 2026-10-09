@@ -11,9 +11,10 @@ export interface ConceptSimilarityHit {
 }
 
 /**
- * A concept-only similarity port. It is deliberately separate from the RAG
- * chunk store because semantic concepts need bounded approximate neighbour
- * lookup, never an unrestricted all-pairs comparison.
+ * 仅面向 Concept 的相似度端口。
+ *
+ * 该端口与 RAG chunk 存储分离，因为语义概念只允许有界近邻查询，
+ * 不能执行不受限制的全量两两比较。
  */
 export interface ConceptSimilarityIndex {
     upsert(items: readonly ConceptEmbeddingRecord[]): Promise<void>;
@@ -30,11 +31,10 @@ interface IndexedConceptVector {
 }
 
 /**
- * Browser-safe locality-sensitive hashing index.
+ * 浏览器安全的局部敏感哈希索引。
  *
- * This is an approximate nearest-neighbour implementation: each query scores
- * only records in a small number of deterministic signature buckets. Empty
- * buckets return no hit; there is intentionally no exact full-index fallback.
+ * 这是近似最近邻实现：每次查询只对少量确定性签名桶中的记录评分。
+ * 空桶直接返回无结果，不提供精确全索引扫描作为降级路径。
  */
 export class BoundedLshConceptSimilarityIndex implements ConceptSimilarityIndex {
     private readonly records = new Map<string, IndexedConceptVector>();
@@ -76,8 +76,7 @@ export class BoundedLshConceptSimilarityIndex implements ConceptSimilarityIndex 
         for (const bucketKey of this.createBucketKeys(normalized)) {
             for (const conceptId of this.buckets.get(bucketKey) ?? []) {
                 candidateIds.add(conceptId);
-                // A hard ceiling prevents pathological common buckets from
-                // becoming an accidental full index scan.
+                // 硬上限防止异常公共桶退化为意外的全索引扫描。
                 if (candidateIds.size >= 512) break;
             }
             if (candidateIds.size >= 512) break;

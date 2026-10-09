@@ -3,15 +3,14 @@ import { getQuestionAnswerForm } from "./exam-question-policy";
 import { ExamEvaluationService } from "./exam-evaluation-service";
 import { ObjectiveExamEvaluationService } from "./objective-exam-evaluation-service";
 
-/** Common evaluation port used by the application layer. */
+/** 应用层使用的统一评估端口。 */
 export interface ExamEvaluator {
     evaluate(session: ExamSession, userAnswers: readonly string[], evaluator: ExamEvaluationMetadata): Promise<ExamEvaluation>;
 }
 
 /**
- * Preserves the existing model evaluator for every legacy/free-response-only
- * session. New objective questions are evaluated locally, then normalized back
- * into the exact same ExamEvaluation contract consumed by Assessment.
+ * 所有旧版或仅自由回答的会话继续使用现有模型评估器。
+ * 新客观题在本地评估后，必须归一化为 Assessment 当前消费的同一 `ExamEvaluation` 契约。
  */
 export class ExamEvaluationRouter implements ExamEvaluator {
     constructor(
@@ -31,7 +30,7 @@ export class ExamEvaluationRouter implements ExamEvaluator {
             else objectiveIndexes.push(index);
         });
 
-        // This exact path protects all existing free-response session behavior.
+        // 该精确分支用于保护全部既有自由回答会话行为，修改时必须先覆盖旧会话回归测试。
         if (objectiveIndexes.length === 0) {
             return this.freeResponseEvaluator.evaluate(session, userAnswers, evaluator);
         }

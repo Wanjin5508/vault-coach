@@ -1,6 +1,6 @@
 import type { KnowledgeIndexBusyPhase, KnowledgeIndexBusyState } from "./index-types";
 
-/** Owns the mutable state shared by rebuild, incremental sync, and cancellation. */
+/** 统一管理重建、增量同步和取消流程共享的可变状态。 */
 export class KnowledgeIndexCoordinator {
     private readonly onStateChanged: () => void;
     private textDirty = true;

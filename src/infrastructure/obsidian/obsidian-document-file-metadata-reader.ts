@@ -5,7 +5,7 @@ import type {
 } from "../../domain/documents/document-file-metadata-reader";
 
 /**
- * Obsidian-backed implementation of the live document metadata port.
+ * 基于 Obsidian 的实时文档元数据端口实现。
  */
 export class ObsidianDocumentFileMetadataReader implements DocumentFileMetadataReader {
     private readonly app: App;

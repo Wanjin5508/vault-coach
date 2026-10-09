@@ -31,6 +31,7 @@ import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/
 import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendation/recommendation-types";
 import type { KnowledgeEngineAvailability, KnowledgeEngineDiagnostics } from "./engine/knowledge-engine-types";
 
+/** 展示层使用的聊天门面；会话持久化和 RAG 编排由应用层完成。 */
 export interface ChatApplicationApi {
     getMessages(): readonly ChatMessage[];
     appendUserMessage(text: string): Promise<void>;
@@ -38,6 +39,7 @@ export interface ChatApplicationApi {
     resetConversation(): void;
 }
 
+/** 考试用例门面；调用方不能绕过它直接写历史记录或评估事实。 */
 export interface ExamApplicationApi {
     getScopeOptions(): ExamScopeOption[];
     getFileOptions(folderPaths: string[]): ExamFileOption[];
@@ -54,6 +56,7 @@ export interface ExamApplicationApi {
     deleteHistory(path: string): Promise<void>;
 }
 
+/** 知识索引的完整展示快照；脏状态与后台任务状态具有独立语义。 */
 export interface KnowledgeIndexViewState {
     textDirty: boolean;
     vectorDirty: boolean;
@@ -64,6 +67,7 @@ export interface KnowledgeIndexViewState {
     vectorStats: VectorIndexStats;
 }
 
+/** 索引生命周期门面；重建和清理的并发控制由应用层负责。 */
 export interface IndexApplicationApi {
     rebuild(signal?: AbortSignal): Promise<void>;
     clear(): Promise<void>;
@@ -72,7 +76,7 @@ export interface IndexApplicationApi {
     getStorageFootprint(): Promise<StorageFootprint>;
 }
 
-/** The only graph entry point available to future presentation code. */
+/** 展示层访问确定性知识图谱的唯一入口。 */
 export interface GraphApplicationApi {
     rebuild(signal?: AbortSignal): Promise<GraphSnapshotV1>;
     getSnapshot(): Promise<GraphSnapshotV1 | null>;
@@ -84,11 +88,11 @@ export interface GraphApplicationApi {
     checkIntegrity(): Promise<GraphIntegrityReport>;
 }
 
-/** Separate facade: M3 decisions never change M2 structural graph facts. */
+/** 独立的语义图门面；M3 用户决策不得修改 M2 结构图事实。 */
 export interface SemanticGraphApplicationApi {
     rebuild(signal?: AbortSignal): Promise<void>;
     clear(): Promise<void>;
-    /** Clears only user-authored semantic decisions; extracted facts and embeddings remain available. */
+    /** 仅清除用户创建的语义决策；已抽取事实和 embedding 继续保留。 */
     resetGovernanceDecisions(): Promise<void>;
     getGovernanceImpact(): SemanticGovernanceImpact;
     abort(): void;
@@ -106,13 +110,13 @@ export interface SemanticGraphApplicationApi {
     undoManualRelationRemoval(decisionId: string): Promise<void>;
 }
 
-/** Read-only M2 + M3 projection consumed by M4B and the Learning Map. */
+/** 供 M4B 和 Learning Map 使用的 M2 + M3 只读投影。 */
 export interface LearningGraphApplicationApi {
     getProjection(query?: LearningGraphQuery): Promise<LearningGraphProjection>;
     getConceptCatalog(): Promise<LearningGraphConceptCatalog>;
 }
 
-/** M4B exposes derived mastery facts without coupling a future UI to storage. */
+/** 暴露 M4B 派生掌握度事实，避免展示层依赖具体存储实现。 */
 export interface MasteryApplicationApi {
     getState(): MasteryStateView;
     getSnapshot(): MasterySnapshotV1 | null;
@@ -122,8 +126,8 @@ export interface MasteryApplicationApi {
 }
 
 /**
- * Read-only dashboard contract. L5.1 supplies aggregated facts only; M5 UI
- * work remains in presentation and M7 owns recommendations.
+ * Dashboard 只读契约。L5.1 仅提供聚合事实；M5 的界面实现留在展示层，
+ * 推荐策略由 M7 负责。
  */
 export interface ProgressApplicationApi {
     isAvailable(): boolean;
@@ -132,9 +136,8 @@ export interface ProgressApplicationApi {
 }
 
 /**
- * M7 recommendation facade. It exposes disposable recommendations and the
- * small durable action log separately, so presentation never writes storage
- * files or changes mastery/graph facts directly.
+ * M7 推荐门面。一次性推荐与小型持久化操作日志通过不同接口暴露，
+ * 确保展示层不直接写存储文件，也不直接修改掌握度或图事实。
  */
 export interface RecommendationApplicationApi {
     isAvailable(): boolean;
@@ -144,9 +147,8 @@ export interface RecommendationApplicationApi {
 }
 
 /**
- * Read-only Engine seam. VC-L8 exposes diagnostics without making any
- * service a prerequisite for Lite workflows or allowing presentation to call
- * an arbitrary URL.
+ * Engine 只读接缝。VC-L8 暴露诊断信息，但不能让任何外部服务成为 Lite 流程的前置条件，
+ * 也不能允许展示层调用任意 URL。
  */
 export interface KnowledgeEngineApplicationApi {
     getAvailability(): KnowledgeEngineAvailability;
@@ -154,6 +156,10 @@ export interface KnowledgeEngineApplicationApi {
     refresh(signal?: AbortSignal): Promise<KnowledgeEngineAvailability>;
 }
 
+/**
+ * 展示层的应用入口。按用例分组的子门面是稳定依赖边界，
+ * UI 不应通过类型断言访问容器内的具体服务或基础设施实现。
+ */
 export interface VaultCoachApplicationApi {
     chat: ChatApplicationApi;
     exam: ExamApplicationApi;

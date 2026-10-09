@@ -2,7 +2,7 @@ import type { TranslationKey } from "../../i18n";
 
 export type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
-/** Renders the shared assistant-thinking indicator without owning interaction state. */
+/** 渲染共享的助手思考指示器，但不持有交互状态。 */
 export function renderThinkingIndicator(containerEl: HTMLDivElement, t: TranslateFn): void {
     containerEl.empty();
     containerEl.addClass("vault-coach-thinking-bubble");

@@ -10,7 +10,7 @@ import { SemanticGraphIntegrityService } from "../../domain/semantic-graph/seman
 import { SEMANTIC_GRAPH_SCHEMA_VERSION, type SemanticGraphState } from "../../domain/semantic-graph/semantic-graph-types";
 import type { SemanticGraphStore } from "../../domain/semantic-graph/semantic-graph-store";
 
-/** Minimal vault adapter needed for recoverable, shard-based semantic graph persistence. */
+/** 可恢复、分片式语义图持久化所需的最小 Vault 适配器接口。 */
 export interface SemanticGraphStorageAdapter {
     exists(path: string): Promise<boolean>;
     read(path: string): Promise<string>;
@@ -18,7 +18,7 @@ export interface SemanticGraphStorageAdapter {
     mkdir(path: string): Promise<void>;
     rename(oldPath: string, newPath: string): Promise<void>;
     remove(path: string): Promise<void>;
-    /** Present on Obsidian's vault adapter; optional for legacy/test adapters. */
+    /** Obsidian Vault 适配器提供该能力；旧版和测试适配器可以不实现。 */
     readBinary?(path: string): Promise<ArrayBuffer>;
     writeBinary?(path: string, data: ArrayBuffer): Promise<void>;
     list?(path: string): Promise<{ files: string[]; folders: string[] }>;
@@ -58,8 +58,9 @@ interface EmbeddingsShard {
 }
 
 /**
- * Persists semantic facts in independently replaceable JSON shards. The manifest
- * is committed last, so an interrupted update retains the previous coherent set.
+ * 将语义事实持久化为可独立替换的 JSON 分片。
+ *
+ * manifest 最后提交，确保更新中断时仍保留上一组一致数据。
  */
 export class JsonSemanticGraphStore implements SemanticGraphStore {
     private readonly integrity = new SemanticGraphIntegrityService();
@@ -299,10 +300,8 @@ export class JsonSemanticGraphStore implements SemanticGraphStore {
             embedding.modelSignature,
             embedding.inputHash,
             embedding.updatedAt,
-            // The vector itself is part of the content address.  An input hash
-            // normally changes before an embedding changes, but including the
-            // payload prevents a changed model response from overwriting a
-            // binary shard still referenced by the previous manifest.
+            // 向量本身参与内容寻址。通常输入哈希会在 embedding 变化前改变，但将向量载荷纳入地址，
+            // 可防止变化后的模型响应覆盖仍被旧 manifest 引用的二进制分片。
             stableSemanticHash(embedding.vector.join(",")),
         ]).join("\u0000"));
         const binaryPath = this.resolve(`embeddings/vectors-${fingerprint}.bin`);
@@ -325,7 +324,7 @@ export class JsonSemanticGraphStore implements SemanticGraphStore {
         return binaryPath;
     }
 
-    /** Removes recognisable, unreferenced semantic shards after successful writes or clear. */
+    /** 在写入成功或清理后，删除可识别且未被引用的语义分片。 */
     private async collectGarbage(manifest: SemanticGraphManifestV1 | null): Promise<void> {
         if (!this.adapter.list) return;
         const retained = new Set<string>([

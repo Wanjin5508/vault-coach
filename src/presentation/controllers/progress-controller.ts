@@ -2,15 +2,15 @@ import type { ProgressApplicationApi } from "../../app/application-api";
 import type { ProgressSnapshot, ProgressStateView } from "../../app/progress/progress-types";
 
 /**
- * Stable presentation boundary for the Progress workspace.
+ * Progress 工作区的稳定展示边界。
  *
- * The controller forwards the grouped Application facade only. It never knows
- * how a snapshot is persisted, calculated, or rendered as DOM.
+ * Controller 只转发分组后的 Application 门面，不感知快照如何持久化、计算或渲染为 DOM。
  */
 export interface ProgressViewState extends ProgressStateView {
     available: boolean;
 }
 
+/** Progress View 的薄适配器，只组合展示状态，不缓存或修改进度事实。 */
 export class ProgressController {
     constructor(private readonly api: ProgressApplicationApi) {}
 
@@ -30,7 +30,6 @@ export class ProgressController {
     }
 
     dispose(): void {
-        // The current controller owns no subscription. Keep this lifecycle seam
-        // so a future View-specific subscription can be released centrally.
+        // 当前 Controller 不持有订阅。保留该生命周期接缝，便于未来集中释放 View 专属订阅。
     }
 }

@@ -9,8 +9,9 @@ import type {
 import { isObjectiveQuestion } from "./exam-question-policy";
 
 /**
- * Scores only questions with an explicit answer key. It deliberately performs
- * no model request, so simple-mode results remain reproducible and auditable.
+ * 只评估具有显式答案键的问题。
+ *
+ * 该服务不发起模型请求，确保简单模式结果可复现、可审计。
  */
 export class ObjectiveExamEvaluationService {
     evaluate(

@@ -18,7 +18,7 @@ import { stableGraphHash } from "../../domain/graph/graph-id";
 import type { MasterySnapshotV1, MasteryStateView } from "../../domain/mastery/mastery-types";
 import type { LearningGraphConceptCatalog } from "../../domain/learning-graph/learning-graph-types";
 
-/** Narrow read-only contracts keep this coordinator independent from UI and storage details. */
+/** 窄化的只读契约使该协调器不依赖 UI 和具体存储实现。 */
 export interface AdaptiveExamPlannerDependencies {
     learningGraph: {
         getConceptCatalog(): LearningGraphConceptCatalog;
@@ -39,8 +39,9 @@ interface AssessmentCoverage {
 }
 
 /**
- * Application coordinator for L6 adaptive planning. It only composes current
- * read models; target ranking remains in the pure domain planner.
+ * L6 自适应规划的应用层协调器。
+ *
+ * 本类只组合当前只读模型；目标排序继续由纯领域规划器负责。
  */
 export class AdaptiveExamPlanner {
     constructor(private readonly dependencies: AdaptiveExamPlannerDependencies) {}
@@ -69,9 +70,9 @@ export class AdaptiveExamPlanner {
     }
 
     /**
-     * Checks only facts that invalidate a visible plan.  It deliberately does
-     * not compare planning time, so waiting on the setup screen does not make
-     * a plan stale by itself.
+     * 只检查会使当前可见方案失效的事实。
+     *
+     * 不比较规划时间，用户停留在设置页本身不会导致方案过期。
      */
     async isCurrent(context: AdaptiveExamGenerationContext, request: AdaptiveExamPlanRequest): Promise<boolean> {
         if (context.algorithmVersion !== ADAPTIVE_EXAM_ALGORITHM_VERSION

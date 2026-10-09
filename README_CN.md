@@ -268,6 +268,8 @@ Vault Coach 没有隐藏遥测。它将工作数据保存在当前 Vault 的 `.v
 
 欢迎提交 Issue 和 PR。反馈问题时，请提供复现步骤、Obsidian 与插件版本、模型服务/模型名称、已脱敏的相关设置，以及控制台报错或截图。
 
+修改源码注释前，请阅读[代码注释规范](./docs/code-commenting-guidelines.md)。说明性注释统一使用中文，重点记录职责、不变量、失败行为、兼容原因和架构边界；标识符及标准 API 名称保留原文。
+
 ## 许可证
 
 [MIT License](./LICENSE)

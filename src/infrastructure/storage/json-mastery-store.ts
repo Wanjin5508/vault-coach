@@ -11,7 +11,7 @@ import {
     type MasteryStore,
 } from "../../domain/mastery/mastery-types";
 
-/** Minimal Obsidian Vault adapter surface used by the derived Mastery cache. */
+/** 派生 Mastery 缓存使用的最小 Obsidian Vault 适配器接口。 */
 export interface MasteryStorageAdapter {
     exists(path: string): Promise<boolean>;
     read(path: string): Promise<string>;
@@ -22,9 +22,10 @@ export interface MasteryStorageAdapter {
 }
 
 /**
- * Persists a disposable, versioned cache. Assessment Session JSON remains the
- * source of truth, but the same staged-write protocol keeps a crash from
- * leaving an invalid cache that obscures a later rebuild.
+ * 持久化可重建、带版本的缓存。
+ *
+ * Assessment Session JSON 仍是事实来源；分阶段写入协议用于防止崩溃留下无效缓存，
+ * 避免后续重建被错误状态阻断。
  */
 export class JsonMasteryStore implements MasteryStore {
     private readonly integrity = new MasteryIntegrityService();

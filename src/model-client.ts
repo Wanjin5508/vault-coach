@@ -232,7 +232,6 @@ export class LocalModelClient {
 
         try {
             const content: string = await this.chat({
-                // model: settings.chatModel,
                 messages: [
                     {role: "system", content: systemPrompt},
                     {role: "user", content: userPrompt},
@@ -370,7 +369,6 @@ export class LocalModelClient {
 
         try {
             const content: string = await this.chat({
-                // model: settings.chatModel,
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt },
@@ -404,9 +402,7 @@ export class LocalModelClient {
      * 约定：返回值始终为 Markdown 文本。
      */
     async generateMarkdownAnswer(messages: LocalChatMessage[], temperature: number): Promise<string> {
-        // const settings: VaultCoachSettings = this.getSettings();
         return this.chat({
-            // model: settings.chatModel,
             messages,
             temperature,
         });
@@ -833,9 +829,9 @@ export class LocalModelClient {
      *
      * 这里采用常见的 /v1/rerank 风格：
      * {
-     *   model: string,
-     *   query: string,
-     *   documents: string[]
+     *   model: string,       // 重排模型名
+     *   query: string,       // 查询文本
+     *   documents: string[] // 候选文档文本
      * }
      */
     async rerankDocuments(query: string, documents: string[]): Promise<RerankResultItem[]> {
@@ -1001,7 +997,7 @@ export class LocalModelClient {
         abortSignal?: AbortSignal,
     ): Promise<Response> {
         try {
-            // requestUrl returns a buffered response; fetch is required here so the UI can receive tokens as they arrive.
+            // `requestUrl` 会缓冲完整响应体；流式场景必须使用 `fetch`，使 UI 能按到达顺序接收 token。
             const response: Response = await window.fetch(targetUrl, {
                 method: "POST",
                 body: JSON.stringify(payload),

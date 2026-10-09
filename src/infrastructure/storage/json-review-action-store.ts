@@ -1,6 +1,7 @@
 import { REVIEW_ACTIONS_PATH, RECOMMENDATIONS_DIR_PATH, VAULT_COACH_HIDDEN_DIR_PATH } from "../../constants";
 import { REVIEW_ACTIONS_SCHEMA_VERSION, type ReviewActionEvent, type ReviewActionStore, type ReviewActionsDocumentV1 } from "../../domain/recommendation/recommendation-types";
 
+/** 建议操作日志所需的最小 Vault 文件适配器。 */
 export interface ReviewActionStorageAdapter {
     exists(path: string): Promise<boolean>;
     read(path: string): Promise<string>;
@@ -8,7 +9,7 @@ export interface ReviewActionStorageAdapter {
     mkdir(path: string): Promise<void>;
 }
 
-/** Small append-only local fact store. Recommendation snapshots are never stored here. */
+/** 小型只追加本地事实存储；推荐快照不得保存在此处。 */
 export class JsonReviewActionStore implements ReviewActionStore {
     constructor(private readonly adapter: ReviewActionStorageAdapter) {}
 

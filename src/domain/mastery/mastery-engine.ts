@@ -14,7 +14,7 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Pure, deterministic M4B calculator. It has no storage, model, or UI dependency. */
+/** 纯函数、确定性的 M4B 计算器，不依赖存储、模型或 UI。 */
 export class MasteryEngine {
     private readonly resolver = new MasteryBindingResolver();
 
@@ -43,9 +43,8 @@ export class MasteryEngine {
     }
 
     /**
-     * Returns the exact same active-evidence set used by both calculation paths.
-     * The application service uses it to refresh snapshot metadata without
-     * recalculating unrelated Concept states.
+     * 返回两条计算路径共同使用的同一活动证据集合。
+     * 应用服务据此刷新快照元数据，而无需重算无关 Concept 状态。
      */
     analyze(input: Pick<MasteryCalculationInput, "assessments" | "catalog">): MasteryAssessmentAnalysis {
         const activeAssessments = selectActiveAssessments(input.assessments);

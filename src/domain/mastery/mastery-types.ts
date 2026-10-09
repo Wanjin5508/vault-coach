@@ -3,8 +3,8 @@ import type { AssessmentErrorCode, ExamDifficulty } from "../exam/exam-types";
 import type { LearningGraphConceptCatalog, LearningGraphConceptCatalogEntry } from "../learning-graph/learning-graph-types";
 
 export const MASTERY_SNAPSHOT_SCHEMA_VERSION = 1 as const;
-// v2 adds exact source-chunk provenance for legacy provisional Exam topics.
-// Existing v1 snapshots must be rebuilt instead of being shown as current.
+// v2 为旧版临时 Exam 主题增加精确来源 chunk 记录。
+// 现有 v1 快照必须重建，不能作为当前数据展示。
 export const MASTERY_ALGORITHM_VERSION = "mastery/v2";
 
 export type MasteryLevel = "unknown" | "weak" | "developing" | "proficient" | "mastered";
@@ -30,7 +30,7 @@ export const DEFAULT_MASTERY_ALGORITHM: MasteryAlgorithmConfig = {
     trendDeltaThreshold: 0.1,
 };
 
-/** One Assessment Event plus the binding facts stored in its Session JSON. */
+/** 一个 Assessment Event 及其 Session JSON 中保存的绑定事实。 */
 export interface MasteryAssessmentInput {
     event: AssessmentEvent;
     conceptBindings: readonly AssessmentConceptBinding[];
@@ -55,6 +55,10 @@ export interface MasteryBindingIssue {
     candidateConceptIds?: string[];
 }
 
+/**
+ * 单个有效 Concept 的可重建掌握度状态。
+ * `masteryScore: null` 表示没有足够证据，不能按 0 分展示；所有概率和置信度字段范围为 0 到 1。
+ */
 export interface ConceptMasteryState {
     conceptId: string;
     masteryScore: number | null;
@@ -63,7 +67,7 @@ export interface ConceptMasteryState {
     assessmentCount: number;
     effectiveEvidenceCount: number;
     lastAssessedAt: number | null;
-    /** No manual-review event exists before M7, so this must remain null. */
+    /** M7 之前不存在人工复核事件，因此该字段必须保持 `null`。 */
     lastReviewedAt: null;
     nextReviewAt: number | null;
     commonErrorCodes: AssessmentErrorCode[];
@@ -73,7 +77,7 @@ export interface ConceptMasteryState {
     algorithmVersion: string;
 }
 
-/** Rebuildable local cache, never a replacement for Assessment Session JSON. */
+/** 可重建本地缓存，不得替代 Assessment Session JSON 事实来源。 */
 export interface MasterySnapshotV1 {
     schemaVersion: typeof MASTERY_SNAPSHOT_SCHEMA_VERSION;
     algorithmVersion: string;
@@ -96,7 +100,7 @@ export interface MasteryCalculationResult {
     unboundIssues: MasteryBindingIssue[];
 }
 
-/** Intermediate deterministic facts shared by a full and an incremental calculation. */
+/** 全量计算和增量计算共享的确定性中间事实。 */
 export interface MasteryAssessmentAnalysis {
     activeAssessments: MasteryAssessmentInput[];
     resolvedEvidence: Array<{
@@ -107,6 +111,7 @@ export interface MasteryAssessmentAnalysis {
     unboundIssues: MasteryBindingIssue[];
 }
 
+/** 应用层可观察的掌握度缓存状态，不包含完整证据明细。 */
 export interface MasteryStateView {
     hasSnapshot: boolean;
     dirty: boolean;
@@ -118,12 +123,14 @@ export interface MasteryStateView {
     unboundIssueCount: number;
 }
 
+/** 可重建掌握度快照的持久化端口；Assessment Session 仍是事实来源。 */
 export interface MasteryStore {
     load(): Promise<MasterySnapshotV1 | null>;
     save(snapshot: MasterySnapshotV1): Promise<void>;
     clear(): Promise<void>;
 }
 
+/** 掌握度计算对当前有效概念目录的只读端口。 */
 export interface MasteryConceptCatalogReader {
     getConceptCatalog(): LearningGraphConceptCatalog;
 }

@@ -15,8 +15,8 @@ import { ConceptReviewController } from "../controllers/concept-review-controlle
 import { requestSemanticGraphCapacityDecision } from "../modals/semantic-graph-capacity-modal";
 
 /**
- * Main-workspace review surface. It renders at most one local projection and
- * never reads JSON shards, model clients, or Obsidian metadata directly.
+ * 主工作区审查界面。一次最多渲染一个局部投影，
+ * 不得直接读取 JSON 分片、模型客户端或 Obsidian 元数据。
  */
 export class ConceptReviewView extends ItemView {
     private readonly controller: ConceptReviewController;
@@ -27,7 +27,7 @@ export class ConceptReviewView extends ItemView {
     private isDisposed = false;
     private forceGraph: ConceptForceGraph | null = null;
     private inspectorEl: HTMLElement | null = null;
-    /** Covers the synchronous gap before application events refresh this View. */
+    /** 覆盖应用事件刷新 View 前的同步时间窗口。 */
     private semanticRebuildInFlight = false;
 
     constructor(leaf: WorkspaceLeaf, application: VaultCoachApplicationApi) {
@@ -177,10 +177,8 @@ export class ConceptReviewView extends ItemView {
                 else this.selectedConceptIds.add(conceptId);
                 this.selectedCandidateFingerprint = null;
                 this.selectedRelationId = null;
-                // Clicking is selection, not navigation. Rebuilding a local
-                // projection here reset pan/zoom and made the graph appear to
-                // jump. Neighbourhood navigation is now an explicit action in
-                // the inspector.
+                // 点击只表示选择，不表示导航。在此重建局部投影会重置平移和缩放并造成图跳动；
+                // 邻域导航因此改为检查器中的显式动作。
                 this.forceGraph?.setSelectedConceptIds(this.selectedConceptIds);
                 this.refreshInspector();
             },

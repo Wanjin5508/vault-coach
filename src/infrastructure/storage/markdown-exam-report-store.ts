@@ -12,13 +12,13 @@ import {
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
-/** Parsed Markdown history with an optional ID for cross-source deduplication. */
+/** 已解析的 Markdown 历史记录；可选 ID 用于跨来源去重。 */
 export interface MarkdownExamHistoryRecord {
     item: ExamHistoryItem;
     sessionId: string | null;
 }
 
-/** Minimal Vault-adapter surface required by Markdown exam reports. */
+/** Markdown 考试报告所需的最小 Vault 适配器接口。 */
 export interface MarkdownExamReportStorageAdapter {
     exists(path: string): Promise<boolean>;
     read(path: string): Promise<string>;
@@ -30,9 +30,9 @@ export interface MarkdownExamReportStorageAdapter {
 }
 
 /**
- * Stores only the readable Markdown representation of an exam. It has no
- * dependency on the JSON facts store, so deleting a report can never delete
- * assessment events or concept bindings.
+ * 只存储考试的可读 Markdown 表示。
+ *
+ * 本存储不依赖 JSON 事实存储，因此删除报告绝不能删除 Assessment 事件或 Concept 绑定。
  */
 export class MarkdownExamReportStore {
     constructor(
@@ -40,7 +40,7 @@ export class MarkdownExamReportStore {
         private readonly t: TranslateFn,
     ) {}
 
-    /** Prepares the stable report path without performing any I/O. */
+    /** 生成稳定报告路径，不执行任何 I/O。 */
     prepareSessionForSave(session: ExamSession): ExamSession {
         return {
             ...session,
@@ -49,7 +49,7 @@ export class MarkdownExamReportStore {
         };
     }
 
-    /** Saves the legacy Markdown report format used by the current application. */
+    /** 保存当前应用仍使用的旧版 Markdown 报告格式。 */
     async save(session: ExamSession): Promise<ExamSession> {
         await this.ensureResultsDirectory();
 
@@ -60,9 +60,8 @@ export class MarkdownExamReportStore {
     }
 
     /**
-     * Creates or refreshes a Markdown projection from an immutable Assessment
-     * Session document. Callers still own persistence of the returned path in
-     * the JSON source of truth.
+     * 根据不可变 Assessment Session 文档创建或刷新 Markdown 投影。
+     * 返回路径仍由调用方负责写回 JSON 事实来源。
      */
     async writeAssessmentProjection(
         document: AssessmentSessionDocumentV1,
@@ -132,7 +131,7 @@ export class MarkdownExamReportStore {
         return this.adapter.read(normalizedPath);
     }
 
-    /** Reads an existing projection or rebuilds it solely from structured facts. */
+    /** 读取现有投影；不存在时仅根据结构化事实重建。 */
     async readOrCreateAssessmentProjection(
         document: AssessmentSessionDocumentV1,
         assessmentSessionPath: string,

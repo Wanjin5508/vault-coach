@@ -15,14 +15,16 @@ import type {
 } from "../../domain/index-lifecycle/storage-footprint";
 import type { VaultCoachPersistentStore } from "../../persistent-store";
 
+/** 磁盘占用报告所需的只读 Vault 适配器。 */
 export interface StorageFootprintAdapter {
     stat(path: string): Promise<Stat | null>;
     list(path: string): Promise<ListedFiles>;
 }
 
 /**
- * Counts only known VaultCoach data roots. It is deliberately read-only and
- * never walks a user's arbitrary Vault folder.
+ * 只统计已知 Vault Coach 数据根目录。
+ *
+ * 本报告器严格只读，不遍历用户 Vault 中的任意其他目录。
  */
 export class StorageFootprintReporter {
     constructor(
@@ -88,8 +90,7 @@ export class StorageFootprintReporter {
         try {
             listing = await this.adapter.list(path);
         } catch {
-            // A concurrent vault change should make this diagnostic incomplete,
-            // never make it mutate data or fail the rest of the plugin.
+            // 并发 Vault 变更最多使本次诊断不完整，不能导致数据修改或使插件其他功能失败。
             return;
         }
         for (const file of listing.files) await this.collectPath(normalizePath(file), files);

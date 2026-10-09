@@ -122,9 +122,9 @@ export interface ExamGenerationProgress {
 
 export interface ExamGenerationOptions {
     analysis?: ExamScopeAnalysisResult;
-    /** The user-facing generation policy for the session being created. */
+    /** 当前创建会话面向用户的生成策略。 */
     examMode?: ExamMode;
-    /** A verified, disposable target plan. Undefined preserves the legacy scope-only flow. */
+    /** 已验证、可重建的目标方案；`undefined` 表示保留旧版仅范围流程。 */
     adaptivePlan?: AdaptiveExamGenerationContext;
     forceProfileRefresh?: boolean;
     skipSemanticFiltering?: boolean;
@@ -140,7 +140,7 @@ export interface GeneratedExamQuestionCandidate {
     rubric: string;
     sourceChunkIds: string[];
     evidenceExcerptIds: string[];
-    /** Candidate UI/answer contract. Kept optional for legacy generator fixtures. */
+    /** 候选项的 UI/答案契约；为兼容旧生成器 fixture 保持可选。 */
     answerForm?: ExamAnswerForm;
     options?: ExamChoiceOption[];
     correctOptionId?: string;
@@ -186,12 +186,12 @@ export interface ExamBlueprintItem {
     learningObjective: string;
     questionType: ExamQuestionType;
     difficulty: ExamDifficulty;
-    /** Separate from cognitive questionType: determines how the learner answers. */
-    /** Undefined is a legacy free-response blueprint item. */
+    /** 与认知层 `questionType` 分离，用于决定学习者的作答方式。 */
+    /** `undefined` 表示旧版自由回答蓝图项。 */
     answerForm?: ExamAnswerForm;
-    /** A short, auditable planner explanation used only during generation diagnostics. */
+    /** 简短、可审计的规划说明，仅用于生成诊断。 */
     selectionRationale?: string;
-    /** Effective Concepts selected by an accepted adaptive plan for this item. */
+    /** 已接受自适应方案为该题选择的有效 Concept。 */
     plannedTargetConceptIds?: string[];
     sourceChunkIds: string[];
 }
@@ -207,29 +207,29 @@ export type ExamQuestionType = "explanation" | "comparison" | "application" | "r
 
 export type ExamDifficulty = "basic" | "intermediate" | "advanced";
 
-/** A session-level experience policy. Do not confuse this with per-item ExamDifficulty. */
+/** 会话级体验策略，不得与单题 `ExamDifficulty` 混淆。 */
 export type ExamMode = "simple" | "challenge";
 
-/** The response UI and evaluation route for a generated question. */
+/** 已生成问题的作答 UI 与评估路径。 */
 export type ExamAnswerForm = "single-choice" | "true-false" | "free-response";
 
-/** A stable option identifier is persisted instead of a display index or translated label. */
+/** 持久化稳定选项标识，而不是展示序号或翻译后的标签。 */
 export interface ExamChoiceOption {
     id: string;
     text: string;
 }
 
-/** Identifies the model and prompt contract used to produce a domain value. */
+/** 标识生成领域值时使用的模型和提示词契约。 */
 export interface ModelPromptMetadata {
     modelProvider: string;
     modelName: string;
     promptVersion: string;
 }
 
-/** Identifies the model and prompt contract used for a completed evaluation. */
+/** 标识完成评估时使用的模型和提示词契约。 */
 export interface ExamEvaluationMetadata extends ModelPromptMetadata {
     evaluatedAt: number;
-    /** Existing sessions are model-scored; objective questions declare deterministic scoring explicitly. */
+    /** 既有会话由模型评分；客观题必须显式声明确定性评分。 */
     evaluatorKind?: "model" | "deterministic";
 }
 
@@ -253,17 +253,17 @@ export interface ExamQuestion {
     rubric: string;
     questionType: ExamQuestionType;
     difficulty: ExamDifficulty;
-    /** Undefined on legacy records and therefore interpreted as free-response. */
+    /** 旧记录中为 `undefined`，因此按自由回答解释。 */
     answerForm?: ExamAnswerForm;
-    /** Present exactly for objective questions. */
+    /** 仅客观题必须存在。 */
     options?: ExamChoiceOption[];
-    /** Present exactly for objective questions; never rendered in the taking UI. */
+    /** 仅客观题必须存在，且不得在作答界面中渲染。 */
     correctOptionId?: string;
     sourceChunkIds: string[];
     evidenceExcerptIds: string[];
     sourcePaths: string[];
     conceptIds: string[];
-    /** Subset of conceptIds explicitly selected by the adaptive plan, if any. */
+    /** 自适应方案显式选择的 `conceptIds` 子集；没有方案时为空。 */
     plannedTargetConceptIds?: string[];
     generationMetadata: ModelPromptMetadata & {
         generatedAt: number;
@@ -298,9 +298,9 @@ export interface ExamSession {
     selectedFolderPaths: string[];
     excludedFilePaths: string[];
     forceIncludedFilePaths: string[];
-    /** Undefined on legacy records; current UI treats those sessions as legacy free-response sessions. */
+    /** 旧记录中为 `undefined`；当前 UI 将此类会话作为旧版自由回答会话处理。 */
     examMode?: ExamMode;
-    /** Additive audit snapshot; raw graph/mastery facts remain in their own sources. */
+    /** 追加式审计快照；原始图和 Mastery 事实继续保留在各自事实来源中。 */
     adaptivePlan?: AdaptivePlanAuditSnapshot;
     scopeSnapshot?: ExamScopeSnapshot;
     analysisSummary?: ExamScopeAnalysisSummary;

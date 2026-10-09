@@ -6,11 +6,10 @@ import type {
 } from "./document-types";
 
 /**
- * Read-only access to the current document index.
+ * 当前文档索引的只读访问端口。
  *
- * Domain services depend on this port instead of the Obsidian-backed
- * VaultKnowledgeBase implementation. Index construction and persistence remain
- * outside this interface.
+ * 领域服务依赖该端口，而不是依赖由 Obsidian 支撑的 `VaultKnowledgeBase` 实现。
+ * 索引构建与持久化不属于本接口职责。
  */
 export interface DocumentIndexReader {
     isReady(): boolean;

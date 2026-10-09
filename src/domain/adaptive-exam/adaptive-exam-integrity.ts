@@ -1,3 +1,8 @@
+/**
+ * 自适应考试规划结果的纯完整性校验。
+ *
+ * 校验器收集全部可发现问题，不修改输入，也不替规划器修复数据；调用方决定是否阻止生成。
+ */
 import type {
     AdaptiveExamPlan,
     AdaptiveExamPlanningInput,
@@ -31,6 +36,7 @@ export function validateAdaptiveExamPlanningInput(input: AdaptiveExamPlanningInp
     return issues;
 }
 
+/** 校验计划的证据、数量和稳定排序不变量。 */
 export function validateAdaptiveExamPlan(plan: AdaptiveExamPlan): AdaptivePlanIssue[] {
     const issues: AdaptivePlanIssue[] = [];
     const targetIds = new Set<string>();

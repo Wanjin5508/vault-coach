@@ -18,6 +18,11 @@ export interface SemanticGraphIntegrityReport {
     issues: SemanticGraphIntegrityIssue[];
 }
 
+/**
+ * 语义图持久化前的只读完整性检查器。
+ *
+ * 检查器收集所有可发现问题且不修复状态；调用方必须把 `valid: false` 视为不可发布快照。
+ */
 export class SemanticGraphIntegrityService {
     check(state: SemanticGraphState): SemanticGraphIntegrityReport {
         const issues: SemanticGraphIntegrityIssue[] = [];
@@ -71,9 +76,8 @@ export class SemanticGraphIntegrityService {
         const redirects = new Map<string, string>();
         for (const decision of decisions) {
             if (decision.kind === "merge-concepts") {
-                // Decisions are an append-only user audit trail. A source can be
-                // removed later, so historical decisions may reference a concept
-                // that no longer has evidence; projection simply leaves it inactive.
+                // 决策是只追加的用户审计轨迹。来源可能随后被删除，因此历史决策可以引用
+                // 已无当前证据的 Concept；投影层应将其保留为非活动状态。
                 for (const mergedId of decision.mergedConceptIds) redirects.set(mergedId, decision.canonicalConceptId);
             }
             if (decision.kind === "undo-merge" && !mergeById.has(decision.supersedesDecisionId)) {

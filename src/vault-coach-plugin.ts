@@ -24,7 +24,7 @@ import { ConfirmActionModal } from "./presentation/modals/confirm-action-modal";
 import { StorageFootprintModal } from "./presentation/modals/storage-footprint-modal";
 import { requestSemanticGraphCapacityDecision } from "./presentation/modals/semantic-graph-capacity-modal";
 
-/** Obsidian composition root: lifecycle, UI registration, and thin host adapters only. */
+/** Obsidian 组合根：只负责生命周期、UI 注册和轻量宿主适配。 */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
     settings: VaultCoachSettings = DEFAULT_SETTINGS;
 
@@ -104,17 +104,17 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         workspace.setActiveLeaf(leaf, { focus: true });
     }
 
-    /** Opens Concept review in a normal workspace tab, never in the Ask/Exam sidebar. */
+    /** 在普通工作区标签页打开 Concept review，不占用 Ask/Exam 侧边栏。 */
     async activateConceptReviewView(): Promise<void> {
         await activateMainWorkspaceView(this.app.workspace, VIEW_TYPE_CONCEPT_REVIEW);
     }
 
-    /** Opens the read-only Learning Map in a normal workspace tab. */
+    /** 在普通工作区标签页打开只读 Learning Map。 */
     async activateLearningMapView(): Promise<void> {
         await activateMainWorkspaceView(this.app.workspace, VIEW_TYPE_LEARNING_MAP);
     }
 
-    /** Opens the Progress dashboard in a normal workspace tab. */
+    /** 在普通工作区标签页打开 Progress Dashboard。 */
     async activateProgressView(): Promise<void> {
         await activateMainWorkspaceView(this.app.workspace, VIEW_TYPE_PROGRESS);
     }
@@ -219,7 +219,7 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         await this.app.workspace.openLinkText(heading ? `${filePath}#${heading}` : filePath, activeFilePath, false);
     }
 
-    /** Bridges a Learning Map concept to the existing, user-editable Exam setup. */
+    /** 将 Learning Map Concept 桥接到现有且用户可编辑的 Exam 设置流程。 */
     private async startLearningMapSourceExam(sourcePaths: readonly string[]): Promise<void> {
         await this.activateView();
         const coachView = this.app.workspace.getLeavesOfType(VIEW_TYPE_VAULT_COACH)

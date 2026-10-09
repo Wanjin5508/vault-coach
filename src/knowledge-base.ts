@@ -55,9 +55,9 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
      * 轻量级倒排索引：token -> (chunkId -> termFrequency)
      *其中 tf（term frequency）表示该 token 在某个 chunk 中出现了多少次。
      * 例如：
-     * "rag" -> {
-     *   "fileA::heading::0" => 3,
-     *   "fileB::heading::2" => 1,
+     * "rag" -> { // 检索词元
+     *   "fileA::heading::0" => 3, // chunk ID 到词频
+     *   "fileB::heading::2" => 1, // chunk ID 到词频
      * }
      */
     private readonly invertedIndex: Map<string, Map<string, number>> = new Map<string, Map<string, number>>();
@@ -208,8 +208,8 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
     }
 
     /**
-     * Produces a lightweight current-Vault inventory without reading document
-     * contents. Runtime uses it before hydrating any persisted derived data.
+     * 在不读取文档正文的情况下生成当前 Vault 的轻量来源清单。
+     * Runtime 在恢复任何持久化派生数据前使用该清单判断缓存是否仍有效。
      */
     getSourceInventory(generatedAt: number = Date.now()): SourceInventoryV1 {
         return createSourceInventory(
@@ -716,7 +716,6 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
      * 将 chunk 写入倒排索引
      */
     private addChunkToIndex(chunk: IndexedChunk): void {
-        // this.chunks.push(chunk);
         this.chunkMap.set(chunk.id, chunk);
 
         const tokens: string[] = this.tokenize(chunk.searchableText);
@@ -1002,11 +1001,8 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
         const chineseSequences: RegExpMatchArray | null = normalizedText.match(/[\u4e00-\u9fff]+/g);
         if (chineseSequences) {
             for (const sequence of chineseSequences) {
-                // 单字 token
-                // for (let index = 0; index < sequence.length; index += 1) {
+                // 单字 token。
                 for (const char of sequence) {
-                    // TypeScript 报错的原因是：它不会把这种“循环边界保证索引合法”的事实精确推导到 sequence[index] 的类型里。
-                    // tokens.push(sequence[index]);
                     tokens.push(char)
                 }
 

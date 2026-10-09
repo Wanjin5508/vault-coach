@@ -1,4 +1,4 @@
-/** Read-only local disk accounting for VaultCoach-derived data. */
+/** Vault Coach 派生数据的只读本地磁盘统计。 */
 export type StorageFootprintCategory =
     | "text-index"
     | "vector-index"
@@ -15,7 +15,7 @@ export interface StorageFootprintEntry {
     bytes: number;
     fileCount: number;
     latestModifiedAt: number | null;
-    /** Domain records represented by this category when cheap to obtain. */
+    /** 在可低成本获取时，记录该类别对应的领域记录数。 */
     recordCount: number | null;
 }
 

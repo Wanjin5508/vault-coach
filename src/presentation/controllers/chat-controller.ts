@@ -24,6 +24,7 @@ export type ChatControllerEvent =
 
 export type ChatControllerListener = (event: ChatControllerEvent) => void | Promise<void>;
 
+/** 剪贴板写入端口，用于隔离浏览器 API 并支持控制器测试。 */
 export interface ClipboardPort {
     writeText(text: string): Promise<void>;
 }
@@ -31,7 +32,7 @@ export interface ClipboardPort {
 export type ChatTimerWindow = Pick<Window, "setInterval" | "clearInterval">;
 export type ChatTimerWindowProvider = () => ChatTimerWindow;
 
-/** Owns chat interaction state and exposes UI-neutral actions. */
+/** 管理聊天交互状态，并暴露与具体 UI 无关的动作。 */
 export class ChatController {
     private readonly listeners: Set<ChatControllerListener> = new Set();
     private state: ChatControllerState = {

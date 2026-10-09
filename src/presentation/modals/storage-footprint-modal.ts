@@ -10,7 +10,7 @@ export interface StorageFootprintModalOptions {
     t: TranslateFn;
 }
 
-/** Read-only view of only the VaultCoach-controlled derived-data roots. */
+/** 仅展示 Vault Coach 管理的派生数据根目录，且保持只读。 */
 export class StorageFootprintModal extends Modal {
     constructor(app: App, private readonly options: StorageFootprintModalOptions) {
         super(app);

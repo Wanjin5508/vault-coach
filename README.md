@@ -273,6 +273,8 @@ Treat `.vault-coach/` as private vault data. It can include note excerpts, filen
 
 Issues and pull requests are welcome. For a bug report, include reproduction steps, Obsidian and plugin versions, provider/model details, relevant non-secret settings, and console errors or screenshots.
 
+Before changing source comments, read the [code commenting guidelines](./docs/code-commenting-guidelines.md). Explanatory comments are written in Chinese and focus on responsibilities, invariants, failure behavior, compatibility, and architectural boundaries; identifiers and standard API names remain unchanged.
+
 ## License
 
 [MIT License](./LICENSE)

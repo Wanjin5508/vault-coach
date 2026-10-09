@@ -14,9 +14,9 @@ export type ProgressMasteryStatus = "current" | "stale" | "missing" | "calculati
 export type ProgressAssessmentStatus = "ready" | "unavailable";
 
 /**
- * Read-only summary of the effective Concept catalog. It deliberately contains
- * no renderer projection or graph-store facts, so a Dashboard cannot bypass
- * the Learning Graph query boundary.
+ * 有效 Concept 目录的只读摘要。
+ *
+ * 其中不包含渲染投影或图存储事实，防止 Dashboard 绕过 Learning Graph 查询边界。
  */
 export interface ProgressGraphSummary {
     status: ProgressGraphStatus;
@@ -25,9 +25,10 @@ export interface ProgressGraphSummary {
 }
 
 /**
- * A bounded, display-ready aggregation of a rebuildable Mastery snapshot.
- * coverageRatio remains null when a current effective catalog or Mastery
- * snapshot is unavailable; zero must not be used to fabricate a conclusion.
+ * 从可重建 Mastery 快照生成的有界、可直接展示的聚合结果。
+ *
+ * 当前有效目录或 Mastery 快照不可用时，`coverageRatio` 必须保持 `null`；
+ * 不得用 0 伪造负面结论。
  */
 export interface ProgressMasterySummary {
     status: ProgressMasteryStatus;
@@ -42,7 +43,7 @@ export interface ProgressMasterySummary {
     unboundIssueCount: number;
 }
 
-/** Summary based only on structured Assessment Session history. */
+/** 仅根据结构化 Assessment Session 历史生成的摘要。 */
 export interface ProgressAssessmentSummary {
     status: ProgressAssessmentStatus;
     message: string | null;
@@ -51,7 +52,7 @@ export interface ProgressAssessmentSummary {
     latestSessionAt: number | null;
 }
 
-/** A bounded display projection of an independently rebuildable recommendation. */
+/** 独立可重建推荐的有界展示投影。 */
 export interface ProgressRecommendationPreview {
     id: string;
     kind: RecommendationKind;
@@ -66,9 +67,10 @@ export interface ProgressRecommendationPreview {
 }
 
 /**
- * Cache freshness for the disposable Progress read model. This is separate
- * from Mastery freshness because an index, graph, or Assessment event can
- * invalidate the composed snapshot before it is read again.
+ * 可重建 Progress 只读模型的缓存新鲜度。
+ *
+ * 该状态与 Mastery 新鲜度分开管理，因为索引、图或 Assessment 事件都可能在下次读取前
+ * 使组合快照失效。
  */
 export interface ProgressStateView {
     hasSnapshot: boolean;
@@ -79,9 +81,9 @@ export interface ProgressStateView {
 }
 
 /**
- * One disposable read model for the future Progress Dashboard / Learning Map.
- * It is never persisted and cannot mutate a graph, mastery state, assessment,
- * or recommendation decision.
+ * 供 Progress Dashboard 和 Learning Map 使用的可重建只读模型。
+ *
+ * 该对象不持久化，也不能修改图、掌握度状态、Assessment 或推荐决策。
  */
 export interface ProgressSnapshot {
     schemaVersion: typeof PROGRESS_SNAPSHOT_SCHEMA_VERSION;

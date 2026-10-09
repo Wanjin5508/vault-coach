@@ -1,7 +1,7 @@
 import type { DocumentLocator } from "../documents/document-types";
 import type { GraphCapacityAssessment } from "../graph-capacity/graph-capacity-types";
 
-/** The persisted semantic graph schema is deliberately separate from M2 GraphSnapshotV1. */
+/** 持久化语义图 schema 与 M2 `GraphSnapshotV1` 明确分离。 */
 export const SEMANTIC_GRAPH_SCHEMA_VERSION = 1;
 export const SEMANTIC_EXTRACTION_SCHEMA_VERSION = "concept-extraction/v1";
 
@@ -33,7 +33,7 @@ export interface SemanticModelMetadata {
     generatedAt: number;
 }
 
-/** A model proposal remains attached to the Section that supplied its evidence. */
+/** 模型提议始终绑定到提供证据的 Section。 */
 export interface SectionConceptCandidate {
     id: string;
     name: string;
@@ -67,8 +67,8 @@ export interface SectionExtractionRecord {
 }
 
 /**
- * Concept IDs identify a source-backed notion, not an automatic claim that two
- * equally named notions are identical.  Merges are always decision-layer facts.
+ * Concept ID 标识一个有来源的概念，不代表名称相同的两个概念自动等同。
+ * 合并始终是决策层事实。
  */
 export interface SemanticConcept {
     id: string;
@@ -111,7 +111,7 @@ export interface RejectCandidateDecision {
     createdAt: number;
 }
 
-/** Reverses one confirmation or rejection without mutating the audit log. */
+/** 撤销一次确认或拒绝，但不修改既有审计日志。 */
 export interface UndoCandidateDecision {
     id: string;
     kind: "undo-candidate-decision";
@@ -161,7 +161,7 @@ export interface RemoveManualRelationDecision {
     createdAt: number;
 }
 
-/** Restores a user-created relation whose removal was previously recorded. */
+/** 恢复曾记录为已删除的用户创建关系。 */
 export interface UndoManualRelationRemovalDecision {
     id: string;
     kind: "undo-manual-relation-removal";
@@ -194,6 +194,10 @@ export interface SemanticEmbeddingRecord {
     updatedAt: number;
 }
 
+/**
+ * 语义图持久化状态。抽取事实、候选和用户决策保持分离，
+ * 投影时才应用确认、拒绝、合并和别名决策。
+ */
 export interface SemanticGraphState {
     schemaVersion: typeof SEMANTIC_GRAPH_SCHEMA_VERSION;
     extractions: SectionExtractionRecord[];
@@ -224,8 +228,7 @@ export interface EffectiveSemanticGraph {
 }
 
 /**
- * Read-only display policy. It must never write confirmation decisions or be
- * used by Mastery/Exam calculations.
+ * 只读展示策略。不得写入确认决策，也不得参与 Mastery 或 Exam 计算。
  */
 export interface SemanticAutoRelationPolicy {
     enabled: boolean;
@@ -244,31 +247,32 @@ export interface SemanticGraphStats {
     embeddingCount: number;
 }
 
-/** Preview shown before removing the user-authored governance overlay. */
+/** 删除用户治理叠加层前展示的影响预览。 */
 export interface SemanticGovernanceImpact {
     decisionCount: number;
     affectedConceptCount: number;
 }
 
-/** In-memory progress only; never persisted with semantic graph facts. */
+/** 仅存在于内存中的进度，不得与语义图事实一起持久化。 */
 export interface SemanticGraphBuildProgress {
-    /** Total Sections that required model work when the current build began. */
+    /** 当前构建开始时需要模型处理的 Section 总数。 */
     totalSections: number;
-    /** Sections whose every extraction window completed successfully. */
+    /** 所有抽取窗口均已成功完成的 Section 数。 */
     processedSections: number;
-    /** Sections not yet attempted in the current build. */
+    /** 当前构建中尚未尝试的 Section 数。 */
     queuedSections: number;
-    /** Sections that failed and will be retried by a later rebuild. */
+    /** 已失败并将在后续重建中重试的 Section 数。 */
     failedSections: number;
 }
 
-/** In-memory report of Lite source filtering for the most recent graph run. */
+/** 最近一次图任务中 Lite 来源过滤的内存报告。 */
 export interface SemanticGraphSourceScope {
     includedFileCount: number;
     skippedFileCount: number;
     skippedFilePaths: string[];
 }
 
+/** 展示层可观察的语义图运行状态；构建进度和错误不属于持久化事实。 */
 export interface SemanticGraphStateView {
     enabled: boolean;
     dirty: boolean;
@@ -297,6 +301,7 @@ export interface ConceptReviewProjection {
     stats: SemanticGraphStats;
 }
 
+/** 创建符合当前 schema 的空状态；时间戳由调用方注入以支持确定性测试。 */
 export function createEmptySemanticGraphState(now = Date.now()): SemanticGraphState {
     return {
         schemaVersion: SEMANTIC_GRAPH_SCHEMA_VERSION,

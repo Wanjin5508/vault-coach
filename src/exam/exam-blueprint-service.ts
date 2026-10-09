@@ -58,7 +58,7 @@ const DIFFICULTIES: ExamBlueprintItem["difficulty"][] = [
 
 const ANSWER_FORMS: readonly ExamAnswerForm[] = ["single-choice", "true-false", "free-response"];
 
-/** Read-only target hints supplied by the adaptive ExamEngine bridge. */
+/** 由自适应 `ExamEngine` 桥接层提供的只读目标提示。 */
 export interface AdaptiveBlueprintTarget {
     conceptId: string;
     label: string;
@@ -538,7 +538,7 @@ export class ExamBlueprintService {
         return DIFFICULTIES[Math.min(DIFFICULTIES.length - 1, Math.floor(index / Math.max(1, Math.ceil(total / DIFFICULTIES.length))))] ?? "basic";
     }
 
-    /** Keeps the LLM adaptive within a finite UI/evaluation contract. */
+    /** 将 LLM 的自适应空间限制在有限的 UI 与评估契约内。 */
     private normalizeAnswerForm(value: unknown, examMode: ExamMode, index: number): ExamAnswerForm {
         const normalizedMode = getExamModeOrDefault(examMode);
         const requested = typeof value === "string" ? value.trim() as ExamAnswerForm : "" as ExamAnswerForm;

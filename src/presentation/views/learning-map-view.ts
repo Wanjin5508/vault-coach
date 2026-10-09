@@ -21,7 +21,7 @@ import {
 import { LearningMapController, type LearningMapControllerState } from "../controllers/learning-map-controller";
 
 export type LearningMapSourceOpener = (filePath: string, heading?: string) => Promise<void>;
-/** Opens the existing Exam setup with a transparent, source-file-bound scope. */
+/** 使用透明、绑定来源文件的范围打开现有 Exam 设置。 */
 export type LearningMapExamStarter = (sourcePaths: readonly string[]) => Promise<void>;
 
 const RELATION_TYPES: readonly SemanticRelationType[] = [
@@ -44,7 +44,7 @@ interface LearningMapLeafState {
     pinnedPositions: Record<string, LearningGraphPinnedPosition>;
 }
 
-/** Main-workspace explorer for confirmed facts and clearly marked display-only candidates. */
+/** 主工作区浏览器：展示已确认事实，以及有明确标识的仅展示候选。 */
 export class LearningMapView extends ItemView {
     private readonly controller: LearningMapController;
     private projection: LearningGraphProjection | null = null;

@@ -7,7 +7,7 @@ import type {
     LearningGraphProjection,
 } from "./learning-graph-types";
 
-/** Pure validation for the bounded M2/M3 read model. */
+/** 对有界 M2/M3 只读模型执行纯函数校验。 */
 export class LearningGraphIntegrityService {
     check(projection: LearningGraphProjection): LearningGraphIntegrityReport {
         const issues: LearningGraphIntegrityIssue[] = [];
