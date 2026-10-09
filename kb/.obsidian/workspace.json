@@ -1,0 +1,343 @@
+{
+  "main": {
+    "id": "8f56580c953c509b",
+    "type": "split",
+    "children": [
+      {
+        "id": "2fa1a7a5550f1f7d",
+        "type": "tabs",
+        "dimension": 49.71023824855119,
+        "children": [
+          {
+            "id": "5fe8a2b4ade48fa6",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "v1.3.4后续开发日志/技术说明与踩坑复盘/里程碑3-语义概念图谱技术说明.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "里程碑3-语义概念图谱技术说明"
+            }
+          },
+          {
+            "id": "91cf1fbcb3edeb17",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "v1.3.4后续开发日志/开发规划与过程记录/KnowledgeEngine-Local-后续开发路线图.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "KnowledgeEngine-Local-后续开发路线图"
+            }
+          },
+          {
+            "id": "76cefc192b81df05",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/00-v1.5-开发总览与学习路线.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "00-v1.5-开发总览与学习路线"
+            }
+          },
+          {
+            "id": "d06bdaddf6bc67eb",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑2-默认体验与Advanced设置分层.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "里程碑2-默认体验与Advanced设置分层"
+            }
+          }
+        ],
+        "currentTab": 3
+      },
+      {
+        "id": "f44331d478838b89",
+        "type": "tabs",
+        "dimension": 50.289761751448815,
+        "children": [
+          {
+            "id": "c7069c8af08ba8f5",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "v1.3.4后续开发日志/开发规划与过程记录/里程碑5-能力地图工作区开发日志.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "里程碑5-能力地图工作区开发日志"
+            }
+          },
+          {
+            "id": "0568e37d467a1a68",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "VC知识库总览/03-Obsidian插件架构.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "03-Obsidian插件架构"
+            }
+          },
+          {
+            "id": "86cd9084b672fa1d",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑1-产品定位与发现入口.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "里程碑1-产品定位与发现入口"
+            }
+          }
+        ],
+        "currentTab": 2
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "714062b3bb42becb",
+    "type": "split",
+    "children": [
+      {
+        "id": "e687c09de24ff23f",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "3c978c1fb307112b",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "7fb0b5818ba195c3",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "df4f3831443e756f",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 322.5
+  },
+  "right": {
+    "id": "f1b198223740a80d",
+    "type": "split",
+    "children": [
+      {
+        "id": "53b05f94ddf8175d",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "8e06668af2af7de9",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "knowledge-engine/README.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "README 的反向链接列表"
+            }
+          },
+          {
+            "id": "f9a22348218cb28a",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "knowledge-engine/README.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "README 的出链列表"
+            }
+          },
+          {
+            "id": "36ba0b049466b34e",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "7b8f783258d55df1",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "73eab689ceb36c0b",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑2-默认体验与Advanced设置分层.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "里程碑2-默认体验与Advanced设置分层 的大纲"
+            }
+          },
+          {
+            "id": "c45288cd08b1fcf7",
+            "type": "leaf",
+            "state": {
+              "type": "value-coach-view",
+              "state": {},
+              "icon": "message-square",
+              "title": "ValueCoach"
+            }
+          },
+          {
+            "id": "28dd4a3b6a5e10d2",
+            "type": "leaf",
+            "state": {
+              "type": "value-coach-view",
+              "state": {},
+              "icon": "message-square",
+              "title": "ValueCoach"
+            }
+          }
+        ],
+        "currentTab": 6
+      }
+    ],
+    "direction": "horizontal",
+    "width": 213.5,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false,
+      "vault-coach:打开 VaultCoach": false,
+      "vault-coach:打开学习仪表盘": false
+    }
+  },
+  "active": "d06bdaddf6bc67eb",
+  "lastOpenFiles": [
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/00-v1.5-开发总览与学习路线.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑1-产品定位与发现入口.md",
+    "v1.3.4后续开发日志/VaultCoach-当前详细架构总览.md",
+    "VC知识库总览/03-Obsidian插件架构.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑0-基线冻结与产品契约.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑2-默认体验与Advanced设置分层.md",
+    "knowledge-graph-kb/05-图分析、表示学习与评估.md",
+    "Pasted image 20261009131520.png",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.4-开发日志/里程碑0-第二轮架构重构开发文档.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.4-开发日志",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.4-开发日志/里程碑6.0-考试难度分级与自适应题型开发规划.md",
+    "v1.3.4后续开发日志/产品更新/v1.5 产品层优化.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑9-CICD发布与持续更新.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑8-迁移兼容与跨平台加固.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑7-首次启动SetupWizard与首个成功动作.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑6-Worker化与可观测索引进度.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑5-内置Embedding运行时与模型缓存.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑4-内置Embedding技术验证与多语言基准.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志/里程碑3-EmbeddingProvider解耦与索引指纹.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/v1.5-开发日志",
+    "v1.3.4后续开发日志/产品更新/v1.4 产品分析.md",
+    "v1.3.4后续开发日志/产品更新/v1.6 以及后续 Agent 转型.md",
+    "v1.3.4后续开发日志/产品更新/竞品研究/Neural-Composer/03-检索优化与产品分析.md",
+    "v1.3.4后续开发日志/产品更新/竞品研究/Neural-Composer/02-LightRAG原理与检索路径.md",
+    "v1.3.4后续开发日志/产品更新/竞品研究/Neural-Composer/01-Neural-Composer的实际实现.md",
+    "v1.3.4后续开发日志/开发规划与过程记录/VaultCoach-Lite-后续开发路线图.md",
+    "v1.3.4后续开发日志/产品更新",
+    "v1.3.4后续开发日志/技术说明与踩坑复盘/里程碑5.8-知识域变更与派生数据生命周期技术说明.md",
+    "v1.3.4后续开发日志/技术说明与踩坑复盘/里程碑5-能力地图工作区技术说明与踩坑复盘.md",
+    "v1.3.4后续开发日志/技术说明与踩坑复盘/里程碑3-语义概念图谱技术说明.md",
+    "knowledge-engine/开发教程/F-产品边界与AI工程",
+    "knowledge-engine/开发教程/E-作业与可靠性",
+    "knowledge-engine/开发教程/D-图谱与知识治理",
+    "knowledge-engine/开发教程/C-搜索与向量检索",
+    "knowledge-engine/开发教程/B-数据与一致性",
+    "knowledge-engine/开发教程/A-后端契约与服务基础",
+    "knowledge-engine/开发教程"
+  ]
+}
