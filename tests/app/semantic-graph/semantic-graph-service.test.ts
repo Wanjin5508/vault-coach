@@ -181,10 +181,10 @@ describe("SemanticGraphService", () => {
         expect(service.getReviewProjection()).toMatchObject({ concepts: [], relations: [], candidates: [] });
     });
 
-    it("refuses a manual rebuild above the 500 semantic-window Lite limit", async () => {
+    it("refuses a manual rebuild above the 650 semantic-window Lite limit", async () => {
         const extract = vi.fn();
         const service = new SemanticGraphService({
-            graphService: { getSnapshot: () => capacitySnapshot(501) } as never,
+            graphService: { getSnapshot: () => capacitySnapshot(651) } as never,
             documentIndex: capacityReader() as DocumentIndexReader,
             store: new MemorySemanticStore(),
             extractionService: { extract } as never,
@@ -193,7 +193,7 @@ describe("SemanticGraphService", () => {
         });
         await service.load();
 
-        await expect(service.rebuildAll()).rejects.toThrow("semantic-input-count=501");
+        await expect(service.rebuildAll()).rejects.toThrow("semantic-input-count=651");
         expect(extract).not.toHaveBeenCalled();
     });
 

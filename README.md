@@ -204,7 +204,7 @@ Use semantic graph rebuilding deliberately: it may send indexed Section excerpts
 
 ### Large vaults and Knowledge Engine Local
 
-Lite keeps semantic work bounded: a vault with up to 300 semantic input windows builds locally by default; 301–500 requires an acknowledgement; above 500, Lite keeps existing facts readable but does not start a new local semantic rebuild. This protects the Obsidian process without blocking Ask, exams, saved assessments, Learning Map, or recommendations.
+Lite keeps semantic work bounded: a vault with up to 400 semantic input windows can build locally without a capacity prompt; 401–650 requires an acknowledgement before a manual rebuild; above 650, Lite keeps existing facts readable but does not start a new local semantic rebuild. Automatic semantic sync pauses above 400 windows. These are model-extraction windows, not file-count limits. Indexing, Ask, exams, saved assessments, Learning Map, and recommendations remain available.
 
 For larger workloads, **Knowledge Engine Local** is the planned optional Docker service. This release contains only its offline compatibility seam: it makes no Engine network request, sends no Vault data, and requires no Docker. A future Engine connection will be explicit, loopback-only, version-negotiated, and limited to user-authorized revisioned data. See [Knowledge Engine requirements](./kb/knowledge-engine/01-需求规格.md) and [architecture](./kb/knowledge-engine/02-架构设计.md).
 

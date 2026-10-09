@@ -1,5 +1,6 @@
 import { Modal, type App } from "obsidian";
 import type { GraphCapacityAssessment } from "../../domain/graph-capacity/graph-capacity-types";
+import { LITE_SEMANTIC_AUTO_WINDOW_LIMIT, LITE_SEMANTIC_MANUAL_WINDOW_LIMIT } from "../../domain/graph-capacity/graph-capacity-assessment";
 import type { TranslationKey } from "../../i18n";
 
 type Translate = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
@@ -68,12 +69,12 @@ export function requestSemanticGraphCapacityDecision(
     if (!capacity.allowManualSemanticBuild) {
         return openCapacityModal(app, {
             title: t("semanticCapacity.blockedTitle"),
-            description: t("semanticCapacity.blockedDescription", { count: windowCount ?? 0 }),
+            description: t("semanticCapacity.blockedDescription", { count: windowCount ?? 0, limit: LITE_SEMANTIC_MANUAL_WINDOW_LIMIT }),
             cancelLabel: t("semanticCapacity.close"),
         });
     }
 
-    if (windowCount !== undefined && windowCount > 300) {
+    if (windowCount !== undefined && windowCount > LITE_SEMANTIC_AUTO_WINDOW_LIMIT) {
         return openCapacityModal(app, {
             title: t("semanticCapacity.recommendTitle"),
             description: t("semanticCapacity.recommendDescription", { count: windowCount }),

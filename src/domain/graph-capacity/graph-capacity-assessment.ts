@@ -12,15 +12,22 @@ interface CapacityThresholds {
     serviceRequired: number;
 }
 
+export const LITE_SEMANTIC_AUTO_WINDOW_LIMIT = 400;
+export const LITE_SEMANTIC_MANUAL_WINDOW_LIMIT = 650;
+
 const THRESHOLDS: Record<GraphCapacityMetric, CapacityThresholds> = {
     // One semantic input window needs at least one serial model request and
     // often a second relation request. This is the primary Lite workload
     // metric; raw file count alone does not predict a rebuild's duration.
     // Lite's explicit local-build contract is based on the number of semantic
-    // model windows: 301–500 needs an acknowledgement, while >500 is refused.
-    "semantic-input-count": { warning: 300, servicePreferred: 500, serviceRequired: 500 },
+    // model windows: 401–650 needs an acknowledgement, while >650 is refused.
+    "semantic-input-count": {
+        warning: LITE_SEMANTIC_AUTO_WINDOW_LIMIT,
+        servicePreferred: LITE_SEMANTIC_MANUAL_WINDOW_LIMIT,
+        serviceRequired: LITE_SEMANTIC_MANUAL_WINDOW_LIMIT,
+    },
     // The remaining metrics are warning-only diagnostics. The explicit
-    // product contract is that a Vault with <=500 semantic windows can still
+    // product contract is that a Vault with <=650 semantic windows can still
     // be built locally after the user acknowledges the cost.
     "semantic-input-characters": { warning: 10 * 1024 * 1024, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
     "chunk-count": { warning: 8_000, servicePreferred: Number.POSITIVE_INFINITY, serviceRequired: Number.POSITIVE_INFINITY },
