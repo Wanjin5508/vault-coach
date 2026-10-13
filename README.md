@@ -2,32 +2,65 @@
 
 > Language: English | [中文](./README_CN.md)
 
-**Turn an Obsidian vault into a learning workflow:** build a source-grounded knowledge base, practise with structured exams, review concept relationships, and use a Learning Map to see what you know and what still needs work.
+**Learn from the notes you already trust.**
 
-Vault Coach is an Obsidian plugin for learners, researchers, and teams who want to study from the notes they already maintain. It supports Markdown and text-based PDFs, cited Q&A, scoped practice exams, reviewable concept graphs, and evidence-based mastery tracking.
+Ask a question, inspect the source, turn the topic into a practice exam, find the concepts that need work, and follow them back through your Learning Map.
+
+**Cited Q&A · Practice exams · Concept review · Learning Map · Mastery tracking · Local or cloud models**
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.4.0-1E90FF)
+![Version](https://img.shields.io/badge/version-1.5.0-1E90FF)
 ![Knowledge training](https://img.shields.io/badge/Knowledge-training-10b981)
 ![Privacy controls](https://img.shields.io/badge/Privacy-user--controlled-334155)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 
-<!-- Screenshot recommendation: place a 16:9 overview of the Vault Coach sidebar here. Show a cited answer, the Q&A / Exam mode switch, and the index status. Blur or replace personal note names. -->
 ![Vault Coach cited Q&A](assets/screenshots/vault-coach-qa.png.png)
 
-## What problem does Vault Coach solve?
+## Why Vault Coach exists
 
-Notes are useful only when you can revisit, test, and connect them. Vault Coach closes that loop inside the vault you already use:
+A vault can hold years of useful notes and still leave a few hard questions unanswered:
 
-1. **Find and explain** — ask questions over your Markdown notes and text PDFs; inspect the source behind an answer.
-2. **Practise and assess** — generate an exam from a vault, folder, or chosen files; submit answers and keep structured results.
-3. **Connect concepts** — extract evidence-backed concept and relationship candidates, then decide what is actually true in Concept review.
-4. **Navigate learning** — explore confirmed knowledge in a Learning Map, see evidence-backed mastery states, and act on local study recommendations in the Learning dashboard.
-5. **Keep control of data** — choose a local model, a self-hosted endpoint, or an OpenAI-compatible provider. Model calls occur only for the features and provider you configure.
+- You remember learning something, but not the exact words you used when you wrote it.
+- An AI answer sounds plausible, but you cannot see which note or PDF page supports it.
+- Reading feels productive, yet it does not show what you can explain without looking.
+- Links show that notes are connected, but not which concepts you have actually practised.
 
-## What you can do
+Vault Coach turns those separate activities into one evidence-backed learning loop inside Obsidian. It is built for learners, researchers, and knowledge-focused teams working with Markdown notes and text-based PDFs.
 
-### Build a personal knowledge base
+## A few things Vault Coach insists on
+
+- **Evidence before confidence.** Answers link back to headings, excerpts, and PDF pages so you can inspect the source yourself.
+- **Practice, not passive collection.** Exams, saved assessment records, mastery states, and review suggestions help turn stored notes into active learning.
+- **Review before a relationship becomes fact.** Concept and relation candidates retain their evidence; you decide what to confirm, reject, merge, or undo.
+- **Your model, your deployment choice.** Run chat and embeddings through local Ollama, a self-hosted OpenAI-compatible endpoint, or a cloud provider you configure.
+- **Explicit data boundaries.** Vault Coach has no hidden telemetry. Local data stays in your vault, and model calls occur only through the providers and features you enable.
+
+## One learning loop
+
+The main workflows are designed to lead into one another:
+
+1. **Ask** a focused question about your Markdown notes or text-based PDFs.
+2. **Inspect** the headings, excerpts, or PDF pages behind the answer.
+3. **Practise** the same material with a scoped exam.
+4. **Find the gap** through saved assessment evidence and mastery states.
+5. **Reconnect the topic** in Concept review and Learning Map, then open the original source.
+
+## Choose where AI runs
+
+Chat and embedding providers are configured separately, so you can choose the deployment that fits each workflow.
+
+| Setup | What it means |
+| --- | --- |
+| **Fully local with Ollama** | Run suitable chat and embedding models on your own computer. Model requests go only to the local endpoint you configure. |
+| **Self-hosted endpoint** | Use an OpenAI-compatible service on your own machine or private infrastructure. |
+| **Cloud LLM or embedding service** | Point Vault Coach at an OpenAI-compatible provider. The provider may receive only the text required for the feature you explicitly run. |
+| **Keyword-only retrieval** | Search locally without building embeddings. Answer generation, when used, still follows your configured chat provider. |
+
+You can keep the entire workflow local, mix local and remote providers, or use cloud services. Vault Coach does not require a specific vendor. See [Privacy, storage, and network use](#privacy-storage-and-network-use) for the exact data boundary.
+
+## What it does
+
+### 1. Ask your notes and inspect the evidence
 
 Choose the whole vault or one folder. Vault Coach indexes Markdown and, optionally, native-text PDFs. It chunks content for retrieval while keeping headings, file paths, excerpts, and PDF page locations for citations.
 
@@ -41,7 +74,7 @@ Choose the whole vault or one folder. Vault Coach indexes Markdown and, optional
 <!-- Screenshot recommendation: show an answer with several expanded source cards. Include one Markdown heading source and one PDF page source if possible. -->
 ![Answer sources](assets/screenshots/retrieval-sources.png.png)
 
-### Train with exam mode
+### 2. Turn a topic into a practice exam
 
 Exam mode turns selected knowledge into deliberate practice instead of another chat session. You can choose the entire knowledge base, folders, or individual files; inspect and adjust the included files; generate questions; submit answers; and review scoring feedback.
 
@@ -61,7 +94,7 @@ Exam mode turns selected knowledge into deliberate practice instead of another c
 
 <!-- Screenshot recommendation: add a second exam image showing a completed result with score, feedback, and source-backed review items. This is more persuasive than another setup screenshot. -->
 
-### Turn notes into a reviewable concept graph
+### 3. Review the connections the model proposes
 
 The optional **Semantic concept graph** extracts Concepts and relationship candidates from indexed Sections. It is deliberately review-first:
 
@@ -71,22 +104,22 @@ The optional **Semantic concept graph** extracts Concepts and relationship candi
 - Similarity candidates use a bounded approximate-neighbour search; similarity never auto-merges concepts.
 - A model-backed semantic rebuild is always explicit. It is not silently triggered just by opening Obsidian.
 
-![alt text](assets/screenshots/concept-review.png)
+![Concept review with evidence-backed relationship candidates](assets/screenshots/concept-review.png)
 <!-- Screenshot recommendation: add a Concept review screenshot. Show a readable graph with both dashed candidate edges and solid confirmed edges, a selected Concept inspector, and the confirm / reject controls. -->
 
-### Explore confirmed knowledge in Learning Map
+### 4. Explore confirmed knowledge in Learning Map
 
 **Learning Map** is the focused reading view of the graph. It presents confirmed and user-created relationships, with directed arrows where the relationship has direction. You can search, filter relationship types, zoom/pan, focus a neighbourhood, inspect source evidence, and jump back to the original note.
 
 Pending or rejected candidates remain out of the Learning Map, so a visual connection is never mistaken for a confirmed learning fact. Optional high-confidence auto-relations are visually distinguished and are display-only; they do not change exams or mastery.
 
-![alt text](assets/screenshots/kg.png)
+![Learning Map of confirmed concepts and relationships](assets/screenshots/kg.png)
 
 <!-- Screenshot recommendation: add a full-width Learning Map screenshot. Show clustered concept nodes, varied node size, directional relationship arrows, the compact upper-right controls, bottom inspector, and legend. Avoid screenshots where labels overlap. -->
 
-![alt text](assets/screenshots/rebuild-concept-pbar.png)
+![Semantic concept graph rebuild progress](assets/screenshots/rebuild-concept-pbar.png)
 
-### Follow evidence-based mastery
+### 5. See what to review next
 
 The **Learning dashboard** summarizes confirmed concepts, assessment coverage, mastery distribution, local data health, and up to five evidence-backed next steps. Mastery is derived from saved structured exam events and confirmed Concept bindings—not from a guess that a note was merely opened.
 
@@ -94,7 +127,7 @@ Recommendations are deterministic local projections of confirmed source-backed C
 
 Use **Rebuild concept mastery** after taking exams or after changing the effective Concept graph. The resulting snapshot is rebuildable; saved exam sessions remain the durable learning record.
 
-![alt text](assets/screenshots/dashboard.png)
+![Learning dashboard with mastery and review recommendations](assets/screenshots/dashboard.png)
 
 <!-- Screenshot recommendation: add a Learning dashboard screenshot with the five summary cards and mastery distribution. Use a vault with enough completed exams to make the distribution meaningful. -->
 
@@ -129,7 +162,7 @@ Do not install a source-code ZIP as a plugin release unless you build it first.
 
 ### 2. Choose the knowledge you want to train on
 
-![alt text](assets/screenshots/setting-kb.png)
+![Knowledge base scope settings](assets/screenshots/setting-kb.png)
 
 Under **Knowledge base**:
 
@@ -150,7 +183,7 @@ Vault Coach does not require a particular provider. Select the chat and embeddin
 | OpenAI-compatible endpoint | You use a cloud provider, a self-hosted gateway, or another compatible service. Configure its URL, models, and API key explicitly. |
 | Keyword-only retrieval | You want basic local search without building embeddings. |
 
-![alt text](assets/screenshots/setting-model.png)
+![Chat and embedding provider settings](assets/screenshots/setting-model.png)
 
 Ollama is an optional privacy-oriented deployment path, not a requirement. If you use it, the typical base URL is `http://127.0.0.1:11434`; do not append `/api/chat`, `/api/embed`, or `/api/embeddings`.
 

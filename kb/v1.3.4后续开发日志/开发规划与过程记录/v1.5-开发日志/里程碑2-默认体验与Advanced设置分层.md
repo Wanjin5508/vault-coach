@@ -9,7 +9,7 @@ depends-on: [里程碑0-基线冻结与产品契约.md]
 
 ## 1. 目标
 
-把默认体验收敛为“选择知识范围 + 配置聊天 LLM”，将 embedding、chunk、TopK、RRF、rerank 和检索模式放入 Advanced。默认检索选择 `auto`，由运行时根据索引状态选择实际模式。
+把**默认体验**收敛为“选择知识范围 + 配置聊天 LLM”，将 embedding、chunk、TopK、RRF、rerank 和检索模式放入 **Advanced**。默认检索选择 `auto`，由运行时根据索引状态选择实际模式。
 
 本阶段只重排现有能力，不引入 Transformers.js，也不改变旧索引格式。学习重点是设置建模、UI 状态、兼容迁移和大文件拆分。
 
