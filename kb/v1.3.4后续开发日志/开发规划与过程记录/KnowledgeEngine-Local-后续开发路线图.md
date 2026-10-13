@@ -22,7 +22,231 @@ related:
   - ../../knowledge-engine/05-语言、客户端与桌面发行策略.md
   - AI-Career-Agent-知识接口与数据契约.md
 ---
+# Knowledge Engine 开发路线图（三阶段版）
 
+基于《Knowledge Engine Local》路线图改写 · 2026-10-12
+
+## 1. 定位与商业模式
+
+Knowledge Engine（KE）是为大规模知识库提供检索、图谱投影与受控推理的独立服务。同一套 Engine Core 以两种形态交付：
+
+|   |   |   |   |   |
+|---|---|---|---|---|
+|形态|用户|租户|默认网络|计费|
+|自托管开源版|有技术基础的用户，Docker 本机或自建部署|单租户|仅 loopback|无|
+|付费托管版|超出 Vault Coach Lite 阈值、愿意订阅的用户|多租户|公网 TLS + 认证|订阅套餐|
+
+两种形态共用同一份业务代码，差异只在配置与部署层（认证方式、租户模式、计费开关、监听地址），禁止分叉出两套业务逻辑。
+
+使用路径：
+
+- Vault Coach 用户：Lite 仍是默认体验；知识库超过阈值时提示可选 Engine，用户在设置页填写服务地址与账号或 key（自托管填本地地址与 token，托管版填订阅 key）。
+- 独立用户：通过 Workbench 查看服务状态、导入资料、检查检索与图谱（轻量诊断型 GUI）。
+- Career Agent：Profile / Gap API 暂缓（见第 7 节）。
+
+## 2. 不变量（沿用并补充）
+
+1. Vault Coach Lite 永远可独立运行；Engine 停止、订阅过期、key 失效、协议不兼容时，必须清晰提示并回退 Lite，不丢本地数据。
+2. Engine 的缓存、embedding 分数、RRF 排名、Agent 建议不得自动覆盖 Vault 事实、图谱治理、Assessment 或 mastery；Connector 不写回 Vault。
+3. 同一 source 不能同时以 managed 导入与 connector 同步产生未标记覆盖（workspace 的 `sourceMode: managed | connector`）。
+4. DTO 以 OpenAPI / JSON Schema 为准，不复用 Obsidian TypeScript 对象。
+5. 无独立基准证明收益，不引入 Elasticsearch、图数据库、专用向量库、Kafka、Redis。
+6. 云上只处理用户显式授权同步的范围，不静默上传；云端演示与压测只用匿名或合成数据。
+7. Agent 不得获得任意文件系统、shell、SQL、ES DSL 或网络工具；高影响动作必须用户确认。
+8. 自托管默认只监听 loopback，不开 LAN、不做远程遥测；托管版必须 TLS + 认证。
+
+相对原路线图的变化：云托管、多租户、支付从「非目标」调整为 P2、P3 的范围；独立考试训练、Career Agent 协同、Electron / Store 发行移出主线（第 7 节）。
+
+## 3. 阶段总览
+
+|   |   |   |   |   |
+|---|---|---|---|---|
+|阶段|目标|主要产物|对应原阶段|时间盒（粗估）|
+|P1|自托管单租户闭环|契约、导入与 revision、检索、有界图谱、job、Vault Coach Connector 最小版|KE-0 至 KE-5、KE-8 部分|4–6 周|
+|P2|多租户与账号|租户隔离、账号与 key、限流配额、公平调度、云部署与可观测、数据生命周期|新增|4–6 周|
+|P3|付费、合规与发布|套餐与计费、合规文档、Vault Coach 云接入体验、设计伙伴 beta、可选受控 Agent|KE-7、KE-9 部分|视反馈|
+
+时间盒按每周 10–15 小时粗估，需按实际速度校准。每个阶段结束时无论完成度如何，都要把成果整理成可展示的内容（文档、基准报告、简历表述），再决定是否继续。
+
+依赖顺序：P1 → P2 → P3。进入 P3 的计费之前，必须先确认 Vault Coach 中确有用户触碰阈值并愿意付费（见 P3 入口条件）。
+
+## 4. P1：自托管单租户闭环
+
+目标：用户在自己的机器上用 Docker 启动 Engine，Vault Coach 超过阈值后可连接并获得检索与图谱加速；Engine 停止时回退 Lite。
+
+### P1-0 契约、事实边界与基准（原 KE-0）
+
+1. 独立仓库 `contracts` 包，冻结 `VersionedEnvelopeV1`、`KnowledgeChangeV1`、`RetrievalRequest/HitV1`、`GraphProjectionV1`；Training、Agent trace、Profile 相关 DTO 延后到需要时再冻结。
+2. 匿名小/中/大语料（Markdown、PDF、中英文、目录 filter、图关系、删除与重命名），不得使用私人 Vault 内容。
+3. 记录 Lite 与 Engine 的对照指标：Recall@K、p50/p95、全量与 1% 增量耗时、内存、磁盘、取消与恢复时间；基准可一键重建，作为后续组件选型依据。
+4. 量化「超过阈值」的真实体验差距：Lite 在哪个规模开始不可用，Engine 能提升多少。
+
+### P1-1 运行时与 Workbench 骨架（原 KE-1）
+
+1. `engine-api`、`engine-worker`、PostgreSQL + pgvector、migration、health/version、request ID、脱敏结构化日志、loopback-only Docker Compose。
+2. 轻量 Workbench：服务状态、workspace 列表、存储占用、API 兼容状态、错误诊断；仅通过 contracts SDK 调用 API。
+3. API contract test、Docker smoke test；覆盖首次启动、旧 schema、端口占用、数据库不可用、容器重启。
+
+### P1-2 工作区、导入与 revision（原 KE-2）
+
+1. managed workspace：导入预览、提交、取消、重试、删除、导出；source / section / chunk / hash / locator / revision。
+2. connector workspace：`POST /v1/workspaces/{id}/changes`，实现 revision 与 idempotency、乱序冲突处理、rename/delete、waterline、outbox/job 入队。
+3. Source / chunk Inspector；workspace 完全删除并清理索引与可识别副本。
+
+### P1-3 检索与 RAG Inspector（原 KE-3）
+
+1. PostgreSQL FTS + pgvector 基线，metadata pre-filter，lexical / vector / hybrid top-K，明确预算与降级。
+2. Retrieval Inspector：查询、scope、模式、命中、locator、revision、阶段耗时、截断信息。
+3. 有证据回答 API：先检索有限 hits，无证据时 abstain。
+4. embedding 与重建走 job，支持限速、取消、重试、revision fencing。
+
+### P1-4 有界图谱投影（原 KE-4，缩小范围）
+
+1. 存储 effective Concept、alias/redirect、confirmed typed relation、evidence 与 revision；候选与已确认事实分层。
+2. 一/两跳 projection 与有限路径查询，强制 depth / node / edge / time 预算；热点 projection 使用按 revision 精确失效的缓存。
+3. 暂不做完整 Graph Explorer，只提供 API 与简单检查页；关系表方案基准通过前不引入图数据库。
+
+### P1-5 Durable job 与可观测（原 KE-5）
+
+1. 状态机 `queued | running | succeeded | failed | cancelled | stale`，含 lease、retry、cancel、checkpoint、revision fencing、worker 重启恢复；队列基于 Postgres（如 `FOR UPDATE SKIP LOCKED`）。
+2. embedding、候选生成、projection 预热等重计算全部放入 job；候选默认 pending，不自动升格。
+3. Job Inspector：输入 revision、阶段、进度、attempt、耗时、错误、index lag、取消与重试。
+4. 失败注入与恢复测试：取消、过期 revision、模型故障、容器重启。
+
+### P1-6 Vault Coach Connector 最小版（原 KE-8 部分）
+
+1. health/version 握手、启动 token、schema 兼容检查、超时与退避、显式同步范围、revision 水位、任务状态查询。
+2. 设置页只展示 Connector 所需状态（服务地址、token、同步范围、连接状态），并保留 Lite 回退。
+3. 三方回归：Engine 停止、协议不兼容、同步进行中，Vault Coach 均保持 Lite 可用。
+
+### P1 出口标准
+
+- 无 Obsidian 时 Docker 可启动，Workbench 能显示状态并完成导入、检索、图谱检查；
+- 重放、乱序、删除、重命名、服务重启不产生重复 chunk 或悬空引用；
+- 所有重计算有 job、进度、取消、恢复，并有可重复的故障注入测试；
+- Vault Coach 连接 Engine 后在超阈值语料上可用，断开后完整回退 Lite；
+- 基准报告可复现，给出 Lite 与 Engine 的对比数据；
+- 产出一页设计说明与基准报告，可直接用于 README 与简历。
+
+可写进简历的产出（数字需自行实测后填写）：设计并实现幂等、乱序容忍的增量同步协议与基于 Postgres 的持久任务队列；在 [N] 万 chunk 规模下检索 p95 为 [X] ms，较 Lite 提升 [Y]；故障注入下无数据丢失。
+
+## 5. P2：多租户与账号
+
+目标：同一 Engine Core 以云部署形态服务多个互相隔离的租户，并能在压测下给出可信的容量与瓶颈结论。此阶段仅使用合成或匿名数据，不接收真实用户笔记。
+
+### P2-1 租户模型与隔离
+
+1. tenant → workspace 层级；所有表带 tenant 标识；Postgres 行级安全（RLS）作为最后防线；请求入口统一注入租户上下文。
+2. 隔离范围覆盖：存储、查询、缓存键、job 队列、日志与 trace、导出文件。
+3. 越权测试套件：租户 A 的凭证访问租户 B 的任何资源（含 job、日志、缓存）必须失败，并纳入 CI。
+
+### P2-2 认证、授权与 key 管理
+
+1. 账号体系（邮箱或 OIDC 登录二选一，先做最小可用）；角色与权限范围。
+2. API key：签发、只存哈希与前缀、scope（可限定 workspace）、轮换、撤销、最近使用记录。
+3. Vault Coach 侧：key 的存放位置要避免被 vault 同步或提交到仓库；key 失效时给出明确提示并回退 Lite。
+4. 威胁模型文档：key 泄露、越权、重放、注入（笔记与 PDF 内容视为不可信输入）。
+
+### P2-3 限流、配额与用量计量
+
+1. 每租户请求限流；存储、chunk 数、查询次数、embedding 调用量的配额，在 API 层强制执行。
+2. `usage_events` 计量表；套餐权益先以配置表达（尚不接支付）。
+3. 记录每单位（chunk、查询、embedding）的真实成本，为 P3 定价提供数据。
+
+### P2-4 公平调度与并发加固
+
+1. 每租户 job 并发上限与公平调度，防止单租户的大批量任务饿死其他租户。
+2. 连接池、超时、背压、模型提供方限速预算、幂等重试。
+3. 压测（如 k6）：混合多租户负载，报告 p50/p95/p99、错误率、瓶颈定位与优化前后对比；至少做一次「噪声邻居」实验。
+
+### P2-5 云部署与可观测
+
+1. 以 IaC 描述环境；托管 Postgres、容器服务、对象存储（如需要）；先 staging 后 production；选欧盟区域。
+2. OpenTelemetry trace、指标、告警；备份与恢复演练；migration 的灰度与回滚；CI/CD 流水线。
+3. 成本控制：小规格实例、压测时开启、平时关闭、预算告警。
+
+### P2-6 数据生命周期与隐私能力
+
+1. 租户数据导出与硬删除：原文、chunk、向量、缓存、job 载荷同步清理，备份保留期写明。
+2. 传输与静态加密、密钥与 secrets 管理、最小化审计日志。
+3. 列出模型提供方（子处理方），支持租户选择可用的提供方；默认不将内容用于训练。
+
+### P2 出口标准
+
+- 越权测试套件全绿，且包含 job、缓存、日志的跨租户用例；
+- 限流与配额在压测下生效，噪声邻居实验中其他租户的 p95 保持在目标范围内；
+- 可脚本化部署到 staging，备份恢复演练通过；
+- 删除一个租户后，各存储与缓存中无可识别残留（有验证脚本）；
+- 产出容量与瓶颈报告、威胁模型、部署文档。
+
+可写进简历的产出（数字需自行实测）：实现基于 RLS 的多租户隔离与越权测试套件；设计每租户限流、配额与公平调度；压测下 p95/p99 为 [X]，定位并优化 [瓶颈]，吞吐提升 [Y]；以 IaC 在 [云平台] 部署并实现可观测与备份恢复。
+
+## 6. P3：付费、合规与发布
+
+入口条件（先验证，再投入）：Vault Coach 中有一定数量的用户触碰过阈值；至少若干设计伙伴表达了付费意愿（可先用等待名单测试）；P2 出口标准已达成。条件不满足时，保留 P2 成果并回到需求验证，不推进计费。
+
+### P3-1 套餐与计费
+
+1. 套餐与权益映射（存储、chunk、查询、并发等），基于 P2 实测成本定价。
+2. 选择支付方案（可比较是否由平台代收代缴税费，选型前请核对当前条款）；webhook 处理必须幂等。
+3. 订阅状态机：试用、有效、逾期、取消；各状态下 Engine 的行为（只读、降级、保留期、宽限期）与数据保留策略。
+
+### P3-2 合规与信任文档
+
+1. 隐私政策、数据处理协议、子处理方清单、数据所在地、保留与删除时限、安全概述、事故响应流程。
+2. 营业主体、税务、Impressum 等事项咨询专业人士；涉及欧盟用户的 GDPR 要求需要法律意见，不凭猜测。
+3. Vault Coach 的 README 与设置页披露：云服务需要账号或付费、网络使用、数据发往何处、无账号时 Lite 仍可用（对应 Obsidian 社区插件政策的披露要求；提交前核对最新政策）。
+
+### P3-3 Vault Coach 云接入体验
+
+1. 设置页：账号与 key 状态、套餐与用量、同步范围、连接诊断；触碰阈值时的提示与引导。
+2. 订阅过期、key 失效、限流、云端不可用时给出明确提示并回退 Lite；无静默上传，授权范围可随时修改与撤销。
+
+### P3-4 受控 Agent 窄场景（可选，可提前到 P1 之后）
+
+1. `AgentRun`、tool registry、policy gate（含租户与 workspace scope）、预算、取消、trace、评估集。
+2. 只开放受限工具：`search_chunks`、`get_graph_projection`、`draft_*`；每步前校验 scope、top-K、depth、调用次数与 deadline；无证据返回结构化失败或 abstain。
+3. 只生成草案；资料导入、大 job 启动、图谱治理等高影响动作由用户确认后调用确定性 API；不保存思维链。
+4. 自动化评估：越权 scope、无来源、循环调用、超预算、模型不可用、取消、过期 revision。
+
+### P3-5 设计伙伴 beta
+
+少量设计伙伴试用，度量：连接成功率、检索收益、支持成本、单位成本与毛利、留存意愿；据此调整套餐与路线。
+
+### P3 出口标准
+
+- 订阅全状态（含逾期与取消）在测试环境走通，webhook 重放不重复计费；
+- 合规文档与披露就绪并经专业人士审阅；
+- Vault Coach 的云接入体验在 key 失效、订阅过期、服务不可用下均能回退 Lite；
+- 设计伙伴 beta 给出单位成本与付费意愿数据；
+- （若做 P3-4）Agent 评估集通过，且无高权限旁路。
+
+## 7. 暂缓与移出主线
+
+|   |   |   |
+|---|---|---|
+|事项|原阶段|处理|
+|独立考试与训练（Exam Workbench、Assessment、mastery）|KE-6|暂缓：Vault Coach 已有考试；仅当设计伙伴明确需要独立训练时再启动|
+|Career Agent Profile / Gap API|KE-8 部分|暂缓，不影响主线|
+|完整 Graph Explorer|KE-4 部分|暂缓，P1 只做 API 与简单检查页|
+|Electron Host、签名公证、Mac App Store、Tauri 对照|KE-9、KE-10|移出：对云服务与并发能力无贡献；仅在用户明确提出安装门槛时再评估|
+|Elasticsearch、图数据库、专用向量库、消息队列|各阶段条件引入|仍须独立基准证明收益后才引入|
+
+## 8. 风险与止损
+
+- 范围膨胀：每个阶段设日历上限，到点即整理成果；未完成的条目回到第 7 节的暂缓列表，不顺延。
+- 隐私与信任：本产品的卖点是本地优先；任何导致用户内容离开本机的功能，都必须显式授权、可撤销、可删除，并在文档中披露。
+- 成本：云资源设预算告警；压测使用合成数据；定价以 P2 实测单位成本为准。
+- 需求不确定：计费前先验证确有用户触碰阈值并愿意付费，否则只保留自托管与多租户技术成果。
+- 工程质量：使用 AI 辅助编码时，契约、隔离规则、核心算法与测试用例由人审定；用依赖方向检查、越权测试和 CI 把约束固化。
+
+
+
+
+
+
+---
+下面是旧版本：
 # Knowledge Engine Local：独立知识训练平台开发路线图
 
 ## 1. 新的产品定位
