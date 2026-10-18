@@ -269,8 +269,8 @@ const ZH_TRANSLATIONS = {
     "settings.defaultGreeting.desc": "重置会话时显示的第一条助手消息。支持 Markdown。",
     "settings.defaultGreeting.placeholder": "请输入默认欢迎语",
     "settings.openOnStartup.name": "启动时自动打开右侧边栏",
-    "settings.defaultRetrievalMode.name": "默认检索模式",
-    "settings.defaultRetrievalMode.desc": "右侧边栏打开时默认使用的召回通道。",
+    "settings.defaultRetrievalMode.name": "检索策略",
+    "settings.defaultRetrievalMode.desc": "Auto 会在向量索引可用时使用混合检索，否则自动回退到关键词检索。",
     "settings.collapseSources.name": "来源默认折叠",
     "settings.collapseSources.desc": "开启后，回答下方的来源区域默认折叠显示。",
 
@@ -908,8 +908,8 @@ const EN_TRANSLATIONS: Record<TranslationKey, string> = {
     "settings.defaultGreeting.desc": "The first assistant message shown after resetting the conversation. Supports Markdown.",
     "settings.defaultGreeting.placeholder": "Enter the default greeting",
     "settings.openOnStartup.name": "Open right sidebar on startup",
-    "settings.defaultRetrievalMode.name": "Default retrieval mode",
-    "settings.defaultRetrievalMode.desc": "The retrieval channel used when the sidebar opens.",
+    "settings.defaultRetrievalMode.name": "Retrieval strategy",
+    "settings.defaultRetrievalMode.desc": "Auto uses hybrid retrieval when the vector index is ready and falls back to keyword search otherwise.",
     "settings.collapseSources.name": "Collapse sources by default",
     "settings.collapseSources.desc": "When enabled, the sources under each answer start collapsed.",
 

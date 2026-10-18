@@ -43,7 +43,7 @@ function createSession(): ExamSession {
 }
 
 function createChatService(): { chatService: ChatService; persist: ReturnType<typeof vi.fn>; streamAnswerQuestion: ReturnType<typeof vi.fn> } {
-    const chatService = new ChatService(() => ({ defaultRetrievalMode: "hybrid", maxConversationMessages: 10 } as VaultCoachSettings));
+    const chatService = new ChatService(() => ({ retrievalPreference: "auto", defaultRetrievalMode: "hybrid", maxConversationMessages: 10 } as VaultCoachSettings));
     const persist = vi.fn(async () => undefined);
     const streamAnswerQuestion = vi.fn(async (
         _question: string,

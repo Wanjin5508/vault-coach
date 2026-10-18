@@ -136,20 +136,14 @@ export class VaultCoachHeader {
     ): void {
         const retrievalGroupEl = panelEl.createDiv({ cls: "vault-coach-retrieval-group" });
         retrievalGroupEl.createSpan({ text: this.t("view.retrievalModeLabel") });
-        const retrievalModeSelectEl = retrievalGroupEl.createEl("select", {
-            attr: { "aria-label": this.t("view.retrievalModeLabel") },
-        });
-        this.addRetrievalOption(retrievalModeSelectEl, "keyword", this.t("view.retrieval.keyword"));
-        this.addRetrievalOption(retrievalModeSelectEl, "vector", this.t("view.retrieval.vector"));
-        this.addRetrievalOption(retrievalModeSelectEl, "hybrid", this.t("view.retrieval.hybrid"));
-        retrievalModeSelectEl.value = this.chatController.getRetrievalMode();
-        retrievalModeSelectEl.disabled = state.interactionBusy || indexBusy;
-        retrievalModeSelectEl.addEventListener("change", () => {
-            const value = retrievalModeSelectEl.value;
-            if (value === "keyword" || value === "vector" || value === "hybrid") {
-                this.chatController.setRetrievalMode(value);
-            }
-        });
+        const resolution = this.chatController.getRetrievalResolution();
+        const modeLabel = resolution.resolvedMode === "keyword"
+                ? this.t("view.retrieval.keyword")
+                : resolution.resolvedMode === "vector"
+                    ? this.t("view.retrieval.vector")
+                    : this.t("view.retrieval.hybrid");
+        const label = resolution.preference === "auto" ? `Auto → ${modeLabel}` : modeLabel;
+        retrievalGroupEl.createSpan({ text: label });
 
         const resetButtonEl = panelEl.createEl("button", {
             text: this.t("view.resetConversation"),

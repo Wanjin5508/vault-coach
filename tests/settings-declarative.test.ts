@@ -7,14 +7,22 @@ import type { VaultCoachPluginApi } from "../src/presentation/plugin-api";
 function createApi() {
     const saveSettings = vi.fn(async () => undefined);
     const refreshAllViews = vi.fn();
-    const setRuntimeRetrievalMode = vi.fn();
+    const setRuntimeRetrievalPreference = vi.fn();
+    let advancedSettingsExpanded = false;
     const markKnowledgeBaseDirty = vi.fn();
     const markVectorIndexDirty = vi.fn();
     const api = {
         settings: createDefaultSettings(),
         saveSettings,
         refreshAllViews,
-        setRuntimeRetrievalMode,
+        setRuntimeRetrievalPreference,
+        getSettingsUiPreferences: () => ({ advancedSettingsExpanded }),
+        setSettingsUiPreferences: vi.fn(async (preferences: { advancedSettingsExpanded: boolean }) => {
+            advancedSettingsExpanded = preferences.advancedSettingsExpanded;
+        }),
+        getSettingsMigrationWarnings: () => [],
+        hasCloudApiKeySecret: () => true,
+        getVectorIndexStats: () => ({ ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null }),
         markKnowledgeBaseDirty,
         markVectorIndexDirty,
     } as unknown as VaultCoachPluginApi;
@@ -22,7 +30,8 @@ function createApi() {
         api,
         saveSettings,
         refreshAllViews,
-        setRuntimeRetrievalMode,
+        setRuntimeRetrievalPreference,
+        expandAdvanced: () => { advancedSettingsExpanded = true; },
         markKnowledgeBaseDirty,
         markVectorIndexDirty,
     };
@@ -37,8 +46,9 @@ function getControlKeys(tab: VaultCoachSettingTab): string[] {
 
 describe("VaultCoachSettingTab declarative settings", () => {
     it("indexes every persisted setting while retaining provider-specific fields", () => {
-        const { api } = createApi();
+        const { api, expandAdvanced } = createApi();
         const tab = new VaultCoachSettingTab(new App(), {} as never, api);
+        expandAdvanced();
         const defaultControlKeys = getControlKeys(tab);
 
         api.settings.modelProvider = "openai-compatible";
@@ -47,6 +57,7 @@ describe("VaultCoachSettingTab declarative settings", () => {
         const indexedKeys = new Set([...defaultControlKeys, ...cloudControlKeys]);
 
         for (const key of Object.keys(createDefaultSettings())) {
+            if (key === "defaultRetrievalMode") continue;
             if (key === "cloudApiKeySecretName") {
                 expect(tab.getSettingDefinitions().some((definition) => {
                     return "name" in definition && definition.name === translate("settings.cloudApiKey.name");

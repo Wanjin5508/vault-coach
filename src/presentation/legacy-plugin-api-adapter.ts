@@ -2,7 +2,8 @@ import type { VaultCoachApplicationApi } from "../app/application-api";
 import type {
     AnswerSource,
     AssistantAnswer,
-    RetrievalMode,
+    RetrievalPreference,
+    RetrievalResolution,
 } from "../domain/retrieval/retrieval-types";
 import type { ChatMessage, StreamHandlers } from "../app/chat/chat-types";
 import type {
@@ -15,7 +16,8 @@ import type {
     ExamScopeSnapshot,
     ExamSession,
 } from "../domain/exam/exam-types";
-import type { VaultCoachSettings } from "../app/config/settings-types";
+import type { SettingsUiPreferences, VaultCoachSettings } from "../app/config/settings-types";
+import type { SettingsMigrationWarning } from "../app/config/settings-schema";
 import type { VaultCoachPluginApi } from "./plugin-api";
 import type { SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
@@ -68,6 +70,22 @@ export class LegacyPluginApiAdapter implements VaultCoachPluginApi {
 
     saveSettings(): Promise<void> {
         return this.host.saveSettings();
+    }
+
+    getSettingsUiPreferences(): SettingsUiPreferences {
+        return this.host.getSettingsUiPreferences();
+    }
+
+    setSettingsUiPreferences(preferences: SettingsUiPreferences): Promise<void> {
+        return this.host.setSettingsUiPreferences(preferences);
+    }
+
+    getSettingsMigrationWarnings(): SettingsMigrationWarning[] {
+        return this.host.getSettingsMigrationWarnings();
+    }
+
+    hasCloudApiKeySecret(): boolean {
+        return this.host.hasCloudApiKeySecret();
     }
 
     activateView(): Promise<void> {
@@ -149,12 +167,16 @@ export class LegacyPluginApiAdapter implements VaultCoachPluginApi {
         return this.host.getEffectiveDefaultGreeting();
     }
 
-    getRuntimeRetrievalMode(): RetrievalMode {
-        return this.host.getRuntimeRetrievalMode();
+    getRuntimeRetrievalPreference(): RetrievalPreference {
+        return this.host.getRuntimeRetrievalPreference();
     }
 
-    setRuntimeRetrievalMode(mode: RetrievalMode): void {
-        this.host.setRuntimeRetrievalMode(mode);
+    setRuntimeRetrievalPreference(preference: RetrievalPreference): void {
+        this.host.setRuntimeRetrievalPreference(preference);
+    }
+
+    getRetrievalResolution(): RetrievalResolution {
+        return this.host.getRetrievalResolution();
     }
 
     getActiveChatModelName(): string {

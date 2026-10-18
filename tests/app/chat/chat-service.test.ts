@@ -5,6 +5,7 @@ import type { VaultCoachSettings } from "../../../src/app/config/settings-types"
 
 function createService(): { service: ChatService; persist: ReturnType<typeof vi.fn> } {
     const service = new ChatService(() => ({
+        retrievalPreference: "auto",
         defaultRetrievalMode: "hybrid",
         maxConversationMessages: 3,
     } as VaultCoachSettings));
@@ -20,12 +21,12 @@ describe("ChatService", () => {
     it("owns retrieval mode and returns copied messages", async () => {
         const { service, persist } = createService();
 
-        service.setRuntimeRetrievalMode("keyword");
+        service.setRuntimeRetrievalPreference("keyword");
         await service.appendUserMessage("测试问题");
         const messages = service.getMessages();
         messages[0]!.text = "external mutation";
 
-        expect(service.getRuntimeRetrievalMode()).toBe("keyword");
+        expect(service.getRuntimeRetrievalPreference()).toBe("keyword");
         expect(service.getMessages()[0]?.text).toBe("测试问题");
         expect(persist).toHaveBeenCalledOnce();
     });

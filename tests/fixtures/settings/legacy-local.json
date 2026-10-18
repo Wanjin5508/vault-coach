@@ -1,0 +1,12 @@
+{
+  "knowledgeScopeMode": "specificFolder",
+  "knowledgeFolder": "Research Notes",
+  "modelProvider": "ollama",
+  "llmBaseUrl": "http://127.0.0.1:11434",
+  "chatModel": "qwen2.5:7b",
+  "embeddingProvider": "ollama",
+  "embeddingModel": "nomic-embed-text",
+  "defaultRetrievalMode": "vector",
+  "chunkSize": 1337,
+  "enableRerank": false
+}

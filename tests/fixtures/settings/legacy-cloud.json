@@ -1,0 +1,12 @@
+{
+  "modelProvider": "openai-compatible",
+  "cloudBaseUrl": "https://example.invalid/v1",
+  "cloudChatModel": "team-chat-model",
+  "cloudApiKeySecretName": "vault-coach-team-key",
+  "embeddingProvider": "openai-compatible",
+  "cloudEmbeddingBaseUrl": "https://embeddings.example.invalid/v1",
+  "cloudEmbeddingModel": "team-embedding-model",
+  "defaultRetrievalMode": "hybrid",
+  "generationTemperature": 0,
+  "enableQueryRewrite": false
+}

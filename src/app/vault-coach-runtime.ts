@@ -6,7 +6,8 @@ import { getErrorMessage, isAbortError } from "../utils/errors";
 import type { KnowledgeBaseStats, KnowledgeBaseSyncResult } from "../domain/documents/document-types";
 import type { PersistedPluginState, KnowledgeBaseSnapshot } from "../infrastructure/storage/storage-types";
 import type { KnowledgeIndexBusyPhase, KnowledgeIndexBusyState } from "./index/index-types";
-import type { RetrievalMode, VectorIndexStats } from "../domain/retrieval/retrieval-types";
+import type { RetrievalPreference, RetrievalResolution, VectorIndexStats } from "../domain/retrieval/retrieval-types";
+import { resolveRetrievalMode } from "./retrieval/retrieval-mode-resolver";
 import type { VaultCoachSettings } from "./config/settings-types";
 import type { ExamScopeSelection } from "../domain/exam/exam-types";
 import type { GraphRename } from "../domain/graph/graph-types";
@@ -197,13 +198,23 @@ export class VaultCoachRuntime {
         return folderPath.length === 0 ? this.t("scope.folderUnset") : this.t("scope.folder", { folder: folderPath });
     }
 
-    getRuntimeRetrievalMode(): RetrievalMode {
-        return this.services.chatService.getRuntimeRetrievalMode();
+    getRuntimeRetrievalPreference(): RetrievalPreference {
+        return this.services.chatService.getRuntimeRetrievalPreference();
     }
 
-    setRuntimeRetrievalMode(mode: RetrievalMode): void {
-        this.services.chatService.setRuntimeRetrievalMode(mode);
+    setRuntimeRetrievalPreference(preference: RetrievalPreference): void {
+        this.services.chatService.setRuntimeRetrievalPreference(preference);
         this.host.onStateChanged();
+    }
+
+    getRetrievalResolution(): RetrievalResolution {
+        return this.services.chatService.getLastRetrievalResolution() ?? resolveRetrievalMode(
+            this.services.chatService.getRuntimeRetrievalPreference(),
+            {
+                vectorEnabled: this.settings.enableVectorRetrieval,
+                vectorReady: this.services.ragEngine.getVectorIndexStats().ready,
+            },
+        );
     }
 
     getActiveChatModelName(): string {

@@ -4,11 +4,16 @@
  * 设置在进入应用服务前必须与默认值合并并完成边界校验。`*SecretName` 保存的是安全存储键名，
  * 不能保存明文凭据。影响解析、分块或向量模型的字段变更必须使相应索引失效。
  */
-import type { RetrievalMode } from "../../domain/retrieval/retrieval-types";
+import type { RetrievalMode, RetrievalPreference } from "../../domain/retrieval/retrieval-types";
 
 export type KnowledgeScopeMode = "wholeVault" | "specificFolder";
 export type ModelProvider = "ollama" | "openai-compatible";
 export type EmbeddingProvider = "ollama" | "openai-compatible";
+
+/** 仅影响设置页展示，不参与知识库、检索或模型行为。 */
+export interface SettingsUiPreferences {
+    advancedSettingsExpanded: boolean;
+}
 
 /**
  * 经默认值合并和校验后提供给应用服务的完整设置。
@@ -33,6 +38,8 @@ export interface VaultCoachSettings {
     contextTopK: number;
     answerSourceLimit: number;
     collapseSourcesByDefault: boolean;
+    retrievalPreference: RetrievalPreference;
+    /** 仅用于从 1.5 以前的数据迁移和旧版本回滚；运行时读取 `retrievalPreference`。 */
     defaultRetrievalMode: RetrievalMode;
     enableQueryRewrite: boolean;
     enableVectorRetrieval: boolean;

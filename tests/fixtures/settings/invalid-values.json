@@ -1,0 +1,7 @@
+{
+  "chunkSize": -1,
+  "generationTemperature": 8,
+  "modelProvider": "unknown",
+  "enableRerank": "yes",
+  "knowledgeFolder": ""
+}

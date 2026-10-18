@@ -120,7 +120,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         knowledgeBase,
         vectorStore,
         () => dependencies.getSettings(),
-        () => chatService.getRuntimeRetrievalMode(),
+        () => chatService.getRuntimeRetrievalPreference(),
         () => dependencies.getCloudApiKey(),
     );
     const memoryService = new LongTermMemoryService(

@@ -14,11 +14,7 @@ import {
     DEFAULT_CHUNK_OVERLAP,
     DEFAULT_CHUNK_SIZE,
     DEFAULT_CONTEXT_TOP_K,
-    DEFAULT_ENABLE_MARKDOWN_INDEXING,
-    DEFAULT_ENABLE_PDF_INDEXING,
     DEFAULT_EMBEDDING_MODEL,
-    DEFAULT_ENABLE_AUTO_INDEX_SYNC,
-    DEFAULT_ENABLE_LONG_TERM_MEMORY,
     DEFAULT_GENERATION_TEMPERATURE,
     DEFAULT_HYBRID_TOP_K,
     DEFAULT_KEYWORD_TOP_K,
@@ -26,11 +22,9 @@ import {
     DEFAULT_CLOUD_CHAT_MODEL,
     DEFAULT_CLOUD_EMBEDDING_BASE_URL,
     DEFAULT_CLOUD_EMBEDDING_MODEL,
-    DEFAULT_EMBEDDING_PROVIDER,
     DEFAULT_MAX_CONVERSATION_MESSAGES,
     DEFAULT_MEMORY_MAX_ITEMS,
     DEFAULT_MEMORY_TOP_K,
-    DEFAULT_MODEL_PROVIDER,
     DEFAULT_MAX_PDF_FILE_SIZE_MB,
     DEFAULT_MAX_PDF_PAGE_COUNT,
     DEFAULT_OLLAMA_BASE_URL,
@@ -41,72 +35,15 @@ import {
 import { getDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import type { VaultCoachPluginApi } from "./presentation/plugin-api";
 import type { VaultCoachSettings } from "./app/config/settings-types";
+import { createDefaultSettings } from "./app/config/settings-defaults";
+import { getAdvancedSettingsSummary } from "./presentation/settings/settings-section-model";
+
+export { createDefaultSettings } from "./app/config/settings-defaults";
 
 /**
  * 插件默认设置
  * 当用户第一次安装插件、还没有保存过配置时，就会使用这些默认值。
  */
-export function createDefaultSettings(): VaultCoachSettings {
-    return {
-        enableMarkdownIndexing: DEFAULT_ENABLE_MARKDOWN_INDEXING,
-        enablePdfIndexing: DEFAULT_ENABLE_PDF_INDEXING,
-        maxPdfFileSizeMb: DEFAULT_MAX_PDF_FILE_SIZE_MB,
-        maxPdfPageCount: DEFAULT_MAX_PDF_PAGE_COUNT,
-        assistantName: "VaultCoach",
-        defaultGreeting: getDefaultGreeting(),
-        openInRightSidebarOnStartup: true,
-        knowledgeScopeMode: "wholeVault",
-        knowledgeFolder: "",
-        chunkSize: DEFAULT_CHUNK_SIZE,
-        chunkOverlap: DEFAULT_CHUNK_OVERLAP,
-        keywordSearchTopK: DEFAULT_KEYWORD_TOP_K,
-        vectorSearchTopK: DEFAULT_VECTOR_TOP_K,
-        hybridSearchTopK: DEFAULT_HYBRID_TOP_K,
-        rerankTopK: DEFAULT_RERANK_TOP_K,
-        contextTopK: DEFAULT_CONTEXT_TOP_K,
-        answerSourceLimit: DEFAULT_SOURCE_LIMIT,
-        collapseSourcesByDefault: true,
-        defaultRetrievalMode: "hybrid",
-        enableQueryRewrite: true,
-        enableVectorRetrieval: true,
-        enableRerank: true,
-        generationTemperature: DEFAULT_GENERATION_TEMPERATURE,
-        modelProvider: DEFAULT_MODEL_PROVIDER,
-        llmBaseUrl: DEFAULT_OLLAMA_BASE_URL,
-        chatModel: DEFAULT_CHAT_MODEL,
-        embeddingModel: DEFAULT_EMBEDDING_MODEL,
-        embeddingProvider: DEFAULT_EMBEDDING_PROVIDER,
-        cloudEmbeddingBaseUrl: DEFAULT_CLOUD_EMBEDDING_BASE_URL,
-        cloudEmbeddingModel: DEFAULT_CLOUD_EMBEDDING_MODEL,
-        cloudBaseUrl: DEFAULT_CLOUD_BASE_URL,
-        cloudChatModel: DEFAULT_CLOUD_CHAT_MODEL,
-        cloudApiKeySecretName: "",
-        rerankBaseUrl: "",
-        rerankModel: "",
-        enableLongTermMemory: DEFAULT_ENABLE_LONG_TERM_MEMORY,
-        memoryTopK: DEFAULT_MEMORY_TOP_K,
-        memoryMaxItems: DEFAULT_MEMORY_MAX_ITEMS,
-        maxConversationMessages: DEFAULT_MAX_CONVERSATION_MESSAGES,
-        enableAutoIndexSync: DEFAULT_ENABLE_AUTO_INDEX_SYNC,
-        autoIndexDebounceMs: DEFAULT_AUTO_INDEX_DEBOUNCE_MS,
-        autoIndexMaxWaitMs: DEFAULT_AUTO_INDEX_MAX_WAIT_MS,
-        autoIndexFileThreshold: DEFAULT_AUTO_INDEX_FILE_THRESHOLD,
-        examExcludePathPatterns: "",
-        enableExamSmartFiltering: true,
-        enableSemanticGraph: false,
-        enableSemanticGraphAutoSync: false,
-        semanticGraphIncludeLargeFiles: false,
-        semanticGraphMaxSectionsPerRun: 30,
-        semanticGraphMaxSectionCharacters: 9000,
-        semanticGraphSimilarityTopK: 30,
-        semanticGraphSimilarityThreshold: 0.86,
-        learningMapAutoRelationsEnabled: true,
-        learningMapAutoModelThreshold: 0.95,
-        learningMapAutoIncludeRuleRelations: true,
-        learningMapAutoIncludeSimilarityRelations: false,
-    };
-}
-
 /**
  * 当前进程内使用的默认设置快照。
  */
@@ -144,6 +81,32 @@ export class VaultCoachSettingTab extends PluginSettingTab {
      * 保持一致，使设置搜索能够索引全部面向用户的名称。
      */
     getSettingDefinitions(): SettingDefinitionItem[] {
+        if (!this.plugin.getSettingsUiPreferences().advancedSettingsExpanded) {
+            return [
+                this.createHeadingDefinition("settings.title"),
+                this.createHeadingDefinition("settings.knowledge.heading", "settings.knowledge.desc"),
+                this.createDropdownDefinition("knowledgeScopeMode", "settings.scope.name", undefined, {
+                    wholeVault: this.t("settings.scope.wholeVault"),
+                    specificFolder: this.t("settings.scope.specificFolder"),
+                }),
+                this.createTextDefinition("knowledgeFolder", "settings.folder.name", "settings.folder.desc", this.t("settings.folder.placeholder")),
+                this.createHeadingDefinition("settings.model.heading", "settings.model.desc"),
+                this.createDropdownDefinition("modelProvider", "settings.model.chatProvider.name", "settings.model.chatProvider.desc", this.createModelProviderOptions()),
+                ...(this.plugin.settings.modelProvider === "ollama"
+                    ? [
+                        this.createTextDefinition("llmBaseUrl", "settings.localServiceBaseUrl.name", "settings.localServiceBaseUrl.desc", DEFAULT_OLLAMA_BASE_URL),
+                        this.createTextDefinition("chatModel", "settings.localChatModel.name", "settings.localChatModel.desc", DEFAULT_CHAT_MODEL),
+                    ]
+                    : [
+                        this.createTextDefinition("cloudBaseUrl", "settings.cloudChatBaseUrl.name", "settings.cloudChatBaseUrl.desc", DEFAULT_CLOUD_BASE_URL),
+                        this.createTextDefinition("cloudChatModel", "settings.cloudChatModel.name", "settings.cloudChatModel.desc", DEFAULT_CLOUD_CHAT_MODEL),
+                        this.createCloudApiKeyDefinition(),
+                    ]),
+                this.createSemanticSearchStatusDefinition(),
+                this.createAdvancedVisibilityDefinition(),
+            ];
+        }
+
         return [
             this.createHeadingDefinition("settings.title"),
 
@@ -151,7 +114,8 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             this.createTextDefinition("assistantName", "settings.assistantName.name", "settings.assistantName.desc", this.t("settings.assistantName.placeholder")),
             this.createTextAreaDefinition("defaultGreeting", "settings.defaultGreeting.name", "settings.defaultGreeting.desc", this.t("settings.defaultGreeting.placeholder")),
             this.createToggleDefinition("openInRightSidebarOnStartup", "settings.openOnStartup.name"),
-            this.createDropdownDefinition("defaultRetrievalMode", "settings.defaultRetrievalMode.name", "settings.defaultRetrievalMode.desc", {
+            this.createDropdownDefinition("retrievalPreference", "settings.defaultRetrievalMode.name", "settings.defaultRetrievalMode.desc", {
+                auto: "Auto",
                 keyword: this.t("view.retrieval.keyword"),
                 vector: this.t("view.retrieval.vector"),
                 hybrid: this.t("view.retrieval.hybrid"),
@@ -232,6 +196,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             this.createNumericTextDefinition("learningMapAutoModelThreshold", "settings.learningMapAuto.threshold.name", "settings.learningMapAuto.threshold.desc", 0.95),
             this.createToggleDefinition("learningMapAutoIncludeRuleRelations", "settings.learningMapAuto.rules.name", "settings.learningMapAuto.rules.desc"),
             this.createToggleDefinition("learningMapAutoIncludeSimilarityRelations", "settings.learningMapAuto.similarity.name", "settings.learningMapAuto.similarity.desc"),
+            this.createAdvancedVisibilityDefinition(),
         ];
     }
 
@@ -253,8 +218,8 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             case "enableQueryRewrite":
             case "enableRerank":
                 return this.updateBooleanSetting(key, value);
-            case "defaultRetrievalMode":
-                return this.updateDefaultRetrievalMode(value);
+            case "retrievalPreference":
+                return this.updateRetrievalPreference(value);
             case "knowledgeScopeMode":
                 return this.updateKnowledgeScopeMode(value);
             case "knowledgeFolder":
@@ -426,10 +391,42 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         return { name, desc, control: { type: "text", key, placeholder: String(fallback) } };
     }
 
+    /** 高级设置展开状态单独持久化，避免把纯 UI 偏好混入运行参数。 */
+    private createAdvancedVisibilityDefinition(): SettingDefinitionItem {
+        const summary = getAdvancedSettingsSummary(this.plugin.settings);
+        return {
+            name: "Show advanced settings",
+            desc: summary.customized
+                ? `${summary.customizedCount} custom advanced settings are active. Expand to review them.`
+                : "Embedding, retrieval, indexing and diagnostic controls for experienced users.",
+            render: (setting) => {
+                setting.addToggle((toggle) => toggle
+                    .setValue(this.plugin.getSettingsUiPreferences().advancedSettingsExpanded)
+                    .onChange(async (advancedSettingsExpanded) => {
+                        await this.plugin.setSettingsUiPreferences({ advancedSettingsExpanded });
+                        this.refreshDeclarativeSettings();
+                    }));
+            },
+        };
+    }
+
+    private createSemanticSearchStatusDefinition(): SettingDefinitionItem {
+        const stats = this.plugin.getVectorIndexStats();
+        const provider = this.plugin.settings.embeddingProvider === "ollama" ? "Ollama" : "OpenAI-compatible";
+        const status = stats.ready ? `Ready (${stats.vectorCount} vectors)` : "Not ready; keyword search remains available";
+        const privacy = this.plugin.settings.embeddingProvider === "ollama"
+            ? "Embedding runs through your configured local Ollama service."
+            : "Indexed text is sent to the configured embedding service when an index is built.";
+        return { name: "Semantic search", desc: `${status}. Provider: ${provider}. ${privacy}` };
+    }
+
     private createCloudApiKeyDefinition(): SettingDefinitionItem {
+        const needsAttention = this.plugin.settings.cloudApiKeySecretName.length > 0 && !this.plugin.hasCloudApiKeySecret();
         return {
             name: this.t("settings.cloudApiKey.name"),
-            desc: this.t("settings.cloudApiKey.desc"),
+            desc: needsAttention
+                ? `${this.t("settings.cloudApiKey.desc")} Needs attention: the selected secret is unavailable on this device.`
+                : this.t("settings.cloudApiKey.desc"),
             render: (setting) => {
                 setting.addComponent((containerEl) => new SecretComponent(this.app, containerEl)
                     .setValue(this.plugin.settings.cloudApiKeySecretName)
@@ -472,10 +469,11 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         await this.plugin.saveSettings();
     }
 
-    private async updateDefaultRetrievalMode(value: unknown): Promise<void> {
-        if (value !== "keyword" && value !== "vector" && value !== "hybrid") return;
-        this.plugin.settings.defaultRetrievalMode = value;
-        this.plugin.setRuntimeRetrievalMode(value);
+    private async updateRetrievalPreference(value: unknown): Promise<void> {
+        if (value !== "auto" && value !== "keyword" && value !== "vector" && value !== "hybrid") return;
+        this.plugin.settings.retrievalPreference = value;
+        this.plugin.settings.defaultRetrievalMode = value === "auto" ? "hybrid" : value;
+        this.plugin.setRuntimeRetrievalPreference(value);
         await this.plugin.saveSettings();
         this.plugin.refreshAllViews();
     }
@@ -703,6 +701,12 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             .setHeading()
             .setName(this.t("settings.title"));
 
+        if (!this.plugin.getSettingsUiPreferences().advancedSettingsExpanded) {
+            this.renderCoreSettings(containerEl);
+            this.renderAdvancedVisibilitySetting(containerEl);
+            return;
+        }
+
         this.renderGeneralSection(containerEl);
         this.renderKnowledgeSection(containerEl);
         this.renderExamSection(containerEl);
@@ -710,6 +714,74 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         this.renderSemanticGraphSection(containerEl);
         this.renderMemorySection(containerEl);
         this.renderAdvancedRagSection(containerEl);
+        this.renderAdvancedVisibilitySetting(containerEl);
+    }
+
+    /** 默认层只展示首次使用和日常切换必须理解的选项。 */
+    private renderCoreSettings(containerEl: HTMLElement): void {
+        new Setting(containerEl).setHeading().setName(this.t("settings.knowledge.heading")).setDesc(this.t("settings.knowledge.desc"));
+        new Setting(containerEl)
+            .setName(this.t("settings.scope.name"))
+            .addDropdown((dropdown) => dropdown
+                .addOption("wholeVault", this.t("settings.scope.wholeVault"))
+                .addOption("specificFolder", this.t("settings.scope.specificFolder"))
+                .setValue(this.plugin.settings.knowledgeScopeMode)
+                .onChange((value) => this.updateKnowledgeScopeMode(value)));
+        new Setting(containerEl)
+            .setName(this.t("settings.folder.name"))
+            .setDesc(this.t("settings.folder.desc"))
+            .addText((text) => text.setValue(this.plugin.settings.knowledgeFolder).onChange((value) => this.updateKnowledgeFolder(value)));
+
+        new Setting(containerEl).setHeading().setName(this.t("settings.model.heading")).setDesc(this.t("settings.model.desc"));
+        new Setting(containerEl)
+            .setName(this.t("settings.model.chatProvider.name"))
+            .setDesc(this.t("settings.model.chatProvider.desc"))
+            .addDropdown((dropdown) => {
+                for (const [value, label] of Object.entries(this.createModelProviderOptions())) dropdown.addOption(value, label);
+                dropdown.setValue(this.plugin.settings.modelProvider).onChange((value) => this.updateModelProvider(value));
+            });
+        if (this.plugin.settings.modelProvider === "ollama") {
+            new Setting(containerEl).setName(this.t("settings.localServiceBaseUrl.name")).setDesc(this.t("settings.localServiceBaseUrl.desc"))
+                .addText((text) => text.setValue(this.plugin.settings.llmBaseUrl).onChange((value) => this.updateLlmBaseUrl(value)));
+            new Setting(containerEl).setName(this.t("settings.localChatModel.name")).setDesc(this.t("settings.localChatModel.desc"))
+                .addText((text) => text.setValue(this.plugin.settings.chatModel).onChange((value) => this.updateTrimmedTextSetting("chatModel", value, DEFAULT_CHAT_MODEL)));
+        } else {
+            new Setting(containerEl).setName(this.t("settings.cloudChatBaseUrl.name")).setDesc(this.t("settings.cloudChatBaseUrl.desc"))
+                .addText((text) => text.setValue(this.plugin.settings.cloudBaseUrl).onChange((value) => this.updateTrimmedTextSetting("cloudBaseUrl", value, DEFAULT_CLOUD_BASE_URL)));
+            new Setting(containerEl).setName(this.t("settings.cloudChatModel.name")).setDesc(this.t("settings.cloudChatModel.desc"))
+                .addText((text) => text.setValue(this.plugin.settings.cloudChatModel).onChange((value) => this.updateTrimmedTextSetting("cloudChatModel", value, DEFAULT_CLOUD_CHAT_MODEL)));
+            const needsAttention = this.plugin.settings.cloudApiKeySecretName.length > 0 && !this.plugin.hasCloudApiKeySecret();
+            const secretSetting = new Setting(containerEl)
+                .setName(this.t("settings.cloudApiKey.name"))
+                .setDesc(needsAttention
+                    ? `${this.t("settings.cloudApiKey.desc")} Needs attention: the selected secret is unavailable on this device.`
+                    : this.t("settings.cloudApiKey.desc"));
+            secretSetting.addComponent((secretContainer) => new SecretComponent(this.app, secretContainer)
+                .setValue(this.plugin.settings.cloudApiKeySecretName)
+                .onChange((value) => { void this.updateCloudApiKeySecretName(value); }));
+        }
+        const stats = this.plugin.getVectorIndexStats();
+        const privacy = this.plugin.settings.embeddingProvider === "ollama"
+            ? "Embedding runs through your configured local Ollama service."
+            : "Indexed text is sent to the configured embedding service when an index is built.";
+        new Setting(containerEl)
+            .setName("Semantic search")
+            .setDesc(`${stats.ready ? `Ready (${stats.vectorCount} vectors)` : "Not ready; keyword search remains available"}. ${privacy}`);
+    }
+
+    private renderAdvancedVisibilitySetting(containerEl: HTMLElement): void {
+        const summary = getAdvancedSettingsSummary(this.plugin.settings);
+        new Setting(containerEl)
+            .setName("Show advanced settings")
+            .setDesc(summary.customized
+                ? `${summary.customizedCount} custom advanced settings are active. Expand to review them.`
+                : "Embedding, retrieval, indexing and diagnostic controls for experienced users.")
+            .addToggle((toggle) => toggle
+                .setValue(this.plugin.getSettingsUiPreferences().advancedSettingsExpanded)
+                .onChange(async (advancedSettingsExpanded) => {
+                    await this.plugin.setSettingsUiPreferences({ advancedSettingsExpanded });
+                    this.renderSettings();
+                }));
     }
 
     /** 单独渲染可选模型功能，使其隐私边界在设置页中保持明确。 */
@@ -862,17 +934,15 @@ export class VaultCoachSettingTab extends PluginSettingTab {
             .setName(this.t("settings.defaultRetrievalMode.name"))
             .setDesc(this.t("settings.defaultRetrievalMode.desc"))
             .addDropdown((dropdown) => {
+                dropdown.addOption("auto", "Auto");
                 this.addRetrievalModeOptions(dropdown);
                 dropdown
-                    .setValue(this.plugin.settings.defaultRetrievalMode)
+                    .setValue(this.plugin.settings.retrievalPreference)
                     .onChange(async (value: string) => {
-                        if (value !== "keyword" && value !== "vector" && value !== "hybrid") {
+                        if (value !== "auto" && value !== "keyword" && value !== "vector" && value !== "hybrid") {
                             return;
                         }
-                        this.plugin.settings.defaultRetrievalMode = value;
-                        this.plugin.setRuntimeRetrievalMode(value);
-                        await this.plugin.saveSettings();
-                        this.plugin.refreshAllViews();
+                        await this.updateRetrievalPreference(value);
                     });
             });
 
