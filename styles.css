@@ -2210,3 +2210,119 @@
 .vault-coach-storage-footprint-note {
     margin-top: 14px;
 }
+
+/* Vault Coach 设置页：类别、范围选择器与进阶 disclosure 只作用于插件命名空间。 */
+.vault-coach-settings__category {
+    margin-block: var(--size-4-3) var(--size-4-5);
+}
+
+.vault-coach-settings__category .setting-item:not(.setting-item-heading) {
+    padding-inline-start: var(--size-4-4);
+}
+
+.vault-coach-settings__advanced-disclosure-row {
+    padding: 0;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.vault-coach-settings__advanced-disclosure {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--size-4-3);
+    align-items: center;
+    width: 100%;
+    min-height: 64px;
+    padding: var(--size-4-3) var(--size-4-2);
+    border: 0;
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--text-normal);
+    text-align: start;
+    box-shadow: none;
+    cursor: pointer;
+}
+
+.vault-coach-settings__advanced-disclosure:hover,
+.vault-coach-settings__advanced-disclosure:focus-visible {
+    background: var(--background-modifier-hover);
+}
+
+.vault-coach-settings__advanced-disclosure:focus-visible {
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: 2px;
+}
+
+.vault-coach-settings__advanced-disclosure-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-1);
+    min-width: 0;
+}
+
+.vault-coach-settings__advanced-disclosure-title {
+    font-size: var(--h2-size);
+    font-weight: var(--h2-weight);
+    line-height: var(--h2-line-height);
+}
+
+.vault-coach-settings__advanced-disclosure-summary {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-normal);
+}
+
+.vault-coach-settings__advanced-disclosure-icon {
+    color: var(--text-muted);
+    font-size: var(--font-ui-large);
+    transition: transform 120ms ease;
+}
+
+.vault-coach-settings__advanced-content-anchor {
+    display: none;
+}
+
+.vault-coach-scope-picker__content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-1);
+    min-width: 0;
+}
+
+.vault-coach-scope-picker__content.is-depth-two {
+    padding-inline-start: var(--size-4-4);
+}
+
+.vault-coach-scope-picker__label {
+    overflow-wrap: anywhere;
+}
+
+.vault-coach-scope-picker__badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--size-4-2);
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+.vault-coach-scope-picker__item.is-selected .vault-coach-scope-picker__label::before {
+    content: "✓";
+    margin-inline-end: var(--size-4-2);
+    color: var(--interactive-accent);
+}
+
+.vault-coach-scope-picker__item.is-missing .vault-coach-scope-picker__badges {
+    color: var(--text-warning);
+}
+
+@media (max-width: 520px) {
+    .vault-coach-settings__category .setting-item:not(.setting-item-heading),
+    .vault-coach-scope-picker__content.is-depth-two {
+        padding-inline-start: var(--size-4-2);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vault-coach-settings__advanced-disclosure-icon {
+        transition: none;
+    }
+}

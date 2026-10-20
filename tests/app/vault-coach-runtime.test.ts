@@ -240,9 +240,96 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
     });
 });
 
+describe("VaultCoachRuntime knowledge scope settings", () => {
+    it("lists only selectable folders while preserving a deep legacy selection", async () => {
+        const harness = createRuntimeHarness();
+        harness.settings.knowledgeScopeMode = "specificFolder";
+        harness.settings.knowledgeFolder = "研究/课程/2025";
+        harness.setFolders(["研究", "研究/课程", "研究/课程/2025", ".vault-coach/graph"]);
+        await harness.runtime.initialize();
+
+        const options = harness.runtime.listKnowledgeScopeOptions();
+
+        expect(options.map((option) => option.kind === "whole-vault" ? option.id : option.path)).toEqual([
+            "whole-vault",
+            "研究/课程/2025",
+            "研究",
+            "研究/课程",
+        ]);
+        expect(options[1]).toMatchObject({ kind: "legacy-folder", exists: true, selected: true });
+        await harness.runtime.dispose();
+    });
+
+    it("saves a changed scope once and marks the index dirty only after persistence succeeds", async () => {
+        const harness = createRuntimeHarness();
+        harness.setFolders(["项目", "项目/AI"]);
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+
+        await harness.runtime.updateKnowledgeScope({ kind: "folder", path: " 项目\\AI/ " });
+
+        expect(harness.settings).toMatchObject({
+            knowledgeScopeMode: "specificFolder",
+            knowledgeFolder: "项目/AI",
+        });
+        expect(harness.saveSettings).toHaveBeenCalledOnce();
+        expect(harness.runtime.isTextIndexDirty()).toBe(true);
+        await harness.runtime.dispose();
+    });
+
+    it("retains the previous folder when switching to the whole Vault and skips repeated choices", async () => {
+        const harness = createRuntimeHarness();
+        harness.settings.knowledgeScopeMode = "specificFolder";
+        harness.settings.knowledgeFolder = "项目/AI";
+        await harness.runtime.initialize();
+
+        await harness.runtime.updateKnowledgeScope({ kind: "whole-vault" });
+        await harness.runtime.updateKnowledgeScope({ kind: "whole-vault" });
+
+        expect(harness.settings.knowledgeScopeMode).toBe("wholeVault");
+        expect(harness.settings.knowledgeFolder).toBe("项目/AI");
+        expect(harness.saveSettings).toHaveBeenCalledOnce();
+        await harness.runtime.dispose();
+    });
+
+    it("rolls back both fields and leaves a clean index clean when persistence fails", async () => {
+        const harness = createRuntimeHarness();
+        harness.setFolders(["项目", "项目/AI"]);
+        await harness.runtime.initialize();
+        await harness.runtime.rebuildKnowledgeBase(false);
+        harness.saveSettings.mockRejectedValueOnce(new Error("disk unavailable"));
+
+        await expect(harness.runtime.updateKnowledgeScope({ kind: "folder", path: "项目/AI" }))
+            .rejects.toThrow("disk unavailable");
+
+        expect(harness.settings.knowledgeScopeMode).toBe("wholeVault");
+        expect(harness.settings.knowledgeFolder).toBe("");
+        expect(harness.runtime.isTextIndexDirty()).toBe(false);
+        await harness.runtime.dispose();
+    });
+
+    it("rejects missing or deep new folders before persistence", async () => {
+        const harness = createRuntimeHarness();
+        harness.setFolders(["项目", "项目/AI", "项目/AI/论文"]);
+        await harness.runtime.initialize();
+
+        await expect(harness.runtime.updateKnowledgeScope({ kind: "folder", path: "项目/AI/论文" }))
+            .rejects.toThrow("第一层或第二层");
+        await expect(harness.runtime.updateKnowledgeScope({ kind: "folder", path: "不存在" }))
+            .rejects.toThrow("第一层或第二层");
+
+        expect(harness.saveSettings).not.toHaveBeenCalled();
+        expect(harness.settings.knowledgeScopeMode).toBe("wholeVault");
+        await harness.runtime.dispose();
+    });
+});
+
 function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = null): {
     runtime: VaultCoachRuntime;
     adapter: InMemoryVaultAdapter;
+    settings: VaultCoachSettings;
+    saveSettings: ReturnType<typeof vi.fn>;
+    setFolders(paths: string[]): void;
     renameKnowledgeFile(oldPath: string, newPath: string): void;
     writeKnowledgeFile(path: string, content: string): void;
     deleteKnowledgeFile(path: string): void;
@@ -260,11 +347,16 @@ function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = nu
         }],
     ]);
     const adapter = new InMemoryVaultAdapter(failWrite);
+    let folderPaths: string[] = [];
     const app = {
         vault: {
             configDir: TEST_CONFIG_DIR,
             adapter,
             getFiles: (): TFile[] => Array.from(files.values()).map((entry) => entry.file),
+            getAllFolders: () => [
+                { path: "/", isRoot: () => true },
+                ...folderPaths.map((path) => ({ path, isRoot: () => false })),
+            ],
             getAbstractFileByPath: (path: string): TFile | null => files.get(normalizePath(path))?.file ?? null,
             cachedRead: async (file: TFile): Promise<string> => {
                 const entry = files.get(file.path);
@@ -290,10 +382,12 @@ function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = nu
         enableVectorRetrieval: false,
         enableAutoIndexSync: false,
     };
+    const saveSettings = vi.fn(async () => undefined);
     const host: VaultCoachRuntimeHost = {
         app,
         pluginId: "vault-coach",
         getSettings: () => settings,
+        saveSettings,
         onStateChanged: () => undefined,
         showNotice: () => undefined,
         translate: (key) => key,
@@ -303,6 +397,9 @@ function createRuntimeHarness(failWrite: ((path: string) => boolean) | null = nu
     return {
         runtime: createRuntime(),
         adapter,
+        settings,
+        saveSettings,
+        setFolders: (paths) => { folderPaths = [...paths]; },
         renameKnowledgeFile: (oldPath, newPath) => {
             const entry = files.get(oldPath);
             if (!entry) throw new Error(`Missing fixture file: ${oldPath}`);

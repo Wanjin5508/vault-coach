@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { migrateSettings } from "../../../src/app/config/settings-migrations";
 import { FutureSettingsSchemaError, SettingsRepository } from "../../../src/app/config/settings-repository";
+import { CURRENT_SETTINGS_SCHEMA_VERSION } from "../../../src/app/config/settings-schema";
 
 function fixture(name: string): unknown {
     return JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures/settings", name), "utf8"));
@@ -46,6 +47,31 @@ describe("settings migration", () => {
             retrievalPreference: "keyword",
             keywordSearchTopK: 31,
             enableVectorRetrieval: false,
+        });
+    });
+
+    it("round-trips an existing deep knowledge folder without a schema bump", async () => {
+        const migrated = migrateSettings(fixture("legacy-local.json"));
+        expect(migrated.status).toBe("ready");
+        if (migrated.status !== "ready") return;
+        const writes: unknown[] = [];
+        const repository = new SettingsRepository({
+            loadData: async () => ({
+                ...migrated.settings,
+                settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
+                knowledgeScopeMode: "specificFolder",
+                knowledgeFolder: "研究/课程/2025/强化学习",
+            }),
+            saveData: async (data) => { writes.push(data); },
+        });
+
+        const result = await repository.load();
+        await repository.save(result.settings);
+
+        expect(result.settings.knowledgeFolder).toBe("研究/课程/2025/强化学习");
+        expect(writes.at(-1)).toMatchObject({
+            settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
+            knowledgeFolder: "研究/课程/2025/强化学习",
         });
     });
 
@@ -119,5 +145,35 @@ describe("settings migration", () => {
         await expect(repository.save(result.settings)).rejects.toThrow("disk unavailable");
         await expect(repository.save({ ...result.settings, assistantName: "Recovered" })).resolves.toBeUndefined();
         expect(saveData).toHaveBeenCalledTimes(2);
+    });
+
+    it("rolls back the in-memory UI preference when persistence fails", async () => {
+        const saveData = vi.fn(async () => undefined);
+        const repository = new SettingsRepository({ loadData: async () => null, saveData });
+        const result = await repository.load();
+        saveData.mockRejectedValueOnce(new Error("disk unavailable"));
+
+        await expect(repository.setUiPreferences(result.settings, { advancedSettingsExpanded: true }))
+            .rejects.toThrow("disk unavailable");
+
+        expect(repository.getUiPreferences()).toEqual({ advancedSettingsExpanded: false });
+    });
+
+    it("keeps an existing expanded advanced preference after upgrade", async () => {
+        const migrated = migrateSettings(fixture("legacy-local.json"));
+        expect(migrated.status).toBe("ready");
+        if (migrated.status !== "ready") return;
+        const repository = new SettingsRepository({
+            loadData: async () => ({
+                ...migrated.settings,
+                settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
+                uiPreferences: { advancedSettingsExpanded: true },
+            }),
+            saveData: async () => undefined,
+        });
+
+        await repository.load();
+
+        expect(repository.getUiPreferences()).toEqual({ advancedSettingsExpanded: true });
     });
 });

@@ -18,6 +18,14 @@ describe("LegacyPluginApiAdapter", () => {
         const hostRebuild = vi.fn(async () => undefined);
         const hostClear = vi.fn(async () => undefined);
         const hostAbort = vi.fn();
+        const getKnowledgeScopeSelection = vi.fn(() => ({ kind: "whole-vault" as const }));
+        const listKnowledgeScopeOptions = vi.fn(() => [{
+            id: "whole-vault" as const,
+            kind: "whole-vault" as const,
+            depth: 0 as const,
+            selected: true,
+        }]);
+        const updateKnowledgeScope = vi.fn(async () => undefined);
 
         const application = {
             chat: {
@@ -53,6 +61,9 @@ describe("LegacyPluginApiAdapter", () => {
             rebuildKnowledgeBase: hostRebuild,
             clearKnowledgeIndex: hostClear,
             abortKnowledgeIndexBuild: hostAbort,
+            getKnowledgeScopeSelection,
+            listKnowledgeScopeOptions,
+            updateKnowledgeScope,
         } as unknown as LegacyPluginApiHost;
         const adapter = new LegacyPluginApiAdapter(application, host);
 
@@ -66,6 +77,9 @@ describe("LegacyPluginApiAdapter", () => {
         await adapter.rebuildKnowledgeBase(false);
         await adapter.clearKnowledgeIndex(false);
         adapter.abortKnowledgeIndexBuild(false);
+        expect(adapter.getKnowledgeScopeSelection()).toEqual({ kind: "whole-vault" });
+        expect(adapter.listKnowledgeScopeOptions()).toHaveLength(1);
+        await adapter.updateKnowledgeScope({ kind: "folder", path: "项目/AI" });
 
         expect(appendUserMessage).toHaveBeenCalledWith("问题");
         expect(resetConversation).toHaveBeenCalledOnce();
@@ -78,6 +92,9 @@ describe("LegacyPluginApiAdapter", () => {
         expect(clear).toHaveBeenCalledOnce();
         expect(abort).toHaveBeenCalledOnce();
         expect(adapter.getMessages()).toEqual([{ role: "assistant", text: "你好", createdAt: 1 }]);
+        expect(getKnowledgeScopeSelection).toHaveBeenCalledOnce();
+        expect(listKnowledgeScopeOptions).toHaveBeenCalledOnce();
+        expect(updateKnowledgeScope).toHaveBeenCalledWith({ kind: "folder", path: "项目/AI" });
 
         await adapter.rebuildKnowledgeBase(true);
         await adapter.clearKnowledgeIndex(true);

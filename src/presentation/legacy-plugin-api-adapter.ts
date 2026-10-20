@@ -21,6 +21,7 @@ import type { SettingsMigrationWarning } from "../app/config/settings-schema";
 import type { VaultCoachPluginApi } from "./plugin-api";
 import type { SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
+import type { KnowledgeScopeOption, KnowledgeScopeSelection } from "../app/knowledge/knowledge-scope-types";
 
 type ApplicationDelegatedMethod =
     | "resetConversation"
@@ -78,6 +79,18 @@ export class LegacyPluginApiAdapter implements VaultCoachPluginApi {
 
     setSettingsUiPreferences(preferences: SettingsUiPreferences): Promise<void> {
         return this.host.setSettingsUiPreferences(preferences);
+    }
+
+    getKnowledgeScopeSelection(): KnowledgeScopeSelection {
+        return this.host.getKnowledgeScopeSelection();
+    }
+
+    listKnowledgeScopeOptions(): KnowledgeScopeOption[] {
+        return this.host.listKnowledgeScopeOptions();
+    }
+
+    updateKnowledgeScope(selection: KnowledgeScopeSelection): Promise<void> {
+        return this.host.updateKnowledgeScope(selection);
     }
 
     getSettingsMigrationWarnings(): SettingsMigrationWarning[] {

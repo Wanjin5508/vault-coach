@@ -23,6 +23,7 @@ import type { SettingsUiPreferences, VaultCoachSettings } from "../app/config/se
 import type { SettingsMigrationWarning } from "../app/config/settings-schema";
 import type { SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
+import type { KnowledgeScopeOption, KnowledgeScopeSelection } from "../app/knowledge/knowledge-scope-types";
 
 /**
  * UI 层和设置页能调用的插件能力。
@@ -36,6 +37,9 @@ export interface VaultCoachPluginApi {
     saveSettings(): Promise<void>;
     getSettingsUiPreferences(): SettingsUiPreferences;
     setSettingsUiPreferences(preferences: SettingsUiPreferences): Promise<void>;
+    getKnowledgeScopeSelection(): KnowledgeScopeSelection;
+    listKnowledgeScopeOptions(): KnowledgeScopeOption[];
+    updateKnowledgeScope(selection: KnowledgeScopeSelection): Promise<void>;
     getSettingsMigrationWarnings(): SettingsMigrationWarning[];
     hasCloudApiKeySecret(): boolean;
     activateView(): Promise<void>;

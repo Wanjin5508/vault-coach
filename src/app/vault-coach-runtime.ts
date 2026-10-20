@@ -1,5 +1,4 @@
 import { normalizePath, type App } from "obsidian";
-import { VAULT_COACH_HIDDEN_DIR_PATH } from "../constants";
 import { createApplicationContainer, type ApplicationContainer } from "./application-container";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, type TranslationKey } from "../i18n";
 import { getErrorMessage, isAbortError } from "../utils/errors";
@@ -9,6 +8,12 @@ import type { KnowledgeIndexBusyPhase, KnowledgeIndexBusyState } from "./index/i
 import type { RetrievalPreference, RetrievalResolution, VectorIndexStats } from "../domain/retrieval/retrieval-types";
 import { resolveRetrievalMode } from "./retrieval/retrieval-mode-resolver";
 import type { VaultCoachSettings } from "./config/settings-types";
+import { buildKnowledgeScopeOptions } from "./knowledge/knowledge-scope-catalog";
+import type {
+    KnowledgeScopeOption,
+    KnowledgeScopeSelection,
+    VaultFolderSnapshot,
+} from "./knowledge/knowledge-scope-types";
 import type { ExamScopeSelection } from "../domain/exam/exam-types";
 import type { GraphRename } from "../domain/graph/graph-types";
 import type { StorageFootprint, StorageFootprintCategory } from "../domain/index-lifecycle/storage-footprint";
@@ -17,6 +22,7 @@ import {
     type SourceInventoryDiff,
     type SourceInventoryStatus,
 } from "../domain/index-lifecycle/source-inventory";
+import { isVaultCoachHiddenPath, normalizeVaultPath } from "../domain/documents/vault-path";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
@@ -25,6 +31,7 @@ export interface VaultCoachRuntimeHost {
     app: App;
     pluginId: string;
     getSettings(): VaultCoachSettings;
+    saveSettings(): Promise<void>;
     onStateChanged(): void;
     showNotice(message: string, timeout?: number): void;
     translate: TranslateFn;
@@ -196,6 +203,64 @@ export class VaultCoachRuntime {
         }
         const folderPath = this.settings.knowledgeFolder.trim().replace(/\/$/, "");
         return folderPath.length === 0 ? this.t("scope.folderUnset") : this.t("scope.folder", { folder: folderPath });
+    }
+
+    /** 返回当前设置对应的单一 UI 范围，不修改旧的持久化字段。 */
+    getKnowledgeScopeSelection(): KnowledgeScopeSelection {
+        return this.settings.knowledgeScopeMode === "wholeVault"
+            ? { kind: "whole-vault" }
+            : { kind: "folder", path: normalizeVaultPath(this.settings.knowledgeFolder) };
+    }
+
+    /** 每次打开选择器时重新读取 Vault 目录，避免跨会话缓存已经失效的路径。 */
+    listKnowledgeScopeOptions(): KnowledgeScopeOption[] {
+        const folders: VaultFolderSnapshot[] = this.host.app.vault.getAllFolders(true).map((folder) => ({
+            path: folder.path,
+            isRoot: folder.isRoot(),
+        }));
+        return buildKnowledgeScopeOptions({
+            folders,
+            current: this.getKnowledgeScopeSelection(),
+            maxSelectableDepth: 2,
+        });
+    }
+
+    /**
+     * 原子更新知识库范围。
+     *
+     * 保存成功后才使索引失效；保存失败会恢复两个旧字段，防止内存状态与 data.json 分裂。
+     */
+    async updateKnowledgeScope(selection: KnowledgeScopeSelection): Promise<void> {
+        const normalizedSelection = normalizeKnowledgeScopeSelection(selection);
+        const previousMode = this.settings.knowledgeScopeMode;
+        const previousFolder = this.settings.knowledgeFolder;
+        const previousSignature = getEffectiveKnowledgeScopeSignature(previousMode, previousFolder);
+        const nextMode = normalizedSelection.kind === "whole-vault" ? "wholeVault" : "specificFolder";
+        const nextFolder = normalizedSelection.kind === "whole-vault"
+            ? previousFolder
+            : normalizedSelection.path;
+        const nextSignature = getEffectiveKnowledgeScopeSignature(nextMode, nextFolder);
+        if (previousSignature === nextSignature) return;
+        if (normalizedSelection.kind === "folder") {
+            const isSelectableFolder = this.listKnowledgeScopeOptions().some((option) => {
+                return option.kind === "folder" && option.path === normalizedSelection.path && option.exists;
+            });
+            if (!isSelectableFolder) {
+                throw new Error("只能选择 Vault 中第一层或第二层的现有目录。");
+            }
+        }
+
+        this.settings.knowledgeScopeMode = nextMode;
+        this.settings.knowledgeFolder = nextFolder;
+        try {
+            await this.host.saveSettings();
+        } catch (error: unknown) {
+            this.settings.knowledgeScopeMode = previousMode;
+            this.settings.knowledgeFolder = previousFolder;
+            throw error;
+        }
+        this.markKnowledgeBaseDirty();
+        this.host.onStateChanged();
     }
 
     getRuntimeRetrievalPreference(): RetrievalPreference {
@@ -779,7 +844,19 @@ export class VaultCoachRuntime {
     }
 
     private isVaultCoachHiddenPath(path: string): boolean {
-        const normalizedPath = normalizePath(path);
-        return normalizedPath === VAULT_COACH_HIDDEN_DIR_PATH || normalizedPath.startsWith(`${VAULT_COACH_HIDDEN_DIR_PATH}/`);
+        return isVaultCoachHiddenPath(path);
     }
+}
+
+function normalizeKnowledgeScopeSelection(selection: KnowledgeScopeSelection): KnowledgeScopeSelection {
+    if (selection.kind === "whole-vault") return selection;
+    const path = normalizeVaultPath(selection.path);
+    if (path.length === 0 || isVaultCoachHiddenPath(path)) {
+        throw new Error("请选择有效的 Vault 目录。");
+    }
+    return { kind: "folder", path };
+}
+
+function getEffectiveKnowledgeScopeSignature(mode: VaultCoachSettings["knowledgeScopeMode"], folder: string): string {
+    return mode === "wholeVault" ? "whole-vault" : `folder:${normalizeVaultPath(folder)}`;
 }

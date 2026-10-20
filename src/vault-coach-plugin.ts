@@ -25,6 +25,7 @@ import type { SourceInventoryStatus } from "./domain/index-lifecycle/source-inve
 import { ConfirmActionModal } from "./presentation/modals/confirm-action-modal";
 import { StorageFootprintModal } from "./presentation/modals/storage-footprint-modal";
 import { requestSemanticGraphCapacityDecision } from "./presentation/modals/semantic-graph-capacity-modal";
+import type { KnowledgeScopeOption, KnowledgeScopeSelection } from "./app/knowledge/knowledge-scope-types";
 
 /** Obsidian 组合根：只负责生命周期、UI 注册和轻量宿主适配。 */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
@@ -40,6 +41,7 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
             app: this.app,
             pluginId: this.manifest.id,
             getSettings: () => this.settings,
+            saveSettings: () => this.saveSettings(),
             onStateChanged: () => this.refreshAllViews(),
             showNotice: (message, timeout) => new Notice(message, timeout),
             translate: (key, replacements) => this.t(key, replacements),
@@ -103,6 +105,18 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
 
     async setSettingsUiPreferences(preferences: SettingsUiPreferences): Promise<void> {
         await this.settingsRepository.setUiPreferences(this.settings, preferences);
+    }
+
+    getKnowledgeScopeSelection(): KnowledgeScopeSelection {
+        return this.runtime.getKnowledgeScopeSelection();
+    }
+
+    listKnowledgeScopeOptions(): KnowledgeScopeOption[] {
+        return this.runtime.listKnowledgeScopeOptions();
+    }
+
+    updateKnowledgeScope(selection: KnowledgeScopeSelection): Promise<void> {
+        return this.runtime.updateKnowledgeScope(selection);
     }
 
     getSettingsMigrationWarnings(): SettingsMigrationWarning[] {

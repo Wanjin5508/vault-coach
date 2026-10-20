@@ -49,8 +49,14 @@ export class SettingsRepository {
     }
 
     async setUiPreferences(settings: VaultCoachSettings, preferences: SettingsUiPreferences): Promise<void> {
+        const previousPreferences = this.uiPreferences;
         this.uiPreferences = { ...preferences };
-        await this.save(settings);
+        try {
+            await this.save(settings);
+        } catch (error: unknown) {
+            this.uiPreferences = previousPreferences;
+            throw error;
+        }
     }
 
     getUiPreferences(): SettingsUiPreferences {

@@ -1,5 +1,4 @@
 import { App, TFile, normalizePath } from "obsidian";
-import { VAULT_COACH_HIDDEN_DIR_PATH } from "./constants";
 import { createDocumentId, hashArrayBuffer, hashString, type DocumentParser, DocumentParserRegistry } from "./document-parser";
 import { MarkdownDocumentParser } from "./markdown-document-parser";
 import { PdfDocumentParser } from "./pdf-document-parser";
@@ -18,6 +17,11 @@ import type {
 } from "./domain/documents/document-types";
 import type { KnowledgeBaseSnapshot } from "./infrastructure/storage/storage-types";
 import type { VaultCoachSettings } from "./app/config/settings-types";
+import {
+    getParentFolderPaths,
+    isVaultCoachHiddenPath,
+    normalizeVaultPath,
+} from "./domain/documents/vault-path";
 
 const DOCUMENT_CHUNKER_VERSION = "document-chunker-v2";
 const DOCUMENT_PARSER_LAYER_VERSION = "document-parser-v2";
@@ -567,19 +571,7 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
      * 获取文件所属的所有父级目录路径。
      */
     private getParentFolderPaths(filePath: string): string[] {
-        const normalizedPath: string = normalizePath(filePath);
-        const pathParts: string[] = normalizedPath.split("/");
-        pathParts.pop();
-
-        const folderPaths: string[] = [];
-        for (let length = 1; length <= pathParts.length; length += 1) {
-            const folderPath: string = pathParts.slice(0, length).join("/");
-            if (folderPath.length > 0 && !this.isVaultCoachHiddenPath(folderPath)) {
-                folderPaths.push(folderPath);
-            }
-        }
-
-        return folderPaths;
+        return getParentFolderPaths(filePath);
     }
 
     /**
@@ -1028,12 +1020,7 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
      * 统一处理目录路径，避免用户输入前后空格或多余斜杠导致判断出错。
      */
     private normalizeFolderPath(folderPath: string): string {
-        const trimmedFolderPath: string = folderPath.trim();
-        if (trimmedFolderPath.length === 0) {
-            return "";
-        }
-
-        return normalizePath(trimmedFolderPath).replace(/\/$/, "");
+        return normalizeVaultPath(folderPath);
     }
 
     /**
@@ -1085,9 +1072,7 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
      * 判断路径是否位于 VaultCoach 隐藏目录中。
      */
     private isVaultCoachHiddenPath(path: string): boolean {
-        const normalizedPath: string = normalizePath(path);
-        return normalizedPath === VAULT_COACH_HIDDEN_DIR_PATH
-            || normalizedPath.startsWith(`${VAULT_COACH_HIDDEN_DIR_PATH}/`);
+        return isVaultCoachHiddenPath(path);
     }
 
     /**
