@@ -5,6 +5,16 @@
  */
 export class App {}
 
+export class FuzzySuggestModal<T> {
+    declare private readonly __itemType?: T;
+
+    constructor(_app: App) {}
+
+    setTitle(_title: string): this { return this; }
+    setPlaceholder(_placeholder: string): this { return this; }
+    open(): void {}
+}
+
 export class PluginSettingTab {
     constructor(_app: App, _plugin: unknown) {}
 

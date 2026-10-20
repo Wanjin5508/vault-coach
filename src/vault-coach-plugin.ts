@@ -6,15 +6,17 @@ import {
     VIEW_TYPE_VAULT_COACH,
 } from "./constants";
 import { VaultCoachRuntime } from "./app/vault-coach-runtime";
-import type { VaultCoachSettings } from "./app/config/settings-types";
+import type { SettingsUiPreferences, VaultCoachSettings } from "./app/config/settings-types";
+import { SettingsRepository } from "./app/config/settings-repository";
+import type { SettingsMigrationWarning } from "./app/config/settings-schema";
 import type { KnowledgeIndexBusyState } from "./app/index/index-types";
 import type { KnowledgeBaseStats } from "./domain/documents/document-types";
-import type { AnswerSource, RetrievalMode, VectorIndexStats } from "./domain/retrieval/retrieval-types";
+import type { AnswerSource, RetrievalPreference, RetrievalResolution, VectorIndexStats } from "./domain/retrieval/retrieval-types";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, translate, type TranslationKey } from "./i18n";
 import { registerVaultCoachCommands, registerVaultCoachRibbon } from "./plugin/command-registry";
 import { activateMainWorkspaceView } from "./plugin/main-workspace-view";
 import { LegacyPluginApiAdapter, type LegacyPluginApiHost } from "./presentation/legacy-plugin-api-adapter";
-import { createDefaultSettings, DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
+import { DEFAULT_SETTINGS, VaultCoachSettingTab } from "./settings";
 import { VaultCoachView } from "./presentation/vault-coach-view";
 import { ConceptReviewView } from "./presentation/views/concept-review-view";
 import { LearningMapView } from "./presentation/views/learning-map-view";
@@ -23,6 +25,7 @@ import type { SourceInventoryStatus } from "./domain/index-lifecycle/source-inve
 import { ConfirmActionModal } from "./presentation/modals/confirm-action-modal";
 import { StorageFootprintModal } from "./presentation/modals/storage-footprint-modal";
 import { requestSemanticGraphCapacityDecision } from "./presentation/modals/semantic-graph-capacity-modal";
+import type { KnowledgeScopeOption, KnowledgeScopeSelection } from "./app/knowledge/knowledge-scope-types";
 
 /** Obsidian 组合根：只负责生命周期、UI 注册和轻量宿主适配。 */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
@@ -30,6 +33,7 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
 
     private runtime!: VaultCoachRuntime;
     private legacyApi!: LegacyPluginApiAdapter;
+    private settingsRepository!: SettingsRepository;
 
     async onload(): Promise<void> {
         await this.loadSettings();
@@ -37,6 +41,7 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
             app: this.app,
             pluginId: this.manifest.id,
             getSettings: () => this.settings,
+            saveSettings: () => this.saveSettings(),
             onStateChanged: () => this.refreshAllViews(),
             showNotice: (message, timeout) => new Notice(message, timeout),
             translate: (key, replacements) => this.t(key, replacements),
@@ -81,13 +86,46 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
     }
 
     async loadSettings(): Promise<void> {
-        const savedSettings = ((await this.loadData()) as Partial<VaultCoachSettings> | null) ?? {};
-        this.settings = Object.assign({}, createDefaultSettings(), savedSettings);
+        this.settingsRepository = new SettingsRepository({
+            loadData: () => this.loadData(),
+            saveData: (data) => this.saveData(data),
+        });
+        const result = await this.settingsRepository.load();
+        this.settings = result.settings;
         this.refreshBuiltInDefaultGreeting();
     }
 
     async saveSettings(): Promise<void> {
-        await this.saveData(this.settings);
+        await this.settingsRepository.save(this.settings);
+    }
+
+    getSettingsUiPreferences(): SettingsUiPreferences {
+        return this.settingsRepository.getUiPreferences();
+    }
+
+    async setSettingsUiPreferences(preferences: SettingsUiPreferences): Promise<void> {
+        await this.settingsRepository.setUiPreferences(this.settings, preferences);
+    }
+
+    getKnowledgeScopeSelection(): KnowledgeScopeSelection {
+        return this.runtime.getKnowledgeScopeSelection();
+    }
+
+    listKnowledgeScopeOptions(): KnowledgeScopeOption[] {
+        return this.runtime.listKnowledgeScopeOptions();
+    }
+
+    updateKnowledgeScope(selection: KnowledgeScopeSelection): Promise<void> {
+        return this.runtime.updateKnowledgeScope(selection);
+    }
+
+    getSettingsMigrationWarnings(): SettingsMigrationWarning[] {
+        return this.settingsRepository.getWarnings();
+    }
+
+    hasCloudApiKeySecret(): boolean {
+        const secretName = this.settings.cloudApiKeySecretName.trim();
+        return secretName.length > 0 && this.app.secretStorage.getSecret(secretName) !== null;
     }
 
     async activateView(): Promise<void> {
@@ -186,12 +224,16 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         return this.runtime.getEffectiveDefaultGreeting();
     }
 
-    getRuntimeRetrievalMode(): RetrievalMode {
-        return this.runtime.getRuntimeRetrievalMode();
+    getRuntimeRetrievalPreference(): RetrievalPreference {
+        return this.runtime.getRuntimeRetrievalPreference();
     }
 
-    setRuntimeRetrievalMode(mode: RetrievalMode): void {
-        this.runtime.setRuntimeRetrievalMode(mode);
+    setRuntimeRetrievalPreference(preference: RetrievalPreference): void {
+        this.runtime.setRuntimeRetrievalPreference(preference);
+    }
+
+    getRetrievalResolution(): RetrievalResolution {
+        return this.runtime.getRetrievalResolution();
     }
 
     getActiveChatModelName(): string {

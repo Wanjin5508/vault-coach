@@ -1,46 +1,13 @@
-import { VAULT_COACH_HIDDEN_DIR_PATH } from "../constants";
+import {
+    normalizeVaultPath,
+} from "../domain/documents/vault-path";
 
-/** 在不依赖 Obsidian 运行时 API 的情况下归一化 Vault 相对路径。 */
-export function normalizeVaultPath(path: string): string {
-    return path
-        .trim()
-        .replace(/\\/g, "/")
-        .replace(/\/+/g, "/")
-        .replace(/^\/+|\/+$/g, "");
-}
-
-/** 判断路径是否属于 Vault Coach 内部运行目录。 */
-export function isVaultCoachHiddenPath(path: string): boolean {
-    const normalizedPath: string = normalizeVaultPath(path);
-    return normalizedPath === VAULT_COACH_HIDDEN_DIR_PATH
-        || normalizedPath.startsWith(`${VAULT_COACH_HIDDEN_DIR_PATH}/`);
-}
-
-/** 返回 Vault 相对文件路径的全部父目录。 */
-export function getParentFolderPaths(filePath: string): string[] {
-    const pathParts: string[] = normalizeVaultPath(filePath).split("/");
-    pathParts.pop();
-
-    const folderPaths: string[] = [];
-    for (let length = 1; length <= pathParts.length; length += 1) {
-        const folderPath: string = pathParts.slice(0, length).join("/");
-        if (folderPath.length > 0 && !isVaultCoachHiddenPath(folderPath)) {
-            folderPaths.push(folderPath);
-        }
-    }
-
-    return folderPaths;
-}
-
-/** 判断文件是否位于指定 Vault 相对目录内。 */
-export function isFileInFolder(filePath: string, folderPath: string): boolean {
-    const normalizedFolderPath: string = normalizeVaultPath(folderPath);
-    if (normalizedFolderPath.length === 0) {
-        return true;
-    }
-
-    return normalizeVaultPath(filePath).startsWith(`${normalizedFolderPath}/`);
-}
+export {
+    getParentFolderPaths,
+    isFileInFolder,
+    isVaultCoachHiddenPath,
+    normalizeVaultPath,
+} from "../domain/documents/vault-path";
 
 /** 返回第一个匹配文件路径的用户排除规则。 */
 export function findMatchingExamExcludeRule(filePath: string, configuredPatterns: string): string | null {

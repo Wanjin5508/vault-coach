@@ -1,7 +1,7 @@
 ---
 tags: [VaultCoach, v1.5, 里程碑2, 设置, 迁移, 检索, TransformersJS]
-status: planned
-updated: 2026-10-13
+status: implemented
+updated: 2026-10-18
 depends-on: [里程碑0-基线冻结与产品契约.md]
 ---
 
@@ -24,7 +24,7 @@ depends-on: [里程碑0-基线冻结与产品契约.md]
 - 旧用户保存的 `keyword | vector | hybrid` 必须继续作为显式偏好，不能迁移成 `auto`；
 - 只有可确定的全新安装才使用新默认值；
 - 移动设置项不触发索引重建，只有影响索引语义的有效值变化才使索引 stale；
-- API key 的实际值继续由 Obsidian `SecretStorage` 管理，普通设置只保存 secret ID；
+- **API key 的实际值**继续由 Obsidian `SecretStorage` 管理，普通设置只保存 secret ID；
 - 迁移失败时不得用默认值覆盖原设置，不得静默更换 provider；
 - builtin 失败时不得自动把笔记发送给 Ollama 或云端服务。
 
@@ -32,18 +32,18 @@ depends-on: [里程碑0-基线冻结与产品契约.md]
 
 ### 2.1 已核实的持久化路径
 
-| 数据 | 当前存储位置 | 当前写入入口 | 升级要求 |
-| --- | --- | --- | --- |
-| 普通插件设置 | `<Vault>/.obsidian/plugins/vault-coach/data.json` | `Plugin.saveData()` | 保留已存在字段，只为缺失字段补默认值 |
-| API key 实际值 | Obsidian `SecretStorage` | `SecretComponent` / `secretStorage` | 不复制进 `data.json`、日志、fixture 或 migration result |
-| API key 引用 | `data.json` 的 `cloudApiKeySecretName` | 设置页保存 | 保留引用；目标设备缺少对应 secret 时显示 `needs-attention` |
-| 索引、图谱、考试与学习数据 | Vault 内现有 `.vault-coach/` 等存储 | 各 storage adapter | 不是设置迁移对象；只根据有效配置决定是否 stale |
-| Advanced 展开状态 | 当前尚无稳定契约 | 待 M2 决策 | 作为 UI 偏好保存，不能影响业务行为 |
-| builtin 模型缓存 | 尚未实现 | M5 runtime/cache adapter | 不能把 `ready` 只当布尔设置；必须检查真实缓存资源 |
+| 数据            | 当前存储位置                                                 | 当前写入入口                              | 升级要求                                           |
+| ------------- | ------------------------------------------------------ | ----------------------------------- | ---------------------------------------------- |
+| 普通插件设置        | `<Vault>/.obsidian/plugins/vault-coach/data.json`      | `Plugin.saveData()`                 | 保留已存在字段，只为缺失字段补默认值                             |
+| API key 实际值   | Obsidian `SecretStorage`                               | `SecretComponent` / `secretStorage` | 不复制进 `data.json`、日志、fixture 或 migration result |
+| API key 引用    | `data.json` 的 `cloudApiKeySecretName`                  | 设置页保存                               | 保留引用；目标设备缺少对应 secret 时显示 `needs-attention`     |
+| 索引、图谱、考试与学习数据 | Vault 内现有 `.vault-coach/` 等存储                          | 各 storage adapter                   | 不是设置迁移对象；只根据有效配置决定是否 stale                     |
+| Advanced 展开状态 | `data.json` 的 `uiPreferences.advancedSettingsExpanded` | `SettingsRepository`                | 作为 UI 偏好保存，不影响业务行为                             |
+| builtin 模型缓存  | 尚未实现                                                   | M5 runtime/cache adapter            | 不能把 `ready` 只当布尔设置；必须检查真实缓存资源                  |
 
 Obsidian API 明确说明 `loadData()` / `saveData()` 将插件数据存入插件目录的 `data.json`；`SecretStorage` 保存 secret，设置对象只持有引用。参考：[Obsidian Plugin API](https://github.com/obsidianmd/obsidian-api/blob/master/obsidian.d.ts)、[Obsidian settings guide](https://github.com/obsidianmd/obsidian-developer-docs/blob/main/en/Plugins/User%20interface/Settings.md)。
 
-### 2.2 当前加载逻辑
+### 2.2 实施前加载逻辑（基线）
 
 当前 `src/vault-coach-plugin.ts` 的核心行为是：
 
@@ -52,12 +52,12 @@ const savedSettings = ((await this.loadData()) as Partial<VaultCoachSettings> | 
 this.settings = Object.assign({}, createDefaultSettings(), savedSettings);
 ```
 
-它有一个有用特性：只要字段名没有改变，已保存值会覆盖新默认值。因此大多数老用户当前可以保留偏好。
+它有一个有用特性：**只要字段名没有改变，已保存值会覆盖新默认值**。因此大多数老用户当前可以保留偏好。
 
 它还存在以下风险：
 
-- 没有 schema version，无法知道设置来自哪个版本；
-- TypeScript 类型断言不会验证磁盘 JSON，错误类型和无效枚举会进入运行时；
+- *没有 schema version，无法知道设置来自哪个版本；*
+- TypeScript **类型断言**不会验证磁盘 JSON，错误类型和无效枚举会进入运行时；
 - 无法可靠区分“全新安装”和“旧版本缺少新字段”；
 - 字段改名或拆分时没有迁移步骤；
 - 未知字段会随对象合并继续存在，并可能在下一次保存时被原样写回；
@@ -83,7 +83,7 @@ interface PersistedVaultCoachSettingsV1 extends SerializableVaultCoachSettings {
 
 约束：
 
-1. `VaultCoachSettings` 是经过验证后供运行时使用的对象；
+1. `VaultCoachSettings` 是经过验证后供运行时使用的**对象**；
 2. `PersistedVaultCoachSettingsV1` 是磁盘格式，两者不要直接等同；
 3. `settingsSchemaVersion` 只描述设置 JSON，不代表索引、考试或图谱 schema；
 4. 1.5 内不重命名现有持久化字段；
@@ -132,14 +132,14 @@ loadData(): unknown
 
 ### 3.4 如何区分新安装和旧用户
 
-| 输入证据 | 分类 | 行为 |
-| --- | --- | --- |
-| `loadData()` 返回 `null` 或空对象，且没有其他 Vault Coach 使用证据 | `new-install` | 使用 1.5 新默认值，后续进入 Setup Wizard |
-| 没有 `settingsSchemaVersion`，但存在任一已知旧字段 | `legacy` schema 0 | 保留旧值并迁移，不能按新安装处理 |
-| `settingsSchemaVersion === CURRENT` | `current` | 校验后加载 |
-| schema 低于当前版本 | `legacy` | 逐版本迁移 |
-| schema 高于当前版本 | `future` | 拒绝保存，提示升级插件或恢复备份 |
-| 设置不完整但已有索引、考试或学习数据 | `legacy/needs-review` | 不清空、不强制首次向导，交给 M8 的综合判定 |
+| 输入证据                                               | 分类                    | 行为                            |
+| -------------------------------------------------- | --------------------- | ----------------------------- |
+| `loadData()` 返回 `null` 或空对象，且没有其他 Vault Coach 使用证据 | `new-install`         | 使用 1.5 新默认值，后续进入 Setup Wizard |
+| 没有 `settingsSchemaVersion`，但存在任一已知旧字段              | `legacy` schema 0     | 保留旧值并迁移，不能按新安装处理              |
+| `settingsSchemaVersion === CURRENT`                | `current`             | 校验后加载                         |
+| schema 低于当前版本                                      | `legacy`              | 逐版本迁移                         |
+| schema 高于当前版本                                      | `future`              | 拒绝保存，提示升级插件或恢复备份              |
+| 设置不完整但已有索引、考试或学习数据                                 | `legacy/needs-review` | 不清空、不强制首次向导，交给 M8 的综合判定       |
 
 “缺少某个新字段”不能作为新安装证据，因为所有老用户都会缺少新字段。
 
@@ -182,7 +182,7 @@ interface RetrievalResolution {
 }
 ```
 
-`auto` 是用户偏好，不应写入回答结果的 `retrievalMode` 字段。回答、日志和诊断记录本次真正使用的模式与原因。
+`auto` 是**用户偏好**，不应写入回答结果的 `retrievalMode` 字段。回答、日志和诊断记录本次真正使用的模式与原因。
 
 规则：
 
@@ -258,6 +258,8 @@ type EmbeddingProviderId = "builtin" | "ollama" | "openai-compatible";
 不要提供一个会同时改写两个 provider 的总开关。用户更换聊天模型不应导致向量索引重建；更换 embedding fingerprint 才需要重建向量。
 
 ## 7. Transformers.js 能否实现内置聊天 LLM
+
+配套原理与实战教程：[[00-教程总览与学习路线|以 Vault Coach 内置 LLM 为例：WebGPU、WASM、量化与模型缓存教程]]。
 
 ### 7.1 技术结论
 
@@ -475,35 +477,92 @@ fixture 不能包含真实 Vault 路径、模型服务凭据或 API key。为每
 
 ## 14. 完成标准
 
-- [ ] 文档和代码明确普通设置、secret、派生数据和模型缓存的存储边界；
-- [ ] 1.4.x Ollama、cloud、混合 provider 和自定义 Advanced fixture 全部保值；
-- [ ] 旧用户不被自动切换到 builtin 或 auto；
-- [ ] 新安装与旧安装有可靠判定，不依赖“缺少新字段”；
-- [ ] schema migration、校验和 future-schema 保护已接入加载入口；
-- [ ] 默认用户只需选择知识范围和回答模型；
-- [ ] 已有外部 provider 用户无需进入 Advanced 就能继续使用；
-- [ ] auto 在向量 ready/unavailable 时结果可预测；
-- [ ] 日志和回答记录真实模式，不记录 auto 为执行事实；
-- [ ] Advanced 可访问并保留全部原有技术参数；
-- [ ] chat 与 embedding provider 可独立组合；
-- [ ] builtin chat 只完成 port 与验证计划，没有被显示成已实现能力；
-- [ ] 单测、lint、build 与升级手工矩阵通过；
-- [ ] 没有把 M5 尚未完成的 builtin embedding 状态显示为 Ready。
+- [x] 文档和代码明确普通设置、secret、派生数据和模型缓存的存储边界；
+- [x] 1.4.x Ollama、cloud、混合 provider 和自定义 Advanced fixture 全部保值；
+- [x] 旧用户不被自动切换到 builtin 或 auto；
+- [x] 新安装与旧安装有可靠判定，不依赖“缺少新字段”；
+- [x] schema migration、校验和 future-schema 保护已接入加载入口；
+- [x] 默认用户只需选择知识范围和回答模型；
+- [x] 已有外部 provider 用户无需进入 Advanced 就能继续使用；
+- [x] auto 在向量 ready/unavailable 时结果可预测；
+- [x] 回答结果和 header 使用解析后的真实模式，不把 auto 当执行事实；
+- [x] Advanced 可访问并保留全部原有技术参数；
+- [x] chat 与 embedding provider 可独立组合；
+- [x] builtin chat 只完成 port 与验证计划，没有被显示成已实现能力；
+- [x] 单测、lint、build 与 fixture 升级矩阵通过；
+- [ ] 在 Obsidian GUI 中执行 10.3 的手工升级矩阵；
+- [x] 没有把 M5 尚未完成的 builtin embedding 状态显示为 Ready。
 
 ## 15. 实施记录
 
-```text
-Commit / PR：
-设置 schema 版本：
+### 15.1 实施范围
+
+实施日期：2026-10-13
+
+开发分支：`feature/v1.5`
+
+Commit / PR：当前工作区实现，尚未创建提交或 PR。
+
+本次实现包含以下代码边界：
+
+- `src/app/config/settings-defaults.ts`：新安装默认值的唯一来源；
+- `src/app/config/settings-schema.ts`：schema v1、加载结果和迁移 warning 契约；
+- `src/app/config/settings-migrations.ts`：纯函数迁移、逐字段校验、旧检索模式映射与未知字段保留；
+- `src/app/config/settings-repository.ts`：`loadData/saveData` 唯一边界、迁移落盘、future-schema 拒绝覆盖和串行保存；
+- `src/presentation/settings/settings-section-model.ts`：Advanced 自定义摘要计算；
+- `src/settings.ts`：默认层、Advanced 层、provider 条件字段、语义检索状态和 secret 缺失提示；
+- `src/app/retrieval/retrieval-mode-resolver.ts`：`auto`、显式偏好、向量不可用和向量失败的解析规则；
+- `src/rag-engine.ts`：在单轮请求开始时冻结解析结果，向量失败时记录真实 keyword fallback；
+- `src/domain/model/chat-provider.ts`：聊天能力 port；现有 `LocalModelClient` 作为 adapter 实现该 port；
+- `src/presentation/components/vault-coach-header.ts`：只读显示 `Auto → 实际模式`，不再要求普通用户选择检索算法。
+
+### 15.2 设置迁移结果
+
+设置 schema 版本：`1`。
+
 旧版本 fixture：
-保留字段检查：
-迁移 warning：
-Provider 组合：
-Round-trip 测试：
-自动测试：
-升级手工场景：
-保存故障注入：
-Built-in Chat ADR / Gate：
-行为偏差与原因：
-下一里程碑输入：
-```
+
+- `legacy-local.json`：Ollama chat + Ollama embedding，并包含自定义 chunk、rerank 和 vector 偏好；
+- `legacy-cloud.json`：cloud chat + cloud embedding，覆盖 secret ID、`false` 和温度 `0`；
+- `legacy-mixed.json`：cloud chat + Ollama embedding，验证 provider 独立组合；
+- `invalid-values.json`：验证逐字段回退和不含配置值的 warning；
+- `future-schema.json`：验证较新 schema 不加载、不保存、不覆盖。
+
+保留字段检查：知识范围、folder、chat/embedding provider、URL、模型、secret ID、旧检索偏好、chunk、TopK、rerank、query rewrite 和布尔开关均由 fixture 断言。旧 `defaultRetrievalMode` 映射到显式 `retrievalPreference`；只有 `null` 或空对象代表全新安装并得到 `auto`。
+
+迁移 warning：只包含 `code`、`field` 和固定文案，不包含 API key、URL、路径或模型配置值。无效字段单独回退，不影响同一文件内的其他合法字段。
+
+Round-trip：未知字段通过 `passthrough` 原样保存；`false`、`0` 和空字符串不会因为真假值判断而丢失；`uiPreferences` 与运行设置共同落盘但保持独立类型。
+
+### 15.3 UI 与运行时决策
+
+- 默认层显示知识范围、回答模型、对应 URL/模型/secret、语义检索状态和 Advanced 开关；
+- Advanced 折叠时显示自定义参数数量，展开后保留原有 embedding、索引、检索、重排、记忆、考试和图谱设置；
+- `cloudApiKeySecretName` 存在但本机 SecretStorage 无对应值时显示 `Needs attention`，不清空引用、不切换 provider；
+- chat 与 embedding provider 继续使用两个独立字段，修改 chat provider 不触发向量索引失效；
+- 全新安装的 `retrievalPreference` 为 `auto`：向量 ready 时解析为 hybrid，否则解析为 keyword；显式偏好原样保留；
+- 向量调用失败时本轮回退 keyword，并在 `AssistantAnswer.retrievalReason` 记录 `vector-failed`；持久化偏好不改变；
+- header 显示解析后的模式，例如 `Auto → Hybrid`，算法选择只存在于 Advanced；
+- M2 未增加 Transformers.js 依赖、模型下载或 Built-in Chat 选项。`ChatProvider` 仅建立稳定 port，后续实现仍需单独质量 Gate。
+
+### 15.4 验证记录
+
+自动测试：`npm test -- --run` 通过，56 个测试文件、225 个测试全部通过。新增 9 个 settings migration/repository 测试和 3 个 retrieval resolver 测试。
+
+静态验证：
+
+- `npx tsc -noEmit -skipLibCheck`：通过；
+- `npm run lint`：通过，0 error、0 warning；
+- `npm run build`：通过；
+- `git diff --check`：通过。
+
+保存故障注入：首次 `saveData` 抛出错误后，调用方收到失败；后续保存队列可以恢复并成功写入。并发保存按调用顺序串行执行，最后一次设置不会被较早写入覆盖。
+
+升级手工场景：fixture 升级矩阵已通过；Obsidian GUI 中的 10.3 手工矩阵尚未执行，因此没有把 GUI 观察写成已验证结论。
+
+### 15.5 行为偏差、限制与下一步
+
+- 文档建议的 `settings-default-section.ts` 和 `settings-advanced-section.ts` 没有机械拆成两个大型文件；共享判断已提取到 settings config、repository 和 `settings-section-model.ts`，现有命令式回退渲染继续留在 `settings.ts`，避免同一里程碑同时重写两套 Obsidian 设置 API；
+- Built-in Chat ADR / Gate：本次只落实 `ChatProvider` port 和“不在 UI 暴露未实现能力”的 Gate。模型候选、包体、内存、首 token 延迟和回答质量实验仍需单独 ADR；
+- 下一里程碑可以直接读取 `SettingsRepository` 的 schema v1，并使用 `RetrievalResolution` 作为诊断与评测字段；M4/M5 不得通过修改 `retrievalPreference` 来伪装 builtin embedding 已 ready；
+- 合并前需在真实 Obsidian Vault 执行 10.3 手工升级矩阵，重点检查 SecretStorage 跨设备缺失提示、设置搜索、重载后的 Advanced 展开状态和 header 实际模式。

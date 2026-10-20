@@ -15,6 +15,7 @@ source-of-truth:
   - src/app/vault-coach-runtime.ts
   - src/app/vault-coach-application.ts
 related:
+  - VaultCoach-当前API调用与接口设计.md
   - 开发规划与过程记录/里程碑0-第二轮架构重构开发文档.md
   - 开发规划与过程记录/里程碑8-Lite发布加固与KnowledgeEngine接缝开发记录.md
   - ../knowledge-engine/01-需求规格.md

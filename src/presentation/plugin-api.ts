@@ -2,7 +2,8 @@ import type { Plugin } from "obsidian";
 import type {
     AnswerSource,
     AssistantAnswer,
-    RetrievalMode,
+    RetrievalPreference,
+    RetrievalResolution,
     VectorIndexStats,
 } from "../domain/retrieval/retrieval-types";
 import type { ChatMessage, StreamHandlers } from "../app/chat/chat-types";
@@ -18,9 +19,11 @@ import type {
 } from "../domain/exam/exam-types";
 import type { KnowledgeBaseStats } from "../domain/documents/document-types";
 import type { KnowledgeIndexBusyState } from "../app/index/index-types";
-import type { VaultCoachSettings } from "../app/config/settings-types";
+import type { SettingsUiPreferences, VaultCoachSettings } from "../app/config/settings-types";
+import type { SettingsMigrationWarning } from "../app/config/settings-schema";
 import type { SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
+import type { KnowledgeScopeOption, KnowledgeScopeSelection } from "../app/knowledge/knowledge-scope-types";
 
 /**
  * UI 层和设置页能调用的插件能力。
@@ -32,6 +35,13 @@ export interface VaultCoachPluginApi {
     settings: VaultCoachSettings;
 
     saveSettings(): Promise<void>;
+    getSettingsUiPreferences(): SettingsUiPreferences;
+    setSettingsUiPreferences(preferences: SettingsUiPreferences): Promise<void>;
+    getKnowledgeScopeSelection(): KnowledgeScopeSelection;
+    listKnowledgeScopeOptions(): KnowledgeScopeOption[];
+    updateKnowledgeScope(selection: KnowledgeScopeSelection): Promise<void>;
+    getSettingsMigrationWarnings(): SettingsMigrationWarning[];
+    hasCloudApiKeySecret(): boolean;
     activateView(): Promise<void>;
     refreshAllViews(): void;
     resetConversation(): void;
@@ -50,8 +60,9 @@ export interface VaultCoachPluginApi {
     getLocalizedKnowledgeScopeDescription(): string;
 
     getEffectiveDefaultGreeting(): string;
-    getRuntimeRetrievalMode(): RetrievalMode;
-    setRuntimeRetrievalMode(mode: RetrievalMode): void;
+    getRuntimeRetrievalPreference(): RetrievalPreference;
+    setRuntimeRetrievalPreference(preference: RetrievalPreference): void;
+    getRetrievalResolution(): RetrievalResolution;
     getActiveChatModelName(): string;
     getActiveEmbeddingModelName(): string;
     getMessages(): ChatMessage[];

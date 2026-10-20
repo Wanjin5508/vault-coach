@@ -1,6 +1,6 @@
 import { isAbortError } from "../../utils/errors";
 import type { ChatMessage } from "../../app/chat/chat-types";
-import type { AnswerSource, AssistantAnswer, RetrievalMode } from "../../domain/retrieval/retrieval-types";
+import type { AnswerSource, AssistantAnswer, RetrievalPreference, RetrievalResolution } from "../../domain/retrieval/retrieval-types";
 import type { VaultCoachSettings } from "../../app/config/settings-types";
 import type { VaultCoachPluginApi } from "../plugin-api";
 
@@ -75,12 +75,16 @@ export class ChatController {
         return this.api.getActiveEmbeddingModelName();
     }
 
-    getRetrievalMode(): RetrievalMode {
-        return this.api.getRuntimeRetrievalMode();
+    getRetrievalPreference(): RetrievalPreference {
+        return this.api.getRuntimeRetrievalPreference();
     }
 
-    setRetrievalMode(mode: RetrievalMode): void {
-        this.api.setRuntimeRetrievalMode(mode);
+    setRetrievalPreference(preference: RetrievalPreference): void {
+        this.api.setRuntimeRetrievalPreference(preference);
+    }
+
+    getRetrievalResolution(): RetrievalResolution {
+        return this.api.getRetrievalResolution();
     }
 
     resetConversation(): void {

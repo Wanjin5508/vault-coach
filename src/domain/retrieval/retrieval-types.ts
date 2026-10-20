@@ -10,6 +10,18 @@ export type { KeywordSearchHit } from "../documents/document-types";
 
 export type RetrievalMode = "keyword" | "vector" | "hybrid";
 
+/** 用户选择的检索偏好；`auto` 由运行时根据向量能力解析。 */
+export type RetrievalPreference = "auto" | RetrievalMode;
+
+/** 自动或显式检索偏好被解析后的原因，用于诊断和结果审计。 */
+export type RetrievalResolutionReason = "explicit" | "vector-ready" | "vector-unavailable" | "vector-failed";
+
+export interface RetrievalResolution {
+    preference: RetrievalPreference;
+    resolvedMode: RetrievalMode;
+    reason: RetrievalResolutionReason;
+}
+
 /** 发送给回答生成器并最终展示给用户的可追溯来源。 */
 export interface AnswerSource {
     filePath: string;
@@ -101,6 +113,8 @@ export interface AssistantAnswer {
     sources: AnswerSource[];
     generationDurationMs?: number;
     retrievalModeUsed: RetrievalMode;
+    retrievalPreference?: RetrievalPreference;
+    retrievalReason?: RetrievalResolutionReason;
     queryRewrite: QueryRewriteResult;
 }
 

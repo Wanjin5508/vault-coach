@@ -1,0 +1,13 @@
+{
+  "knowledgeScopeMode": "wholeVault",
+  "modelProvider": "openai-compatible",
+  "cloudBaseUrl": "https://chat.example.invalid/v1",
+  "cloudChatModel": "cloud-chat",
+  "cloudApiKeySecretName": "mixed-provider-key",
+  "embeddingProvider": "ollama",
+  "llmBaseUrl": "http://localhost:11434",
+  "embeddingModel": "local-embedding",
+  "defaultRetrievalMode": "keyword",
+  "keywordSearchTopK": 31,
+  "enableVectorRetrieval": false
+}

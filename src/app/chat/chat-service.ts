@@ -1,6 +1,6 @@
 import { normalizeObsidianMarkdown } from "../../markdown-normalizer";
 import { AdvancedRagEngine } from "../../rag-engine";
-import type { AnswerSource, AssistantAnswer, RetrievalMode } from "../../domain/retrieval/retrieval-types";
+import type { AnswerSource, AssistantAnswer, RetrievalPreference, RetrievalResolution } from "../../domain/retrieval/retrieval-types";
 import type { LongTermMemoryService } from "../../memory/memory-service";
 import type { ChatMessage, StreamHandlers } from "./chat-types";
 import type { VaultCoachSettings } from "../config/settings-types";
@@ -20,24 +20,30 @@ export interface ChatServiceDependencies {
 export class ChatService {
     private readonly getSettings: () => VaultCoachSettings;
     private messages: ChatMessage[] = [];
-    private runtimeRetrievalMode: RetrievalMode;
+    private runtimeRetrievalPreference: RetrievalPreference;
+    private lastRetrievalResolution: RetrievalResolution | null = null;
     private dependencies: ChatServiceDependencies | null = null;
 
     constructor(getSettings: () => VaultCoachSettings) {
         this.getSettings = getSettings;
-        this.runtimeRetrievalMode = getSettings().defaultRetrievalMode;
+        this.runtimeRetrievalPreference = getSettings().retrievalPreference;
     }
 
     setDependencies(dependencies: ChatServiceDependencies): void {
         this.dependencies = dependencies;
     }
 
-    getRuntimeRetrievalMode(): RetrievalMode {
-        return this.runtimeRetrievalMode;
+    getRuntimeRetrievalPreference(): RetrievalPreference {
+        return this.runtimeRetrievalPreference;
     }
 
-    setRuntimeRetrievalMode(mode: RetrievalMode): void {
-        this.runtimeRetrievalMode = mode;
+    setRuntimeRetrievalPreference(preference: RetrievalPreference): void {
+        this.runtimeRetrievalPreference = preference;
+        this.lastRetrievalResolution = null;
+    }
+
+    getLastRetrievalResolution(): RetrievalResolution | null {
+        return this.lastRetrievalResolution ? { ...this.lastRetrievalResolution } : null;
     }
 
     getMessages(): ChatMessage[] {
@@ -103,6 +109,13 @@ export class ChatService {
                 memoryContext,
                 effectiveHandlers,
             );
+            if (answer.retrievalPreference && answer.retrievalReason) {
+                this.lastRetrievalResolution = {
+                    preference: answer.retrievalPreference,
+                    resolvedMode: answer.retrievalModeUsed,
+                    reason: answer.retrievalReason,
+                };
+            }
             const generationDurationMs: number = firstChunkDurationMs ?? Math.max(0, Date.now() - generationStartedAt);
             const answerWithDuration: AssistantAnswer = { ...answer, generationDurationMs };
             this.addAssistantMessage(answerWithDuration.text, answerWithDuration.sources, generationDurationMs);

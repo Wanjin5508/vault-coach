@@ -11,6 +11,8 @@ import type {
     RerankedCandidate,
     RetrievalCandidate,
     RetrievalMode,
+    RetrievalPreference,
+    RetrievalResolution,
     RerankResultItem,
     VectorIndexStats,
     VectorRecord,
@@ -19,9 +21,11 @@ import type {
     VectorStoreHit,
     VectorStoreStats,
 } from "./domain/retrieval/retrieval-types";
+import { resolveRetrievalMode, resolveVectorFailure } from "./app/retrieval/retrieval-mode-resolver";
 import type { ChatMessage, StreamHandlers } from "./app/chat/chat-types";
 import type { IndexedChunk, KnowledgeBaseSyncResult } from "./domain/documents/document-types";
 import type { LocalChatMessage } from "./domain/model/model-types";
+import type { ChatProvider } from "./domain/model/chat-provider";
 import type { VaultCoachSettings } from "./app/config/settings-types";
 
 /**
@@ -40,9 +44,15 @@ interface PreparedAnswer {
     sources: AnswerSource[];
     rerankedCandidates: RerankedCandidate[];
     retrievalModeUsed: RetrievalMode;
+    retrievalResolution: RetrievalResolution;
     rewriteResult: QueryRewriteResult;
     originalUserText: string;
     noCandidates: boolean;
+}
+
+interface RetrievalExecution {
+    candidates: RetrievalCandidate[];
+    resolution: RetrievalResolution;
 }
 
 /**
@@ -52,8 +62,9 @@ export class AdvancedRagEngine {
     private readonly documentIndex: DocumentIndexReader;
     private readonly vectorStore: VectorStore;
     private readonly getSettings: () => VaultCoachSettings;
-    private readonly getRuntimeRetrievalMode: () => RetrievalMode;
+    private readonly getRuntimeRetrievalPreference: () => RetrievalPreference;
     private readonly client: LocalModelClient;
+    private readonly chatProvider: ChatProvider;
 
     private vectorStats: VectorIndexStats = {
         ready: false,
@@ -66,14 +77,15 @@ export class AdvancedRagEngine {
         documentIndex: DocumentIndexReader,
         vectorStore: VectorStore,
         getSettings: () => VaultCoachSettings,
-        getRuntimeRetrievalMode: () => RetrievalMode,
+        getRuntimeRetrievalPreference: () => RetrievalPreference,
         getCloudApiKey: () => string | null,
     ) {
         this.documentIndex = documentIndex;
         this.vectorStore = vectorStore;
         this.getSettings = getSettings;
-        this.getRuntimeRetrievalMode = getRuntimeRetrievalMode;
+        this.getRuntimeRetrievalPreference = getRuntimeRetrievalPreference;
         this.client = new LocalModelClient(getSettings, getCloudApiKey);
+        this.chatProvider = this.client;
     }
 
     /**
@@ -213,12 +225,14 @@ export class AdvancedRagEngine {
                 )),
                 sources: [],
                 retrievalModeUsed: prepared.retrievalModeUsed,
+                retrievalPreference: prepared.retrievalResolution.preference,
+                retrievalReason: prepared.retrievalResolution.reason,
                 queryRewrite: prepared.rewriteResult,
             };
         }
 
         try {
-            const markdownAnswer: string = await this.client.generateMarkdownAnswer(
+            const markdownAnswer: string = await this.chatProvider.generateMarkdownAnswer(
                 prepared.promptMessages,
                 this.getSettings().generationTemperature,
             );
@@ -227,6 +241,8 @@ export class AdvancedRagEngine {
                 text: normalizeObsidianMarkdown(markdownAnswer),
                 sources: prepared.sources,
                 retrievalModeUsed: prepared.retrievalModeUsed,
+                retrievalPreference: prepared.retrievalResolution.preference,
+                retrievalReason: prepared.retrievalResolution.reason,
                 queryRewrite: prepared.rewriteResult,
             };
         } catch (error: unknown) {
@@ -241,6 +257,8 @@ export class AdvancedRagEngine {
                 )),
                 sources: prepared.sources,
                 retrievalModeUsed: prepared.retrievalModeUsed,
+                retrievalPreference: prepared.retrievalResolution.preference,
+                retrievalReason: prepared.retrievalResolution.reason,
                 queryRewrite: prepared.rewriteResult,
             };
         }
@@ -275,12 +293,14 @@ export class AdvancedRagEngine {
                 )),
                 sources: [],
                 retrievalModeUsed: prepared.retrievalModeUsed,
+                retrievalPreference: prepared.retrievalResolution.preference,
+                retrievalReason: prepared.retrievalResolution.reason,
                 queryRewrite: prepared.rewriteResult,
             };
         }
 
         try {
-            const markdownAnswer: string = await this.client.streamMarkdownAnswer(
+            const markdownAnswer: string = await this.chatProvider.streamMarkdownAnswer(
                 prepared.promptMessages,
                 this.getSettings().generationTemperature,
                 handlers,
@@ -290,6 +310,8 @@ export class AdvancedRagEngine {
                 text: normalizeObsidianMarkdown(markdownAnswer),
                 sources: prepared.sources,
                 retrievalModeUsed: prepared.retrievalModeUsed,
+                retrievalPreference: prepared.retrievalResolution.preference,
+                retrievalReason: prepared.retrievalResolution.reason,
                 queryRewrite: prepared.rewriteResult,
             };
         } catch (streamError: unknown) {
@@ -300,7 +322,7 @@ export class AdvancedRagEngine {
             console.error("[VaultCoach] 流式回答失败，将回退到非流式回答。", streamError);
 
             try {
-                const markdownAnswer: string = await this.client.generateMarkdownAnswer(
+                const markdownAnswer: string = await this.chatProvider.generateMarkdownAnswer(
                     prepared.promptMessages,
                     this.getSettings().generationTemperature,
                 );
@@ -314,6 +336,8 @@ export class AdvancedRagEngine {
                     text: normalizeObsidianMarkdown(markdownAnswer),
                     sources: prepared.sources,
                     retrievalModeUsed: prepared.retrievalModeUsed,
+                    retrievalPreference: prepared.retrievalResolution.preference,
+                    retrievalReason: prepared.retrievalResolution.reason,
                     queryRewrite: prepared.rewriteResult,
                 };
             } catch (error: unknown) {
@@ -329,6 +353,8 @@ export class AdvancedRagEngine {
                     )),
                     sources: prepared.sources,
                     retrievalModeUsed: prepared.retrievalModeUsed,
+                    retrievalPreference: prepared.retrievalResolution.preference,
+                    retrievalReason: prepared.retrievalResolution.reason,
                     queryRewrite: prepared.rewriteResult,
                 };
             }
@@ -360,7 +386,7 @@ export class AdvancedRagEngine {
         assistantText: string,
         messages: ChatMessage[],
     ): Promise<string[]> {
-        return this.client.extractMemoryStatements(
+        return this.chatProvider.extractMemoryStatements(
             this.buildConversationContext(messages),
             userText,
             assistantText,
@@ -377,15 +403,17 @@ export class AdvancedRagEngine {
         memoryContext: string,
     ): Promise<PreparedAnswer> {
         const settings: VaultCoachSettings = this.getSettings();
-        const rewriteResult: QueryRewriteResult = await this.client.rewriteQuery(
+        const rewriteResult: QueryRewriteResult = await this.chatProvider.rewriteQuery(
             userText,
             this.buildConversationContext(messages),
             scopeDescription,
         );
 
-        const retrievalModeUsed: RetrievalMode = this.resolveEffectiveRetrievalMode();
+        const initialResolution = this.resolveEffectiveRetrievalMode();
         const retrievalQuery: string = rewriteResult.rewrittenQuery;
-        const candidates: RetrievalCandidate[] = await this.retrieveCandidates(retrievalQuery, retrievalModeUsed);
+        const execution = await this.retrieveCandidates(retrievalQuery, initialResolution);
+        const candidates = execution.candidates;
+        const retrievalModeUsed = execution.resolution.resolvedMode;
 
         if (candidates.length === 0) {
             return {
@@ -393,6 +421,7 @@ export class AdvancedRagEngine {
                 sources: [],
                 rerankedCandidates: [],
                 retrievalModeUsed,
+                retrievalResolution: execution.resolution,
                 rewriteResult,
                 originalUserText: userText,
                 noCandidates: true,
@@ -417,6 +446,7 @@ export class AdvancedRagEngine {
             sources,
             rerankedCandidates,
             retrievalModeUsed,
+            retrievalResolution: execution.resolution,
             rewriteResult,
             originalUserText: userText,
             noCandidates: false,
@@ -426,40 +456,40 @@ export class AdvancedRagEngine {
     /**
      * 根据运行时模式和向量索引状态决定实际检索模式。
      */
-    private resolveEffectiveRetrievalMode(): RetrievalMode {
-        const runtimeMode: RetrievalMode = this.getRuntimeRetrievalMode();
+    private resolveEffectiveRetrievalMode(): RetrievalResolution {
         const settings: VaultCoachSettings = this.getSettings();
-
-        if (runtimeMode === "keyword") {
-            return "keyword";
-        }
-
-        if (!settings.enableVectorRetrieval || !this.vectorStats.ready) {
-            return "keyword";
-        }
-
-        return runtimeMode;
+        return resolveRetrievalMode(this.getRuntimeRetrievalPreference(), {
+            vectorEnabled: settings.enableVectorRetrieval,
+            vectorReady: this.vectorStats.ready,
+        });
     }
 
     /**
      * 按检索模式召回候选 chunk。
      */
-    private async retrieveCandidates(query: string, mode: RetrievalMode): Promise<RetrievalCandidate[]> {
+    private async retrieveCandidates(query: string, resolution: RetrievalResolution): Promise<RetrievalExecution> {
+        const mode = resolution.resolvedMode;
         if (mode === "keyword") {
-            return this.buildCandidatesFromKeywordHits(
-                this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK),
-            );
+            return {
+                candidates: this.buildCandidatesFromKeywordHits(
+                    this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK),
+                ),
+                resolution,
+            };
         }
 
         if (mode === "vector") {
             try {
                 const vectorHits: VectorSearchHit[] = await this.searchVector(query);
-                return this.buildCandidatesFromVectorHits(vectorHits);
+                return { candidates: this.buildCandidatesFromVectorHits(vectorHits), resolution };
             } catch (error: unknown) {
                 console.error("[VaultCoach] 向量检索失败，将回退到关键词检索。", error);
-                return this.buildCandidatesFromKeywordHits(
-                    this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK),
-                );
+                return {
+                    candidates: this.buildCandidatesFromKeywordHits(
+                        this.documentIndex.searchKeyword(query, this.getSettings().keywordSearchTopK),
+                    ),
+                    resolution: resolveVectorFailure(resolution.preference),
+                };
             }
         }
 
@@ -469,8 +499,15 @@ export class AdvancedRagEngine {
             vectorHits = await this.searchVector(query);
         } catch (error: unknown) {
             console.error("[VaultCoach] 混合检索中的向量召回失败，将只使用关键词召回。", error);
+            return {
+                candidates: this.buildCandidatesFromKeywordHits(keywordHits),
+                resolution: resolveVectorFailure(resolution.preference),
+            };
         }
-        return this.mergeHybrid(keywordHits, vectorHits, this.getSettings().hybridSearchTopK);
+        return {
+            candidates: this.mergeHybrid(keywordHits, vectorHits, this.getSettings().hybridSearchTopK),
+            resolution,
+        };
     }
 
     /**

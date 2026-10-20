@@ -31,6 +31,33 @@ const INDEX_SETTINGS: VaultCoachSettings = {
 } as VaultCoachSettings;
 
 describe("VaultKnowledgeBase graph integration contract", () => {
+    it("keeps whole-Vault and recursive folder scope semantics independent from picker depth", async () => {
+        const vault = new MutableFixtureVault({
+            "outside.md": "# Outside\n\nWhole Vault content.",
+            "项目/AI/overview.md": "# AI\n\nSelected folder content.",
+            "项目/AI/论文/2026/deep.md": "# Deep\n\nDeep descendant content.",
+            "项目/其他/ignored.md": "# Sibling\n\nSibling folder content.",
+            ".vault-coach/private.md": "# Internal\n\nNever index this file.",
+        });
+        const settings: VaultCoachSettings = {
+            ...INDEX_SETTINGS,
+            knowledgeScopeMode: "wholeVault",
+            knowledgeFolder: "项目/AI",
+        };
+        const knowledgeBase = new VaultKnowledgeBase(vault.app, () => settings);
+
+        await knowledgeBase.rebuildIndexDetailed();
+        expect(knowledgeBase.getFileRecord("outside.md")).not.toBeNull();
+        expect(knowledgeBase.getFileRecord(".vault-coach/private.md")).toBeNull();
+
+        settings.knowledgeScopeMode = "specificFolder";
+        await knowledgeBase.rebuildIndexDetailed();
+        expect(knowledgeBase.getFileRecords().map((record) => record.filePath)).toEqual([
+            "项目/AI/overview.md",
+            "项目/AI/论文/2026/deep.md",
+        ]);
+    });
+
     it("indexes graph fixture files deterministically and excludes the VaultCoach hidden directory", async () => {
         const vault: MutableFixtureVault = createBasicGraphFixtureVault();
         const knowledgeBase = new VaultKnowledgeBase(vault.app, () => INDEX_SETTINGS);

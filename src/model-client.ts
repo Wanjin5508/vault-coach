@@ -3,7 +3,7 @@ import type {
     LocalChatMessage,
 } from "./domain/model/model-types";
 import type { QueryRewriteResult, RerankResultItem } from "./domain/retrieval/retrieval-types";
-import type { StreamHandlers } from "./app/chat/chat-types";
+import type { ChatProvider, ChatStreamHandlers } from "./domain/model/chat-provider";
 import type { VaultCoachSettings } from "./app/config/settings-types";
 import { detectQuestionLanguage, type QuestionLanguage } from "./question-language";
 
@@ -141,7 +141,7 @@ class ModelRequestError extends Error {
  * - 如果用户未配置 rerankBaseUrl，则上层会回退到本地启发式重排。
  */
 
-export class LocalModelClient {
+export class LocalModelClient implements ChatProvider {
     // 使用函数注入设置读取器，避免持有构造时的旧配置快照。
     private readonly getSettings: () => VaultCoachSettings;
     private readonly getCloudApiKey: () => string | null;
@@ -424,7 +424,7 @@ export class LocalModelClient {
     async streamMarkdownAnswer(
         messages: LocalChatMessage[],
         temperature: number,
-        handlers?: StreamHandlers,
+        handlers?: ChatStreamHandlers,
     ): Promise<string> {
         const settings: VaultCoachSettings = this.getSettings();
 
@@ -447,7 +447,7 @@ export class LocalModelClient {
         settings: VaultCoachSettings,
         messages: LocalChatMessage[],
         temperature: number,
-        handlers?: StreamHandlers,
+        handlers?: ChatStreamHandlers,
     ): Promise<string> {
         if (settings.chatModel.trim().length === 0) {
             throw new Error("未配置本地聊天模型。");
@@ -535,7 +535,7 @@ export class LocalModelClient {
         settings: VaultCoachSettings,
         messages: LocalChatMessage[],
         temperature: number,
-        handlers?: StreamHandlers,
+        handlers?: ChatStreamHandlers,
     ): Promise<string> {
         const apiKey: string | null = this.getCloudApiKey();
 

@@ -2,7 +2,7 @@
 tags: [VaultCoach, v1.5, 里程碑3, EmbeddingProvider, 索引指纹]
 status: planned
 updated: 2026-10-09
-depends-on: [里程碑2-默认体验与Advanced设置分层.md]
+depends-on: [里程碑2.1-设置页目录选择与信息层级优化.md]
 ---
 
 # 里程碑 3：Embedding Provider 解耦与索引指纹
