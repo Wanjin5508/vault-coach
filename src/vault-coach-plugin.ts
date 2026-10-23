@@ -87,6 +87,8 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
 
     async loadSettings(): Promise<void> {
         this.settingsRepository = new SettingsRepository({
+            // 这里体现了 ts 接口用作约束，尽管接口不能实例化，
+            // 但是我们可以让一个变量满足该接口的结构要求
             loadData: () => this.loadData(),
             saveData: (data) => this.saveData(data),
         });

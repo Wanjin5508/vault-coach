@@ -1,278 +1,122 @@
 ---
-tags: [VaultCoach, v1.5, 里程碑9, CI-CD, Release]
+tags: [VaultCoach, v1.5, CICD, 发布, 开发规划]
 status: planned
-updated: 2026-10-09
-depends-on:
-  - 里程碑1-产品定位与发现入口.md
-  - 里程碑8-迁移兼容与跨平台加固.md
+updated: 2026-10-23
 ---
+# 里程碑 9：CI/CD、发布与持续更新
 
-# 里程碑 9：CI/CD、1.5 发布与持续更新
+## 1. 发布原则与当前事实
 
-## 1. 目标
+每个增量 A/B/C 都经过本里程碑，不等到 Utility 或内置主 LLM 全部完成再首次交付。M4 的运行位置/资产验证、M8 的迁移与设备证据是发布输入，CI 绿灯不能替代真实 Obsidian 验证。
 
-把前八个里程碑的证据转化为可重复发布门禁：PR 验证、版本一致性、bundle/release asset 检查、干净 Vault 安装、升级验证、GitHub Release、社区文案和回滚演练。
+2026-10-23 静态检查：
 
-学习重点：GitHub Actions、SemVer、artifact provenance、发布故障定位、最小权限与可回滚发布。
+- package.json 与 manifest.json 为 1.5.2；未来发布号需比较实际已发布版本后确定。
+- lint.yml 在 Node 20/22 执行现有检查；release.yml 使用 Node 18，按三段纯数字 tag 触发，目前发布路径主要是构建后上传。
+- version-bump.mjs 仅在最低 Obsidian 版本首次出现在 values 中时才写 versions 映射；同一最低版本的后续插件版本可能缺键，需修复并加测试。
+- kb/ 中有已跟踪文件，包括 Obsidian 配置；不能认为整个 kb 被忽略，更不能通过无差别 git add 把工作区状态一起发布。
+- 当前尚无本规划拟新增的 runtime、模型 manifest 或专用验证脚本；下文脚本名为待实现任务。
 
-## 2. 当前基线与已知风险
+## 2. 文件与依赖
 
-- `.github/workflows/lint.yml` 当前在 Node 20/22 运行 install/build/lint/test；
-- `.github/workflows/release.yml` 仍需与当前 Node LTS、验证门禁和最新 action 版本对齐；
-- release tag 必须与 `manifest.json` version 完全一致，格式为 `1.5.0`，没有前导 `v`；
-- Community 安装依赖同一 tag 下的 `main.js`、`manifest.json` 和可选 `styles.css`；
-- `version-bump.mjs` 必须按版本 key 检查 `versions.json`，不能因为相同 `minAppVersion` 已存在就漏掉新版本 key；
-- Worker/WASM 方案可能产生隐藏的额外 asset 依赖，必须在构建产物中检查；
-- `kb/` 当前被忽略，开发记录不会自动进入仓库发布历史。
-
-## 3. 发布门禁层级
-
-```text
-Local fast checks
-  └─ type/build + lint + focused tests
-PR CI (Node 20/22)
-  └─ clean npm ci + full test + build + release static checks
-Release candidate
-  └─ package exact assets + clean Vault + upgrade + desktop/mobile smoke
-Tag workflow
-  └─ rerun gates + verify tag/version + create GitHub Release
-Post-release
-  └─ install from Release + community metadata + monitor/rollback
-```
-
-Release job 要自己重新验证，不能只假设某个早期 PR workflow 已通过，因为 tag 指向和依赖状态可能改变。
-
-## 4. 建议脚本
-
-在 `package.json` 中组合已有脚本，名称以实际仓库风格为准：
-
-```json
-{
-  "scripts": {
-    "check": "npm run lint && npm test && npm run build",
-    "verify:version": "node scripts/verify-version.mjs",
-    "verify:release": "node scripts/verify-release-artifacts.mjs",
-    "benchmark:retrieval": "node scripts/run-retrieval-benchmark.mjs"
-  }
-}
-```
-
-`verify-version.mjs` 检查：
-
-- `package.json.version === manifest.json.version`；
-- `versions.json` 含目标 version key；
-- value 与 `manifest.minAppVersion` 一致；
-- release 环境中 tag 与 version 一致；
-- SemVer 与 tag 格式合法；
-- 不把 tag `v1.5.0` 自动容错成成功。
-
-`verify-release-artifacts.mjs` 检查：
-
-- `main.js`、`manifest.json` 非空；
-- 存在 `styles.css` 时非空并随 release；
-- JSON 可解析；
-- main.js 不引用绝对本机路径、source `.ts`、缺失 worker asset 或远程可执行 JS；
-- bundle 体积与预算比较，超限需要明确审查；
-- 产出 SHA-256 清单，便于下载后比对；
-- release staging 目录不混入 `node_modules`、测试 fixture、模型权重或 API key。
-
-## 5. 涉及文件与模块
-
-| 文件/位置 | 修改 |
+| 文件/模块 | 计划变更 |
 | --- | --- |
-| `package.json` | scripts、version、description、固定依赖 |
-| `package-lock.json` | 可重复依赖图 |
-| `manifest.json` | version `1.5.0`、description、准确 minAppVersion |
-| `versions.json` | 增加 `1.5.0: minAppVersion` |
-| `version-bump.mjs` | 修复按 key 添加版本并增加测试 |
-| `scripts/verify-version.mjs` | 新建版本一致性门禁 |
-| `scripts/verify-release-artifacts.mjs` | 新建 release 文件/引用/体积检查 |
-| `.github/workflows/lint.yml` | PR matrix 与缓存、最小权限 |
-| `.github/workflows/release.yml` | tag gate、build、verify、release assets |
-| `.github/workflows/benchmark.yml` | 可选，手工触发真实模型 benchmark |
-| `README.md`、`README_CN.md` | M1 最终文案、安装、隐私、模型下载 |
-| `CHANGELOG.md` / Release notes | 用户结果、迁移、限制、回滚 |
-| `kb/.../VaultCoach-当前详细架构总览.md` | 更新实际 1.5 架构与接口 |
+| package.json、package-lock.json | 锁定运行时依赖，增加必要验证脚本，统一受支持 Node 策略 |
+| esbuild.config.mjs | 延续 M4/M6 已验证的 Worker/WASM 打包与发布路径 |
+| version-bump.mjs | 每次写入 versions[targetVersion]，校验版本输入，保持重复执行一致 |
+| manifest.json、versions.json | 版本一致、最低 Obsidian 声明与实际 API 相符 |
+| .github/workflows/lint.yml | 快速门禁、契约/迁移测试、构建和资产核对 |
+| .github/workflows/release.yml | tag/version 校验、同等必需检查、产物和发布证据 |
+| scripts/verify-version.mjs、verify-runtime-assets.mjs（拟新增） | 可重复的版本/资源检查；在 package scripts 注册后使用 |
+| README.md、docs/ 或本开发日志 | 新旧用户路径、网络说明、支持设备和恢复方法 |
+| benchmarks/local-ai/、发布验证记录（拟新增） | 固定数据版本、模型锁定信息、门槛和实测结果 |
 
-## 6. CI 工作流设计
+内部依赖：M7 的完整用户流程、M8 的升级/设备矩阵、M4 的模型与可执行资源分发 ADR。外部依赖：GitHub Actions、npm registry、实际 Obsidian 发布约束、模型许可证与固定资产来源。涉及 Actions/Node 版本升级时，实施当时核对官方支持状态，不能把本文记录的旧版本当推荐版本。
 
-### PR workflow
+## 3. 实施步骤
 
-1. `checkout`；
-2. `setup-node` 20/22 与 npm cache；
-3. `npm ci`；
-4. version/static config checks；
-5. lint；
-6. unit/integration tests；
-7. production build；
-8. release artifact static checks；
-9. 上传失败时必要的小型日志，不上传私人 fixture/cache。
+### Step 1：先修版本工具，再谈自动发布
 
-真实模型下载、WebGPU benchmark 和移动端测试不进入普通 PR CI。metric parser、fake Worker、migration fixture 和 bundle reference 检查必须进入。
+- 用临时 fixtures 测试重复最低版本、新最低版本、非法目标版本和幂等执行。
+- 改为按插件版本键写映射，不按最低版本值是否存在来跳过。
+- 核对 package、lockfile 根版本、manifest、versions 对应关系。
+- 增加 tag 与 manifest.version 完全一致检查，tag 不带 v。
+- 版本变更由明确的发布 PR 管理；不要让普通功能构建自动改版本或创建 tag。
 
-### Release workflow
+**交付：** 本地与 CI 使用同一检查脚本；无有效版本时在上传前失败。
 
-- 只允许匹配数字 SemVer 的 tag；
-- `permissions: contents: write` 只授予 release job；其他 job read-only；
-- 使用当前受支持的 action major 与 Node LTS；
-- checkout tag commit，不 checkout 默认分支；
-- `npm ci` 后完整复跑门禁；
-- staging 目录只复制 release assets；
-- 上传独立 `main.js`、`manifest.json`、`styles.css`；
-- release 失败不自动移动/重写 tag；
-- job summary 输出 version、commit、hash、测试结果。
+### Step 2：将快速 CI 与模型实验分开
 
-## 7. 修复版本脚本
+PR 必需检查包括 lint、单元/契约测试、构建、迁移 fixtures、资产 manifest 的静态一致性与禁止意外 CDN 运行时代码的检查。HTTP/Worker/模型输出使用可控 fake，覆盖错误路径而不依赖网络。
 
-目标逻辑：
+真实模型评测在显式触发或受控周期任务中执行：固定模型/语料/环境，记录下载授权、缓存和预算。GPU 实验不能假定 GitHub 标准 runner 拥有相同能力；用已登记设备跑并保留报告。
 
-```js
-versions[nextVersion] = minAppVersion;
-```
+阻止未知来源 PR 使用发布凭据；不要让不可信代码通过提权 workflow 获取 secrets。只对需要发布的 job 授予必需权限，具体配置按实施时官方文档评审。
 
-更新前验证输入版本；更新后排序/格式遵循当前文件；已有同 key 且值不同则失败，不能静默覆盖。增加临时 fixture 测试：
+**学习点：** CI 验证代码契约，模型质量 Gate 验证行为；两类证据互补。
 
-1. 新版本与旧版本使用相同 minAppVersion，仍必须添加新 key；
-2. key 已存在且值相同，幂等；
-3. key 已存在但值不同，失败；
-4. 非法 SemVer/minAppVersion，失败；
-5. package/manifest/versions 最终一致。
+### Step 3：验证可安装资产与供应链
 
-## 8. Release Candidate 手工清单
+- 从干净 checkout 执行 npm ci 和生产构建，记录 commit、锁文件与产物哈希。
+- 检查 Worker/JS/WASM 是否来自发布包内或 M4 已确认合规的分发方案；不能靠开发机 node_modules 或 CDN 动态代码才能启动。
+- 实际验证 main.js、manifest.json、styles.css 的社区插件安装路径。若方案需要额外文件，必须先证实安装/升级能拿到它们；仅把文件上传 GitHub Release 不代表 Obsidian 会安装。
+- 权重作为用户授权准备的模型资源，记录来源、revision、hash、大小和许可证；发布代码与模型资源更新分别版本化。
+- 生成依赖/许可证清单，确认构建未包含凭据、用户 data.json、真实笔记和测试日志。
+- 资源缓存命中不能掩盖安装问题：用无开发依赖、无模型缓存的 Vault 跑一次首次安装，再用缓存完整的环境验证离线。
 
-### 从干净 checkout 构建
+### Step 4：给 Release 加必需门禁
 
-```bash
-npm ci
-npm run lint
-npm test
-npm run build
-npm run verify:version
-npm run verify:release
-git diff --check
-git status --short
-```
+让 release job 对相同 commit 执行或可靠依赖完整必需检查，包括版本、测试、构建、资产核对。失败时不创建可供用户安装的正式发布。
 
-确认构建没有依赖工作区未提交文件。`main.js` 是生成资产，遵循仓库规则不提交，但发布时必须由 tag commit 重建。
+产物上传流程先在不公开的验证产物/草稿路径演练；正式 tag 只在明确发布操作时创建。不要覆盖已发布同版本的二进制，修复使用新的递增版本。
 
-### 干净 Vault 安装
+发布说明必须区分：
+1. 本次实际交付哪种能力。
+2. 首次下载和主 LLM 数据去向。
+3. 哪些平台已验证、哪些仍实验。
+4. 老用户是否需要操作，索引何时重建。
+5. 已知限制和恢复入口。
 
-只复制 `main.js`、`manifest.json`、`styles.css` 到新的插件目录：
+### Step 5：按仓库实际流程发布与回归
 
-1. 启用插件；
-2. 走全新 Setup Wizard；
-3. 首次模型下载/取消/重试；
-4. 断网暖启动；
-5. Ask 引用、Test、Learning Map；
-6. 清模型后 keyword fallback；
-7. reload/unload 无泄漏或重复命令。
+建议人工执行顺序：
 
-### 升级 Vault
+1. 功能 PR 合并目标主分支，必需检查通过。
+2. 在最新基线上提交版本与说明 PR，核对发布号和 versions 映射。
+3. 合并后再次确认目标 commit/资产与 M8 证据对应。
+4. 执行已授权的 tag/Release 操作，tag 与 manifest 完全相同。
+5. 检查自动化运行、下载资产和哈希；在测试 Vault 安装并执行 M7 核心路径。
+6. 用旧配置升级一次，验证 provider、范围、UI 偏好与索引行为。
+7. 记录发布结果和后续问题，不以 workflow completed 代替用户安装成功。
 
-从真实 1.4.1 副本升级：
+本规划不授权现在推送 tag、发布 Release 或上传模型，当前任务仅修改文档。
 
-1. 先备份；
-2. 验证设置/provider 保留；
-3. 验证无静默模型下载；
-4. 旧向量正确 stale/rebuild；
-5. chat/exam/assessment/graph governance 数据完整；
-6. 回到 keyword 的路径可用；
-7. 记录迁移前后摘要和日志。
+### Step 6：建立可持续反馈和恢复流程
 
-### 平台证据
+每个问题记录：版本/commit、平台、能力、错误码、脱敏 trace ID、复现步骤、预期和实际行为。可选诊断包默认不含正文、密钥、目录名、问题或记忆，用户可预览后主动导出；不启用隐藏遥测。
 
-记录 Obsidian、OS、Node（仅构建）、设备、WebGPU/WASM、Vault 规模、模型 fingerprint、commit/tag。没有执行的平台写“未验证”，不写“支持已确认”。
+故障恢复优先关闭新能力或发布修复版。若需降级二进制，先核对 schema 和数据恢复条件；不要删除用户知识库来“重置”。模型切换经过同一质量/身份 Gate，禁止远程更新 manifest 后静默替换默认权重。
 
-## 9. 版本与发布顺序
+## 4. 发布验收清单
 
-1. 冻结 RC commit；
-2. 在分支中更新 package/manifest/versions/CHANGELOG；
-3. 跑完整门禁与 RC 手工清单；
-4. 合并后确认 CI 使用同一 commit；
-5. 创建 tag `1.5.0`；
-6. release workflow 从该 tag 重建；
-7. 核对 Release assets 的 manifest version 与 SHA-256；
-8. 用 Release 下载文件做第二个干净 Vault smoke；
-9. 更新 GitHub description/README/社区线程；
-10. 观察 issue/日志，按严重度决定 patch 或撤下说明。
+- [ ] 必需代码检查、模型质量报告、实机矩阵对应同一候选版本。
+- [ ] 版本/标签/最低版本映射一致，版本脚本回归通过。
+- [ ] 干净安装与升级通过；资源路径不依赖开发环境。
+- [ ] 所有可执行资源与模型资源来源、许可、hash 可追溯。
+- [ ] 本次能力的下载授权/失败回退/日志隐私经过验证。
+- [ ] 说明准确标注支持范围，无“全离线”“全平台”过度承诺。
+- [ ] 回退手册、问题模板与下一增量待办已更新。
 
-不要先发布 tag 再修改版本文件；也不要手工上传来自另一个 commit 的 `main.js`。
+## 5. 开发与发布记录模板
 
-## 10. Release notes 结构
+| 字段 | 实际填写 |
+| --- | --- |
+| 增量/目标版本/commit | 待填写 |
+| 模型/运行时/策略版本 | 待填写 |
+| CI URL 与结果 | 未执行 |
+| 质量报告与设备矩阵 | 未执行 |
+| 发布资产/哈希/安装结果 | 未执行 |
+| 升级/恢复验证 | 未执行 |
+| 已知问题及负责人 | 待填写 |
 
-1. 用户结果：只需选择知识范围和聊天 LLM；
-2. 新功能：本地语义搜索、真实索引进度、Setup Wizard；
-3. 升级行为：旧 provider 保留，何时会下载模型/重建向量；
-4. 隐私：哪些本地、哪些可能发给聊天 provider；
-5. 平台与已验证范围；
-6. 已知限制；
-7. 清缓存、重建、切 keyword 的恢复步骤；
-8. 完整 changelog/issue 链接。
-
-不得把 fallback 成功表述为内置模型成功，也不得引用 M4 未达到或未复测的数字。
-
-## 11. 持续更新渠道
-
-准备一份同源摘要，再适配渠道：
-
-- GitHub Release：完整技术和迁移内容；
-- Obsidian Forum 原主题：用户结果、截图、升级注意；
-- Discord：短摘要与 Release 链接；
-- 中文社区：中文结果、隐私与排错；
-- Marketplace metadata：最终 description。
-
-发送外部消息是发布者手工动作。每个渠道记录发布时间、链接和纠正项，避免内容漂移。
-
-## 12. 回滚与 hotfix 演练
-
-发布前模拟：
-
-1. Release workflow 构建失败：不创建半成品 release；
-2. asset 缺失：修 workflow/commit，发布 `1.5.1`，不复用错误二进制；
-3. 严重迁移 bug：建议用户保留备份和切 keyword，停止推广；
-4. builtin 运行时大面积失败：通过已有设置切回旧 provider/keyword；
-5. tag 指错 commit：记录事件并按 GitHub/社区约束选择撤下或新 patch，避免静默替换已下载资产；
-6. 使用 release asset hash 确认用户实际版本。
-
-Rollback 不能假设 1.4 能读 1.5 写出的所有 schema；在 release notes 明确数据备份和 downgrade 限制。
-
-## 13. 工程实践与原因
-
-- tag/version 严格一致让 Community 客户端找到正确资产；
-- release 从 tag 重建，避免本地脏工作区二进制；
-- PR 与 release 都验证，减少“合并后环境漂移”；
-- 大模型 benchmark 与普通 CI 分离，兼顾稳定性与证据；
-- 最小 workflow 权限减少供应链风险；
-- staging allowlist 防止把缓存、源码或秘密打包；
-- 发布后从下载资产重测，验证用户拿到的内容而非本地 build。
-
-## 14. 完成标准
-
-- [ ] Node 20/22 PR CI 的 lint/test/build/release check 全绿；
-- [ ] version-bump 相同 minAppVersion 场景有回归测试；
-- [ ] package/manifest/versions/tag 均为 `1.5.0` 且一致；
-- [ ] main.js 无缺失 Worker/WASM 引用和本机绝对路径；
-- [ ] 干净安装和 1.4.1 升级 smoke 有证据；
-- [ ] Desktop/Mobile 验证范围和限制写入 Release notes；
-- [ ] release assets 来自 tag commit 且 hash 已保存；
-- [ ] 从下载的 release assets 再安装成功；
-- [ ] README、架构总览、隐私和社区文案同步；
-- [ ] 回滚/hotfix 演练完成；
-- [ ] 未验证能力未出现在发布承诺中。
-
-## 15. 实施记录
-
-```text
-RC commit：
-Tag：
-CI runs：
-版本一致性：
-Release asset SHA-256：
-干净 Vault：
-升级 Vault：
-Desktop/Mobile：
-下载资产复测：
-外部渠道链接：
-回滚演练：
-发布后问题：
-```
+原版详见 [[历史规划-2026-10-23调整前/原M9]]。当前文件只完成规划调整，没有进行构建、发布或远程操作。

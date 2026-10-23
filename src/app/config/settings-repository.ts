@@ -27,6 +27,8 @@ export class SettingsRepository {
     private warnings: SettingsMigrationWarning[] = [];
 
     constructor(private readonly storage: SettingsStoragePort) {}
+    // TypeScript 的参数属性（Parameter Properties）语法糖，
+    // 如果在构造器参数前面加上了访问修饰符（public、private、protected）或 readonly，TypeScript 会自动帮你声明同名属性并完成赋值，因此函数体里就不需要写 this.xxx = xxx 了
 
     async load(): Promise<ReadySettingsLoadResult> {
         const result = migrateSettings(await this.storage.loadData());

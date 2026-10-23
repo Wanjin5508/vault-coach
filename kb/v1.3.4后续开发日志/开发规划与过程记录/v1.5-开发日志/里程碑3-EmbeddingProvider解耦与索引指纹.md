@@ -7,7 +7,7 @@ tags:
   - 索引指纹
   - 架构重构
 status: planned
-updated: 2026-10-20
+updated: 2026-10-23
 baseline: 1.5.2
 depends-on:
   - 里程碑2.1-设置页目录选择与信息层级优化.md
@@ -15,10 +15,74 @@ next:
   - 里程碑4-内置Embedding技术验证与多语言基准.md
 ---
 
-# 里程碑 3：Embedding Provider 解耦与索引指纹
+# 里程碑 3：模型职责接缝、Embedding Provider 解耦与索引指纹
 
 > 本文以 Vault Coach 1.5.2 的实际代码为基线。它既是技术设计，也是新人开发手册。
 > 请按 Step 0 到 Step 10 的顺序实施，不要先改 UI，也不要在一次提交中同时完成所有重构。
+
+## 0. 2026-10-23 路线调整：先建立四类职责的接缝
+
+依据 [[VC知识库总览/专题教程-内置LLM运行时/06-实现顺序|06-实现顺序]]，后续依次交付 Embedding、Reranker、Utility SLM，再独立评估主生成模型。请先读 [[01-LocalAIRuntime架构与跨里程碑契约]]。本文件原有 embedding、fingerprint、存储恢复和测试步骤继续执行，新增工作嵌入下述步骤，不将全部本地推理实现堆进 M3。
+
+### 0.1 当前代码核对与交付边界
+
+2026-10-23 核对：`src/domain/model/chat-provider.ts` 已有 ChatProvider，包含生成、rewrite 和 memory；RAG 同时持有具体 LocalModelClient 和可注入 ChatProvider；LongTermMemoryService 通过 RAG 调抽取。`src/model-client.ts` 的远程 rerank 还由 RAG 判断配置后调用。新增接缝应围绕这些真实入口演进。
+
+M3 只交付窄接口和保持现有行为的 adapter，加上完整 embedding 解耦与索引代际。不安装模型，不触发下载，不改变旧用户路由。M6.1 实现内置 rerank；M6.2 把 rewrite/memory 从用户主生成模型职责中拆出。
+
+### 0.2 按步骤加入的工作
+
+| 原步骤 | 新增工作 | 内部依赖 | 外部依赖 | 验收证据 |
+| --- | --- | --- | --- | --- |
+| Step 1 | 画出 embedding、rerank、rewrite、memory、answer、exam、概念抽取实际调用图；冻结四类职责 ADR | model-client、rag-engine、memory-service、application-container | 无新增运行依赖 | 默认/关闭/外部失败行为刻画 |
+| Step 2 | 增加 RerankProvider、QueryRewritePort、MemoryExtractionPort 的最小契约；定义 LocalAI role/status 草案 | 现有 QueryRewriteResult、RerankResultItem 和 ChatProvider | TypeScript/Vitest | fake 可满足契约；无 Obsidian/SDK import |
+| Step 3 | 用 legacy adapter 复用现有 HTTP/聊天方法；保留 heuristic 排序 | Step 2、现有错误和关闭行为 | 现有 requestUrl，仅联调才需要真实服务 | 输出和路由未变化 |
+| Step 4–5 | 组合根注入角色端口；RAG 调用窄端口；可暂保留 memory 经 RAG 的兼容桥 | application-container、RAG、旧构造测试 | 无新 SDK | 无参数调用仍走原配置；stub 能单独替换 rerank/utility |
+| Step 6–7 | embedding 空间身份与模型资产/任务策略身份分离 | manifest v2、Runtime 恢复 | Vault storage adapter | 改 reranker/utility 不触发 corpus vector 重建 |
+| Step 8–10 | 脱敏 role/provider 诊断，架构依赖检查，兼容回归 | 已有设置迁移和应用 API | 实际 Ollama/API 仅用于手工矩阵 | Main Chat/考试/图治理数据不被重构改变 |
+
+### 0.3 新增文件与接口指导
+
+以下路径为拟新增，只有语义稳定才导出公共接口：
+
+- `src/domain/rerank/rerank-provider.ts`：query + 带稳定 ID 的候选 → ID/score；取消、数量、有限数和 ID 合法性契约。
+- `src/domain/utility/query-rewrite-port.ts`：复用 QueryRewriteResult；原 query、受限对话上下文、scope → rewrittenQuery；失败由 app 回退原 query。
+- `src/domain/utility/memory-extraction-port.ts`：受限 turn 上下文 → 候选记忆；provider 不直接写入 memory store。
+- `src/domain/local-ai/local-ai-types.ts`：role、策略身份、状态、错误的最小类型，不导入 Transformers.js。
+- `src/infrastructure/rerank/legacy-rerank-adapter.ts`：将 LocalModelClient 的 index 结果映射到输入稳定 ID。
+- `src/infrastructure/utility/legacy-chat-utility-adapter.ts`：调用原 ChatProvider 的 rewrite/memory，保持原行为。
+- `tests/domain/rerank/rerank-provider.contract.test.ts`、`tests/domain/utility/utility-provider.contract.test.ts`：fake 测试，无模型下载。
+
+接口示意（实际实现需导入/补齐现有 DTO）：
+
+```ts
+interface RerankProvider {
+    rerank(request: {
+        query: string;
+        candidates: readonly { id: string; text: string }[];
+        signal?: AbortSignal;
+    }): Promise<readonly { id: string; score: number }[]>;
+}
+```
+
+关闭 rerank 时直接跳过端口，保持当前候选截断和排序行为；旧远程接口如果只返回 Top-N，adapter 返回已评分的稳定 ID 子集。M3 的兼容消费层仍按现有规则处理未返回项和混合分数，并将缺失标记为“无模型评分”，不能把用于旧排序的补 0 描述成真实模型评分。M6.1 再通过实验引入严格校验与新的完整/部分响应策略，避免在 M3 重构时悄悄改变排序。
+
+旧 ChatProvider 可以暂保留 rewrite/memory 方法用于兼容；新消费者使用窄端口，M6.2 才移除所有旧调用后收窄主聊天接口。不为了“统一”把考试生成/评分和概念抽取自动送给 Utility SLM。
+
+### 0.4 Fingerprint 的前置补充
+
+本版 descriptor 新增 `modelDtype: string`；当前 HTTP adapter 使用 `provider-defined`，内置 adapter 使用固定 q4/q8/fp32 等策略值。`outputDtype: "float32"` 只说明返回数组格式。canonical 比较必须包含 modelDtype，否则量化变化可能错误复用索引。
+
+模型资产完整性由 artifact identity 管，corpus/query 兼容由 embedding fingerprint 管，rerank/utility prompt、schema、截断策略由 task policy identity 管。device 不直接进入空间 fingerprint，但换设备若同时换权重 dtype 或预处理，必须判不兼容。
+
+### 0.5 推荐 PR 切分和交接
+
+1. M3-A：行为刻画 + embedding/rerank/utility 窄端口 + legacy adapters。
+2. M3-B：组合根、RAG 和语义 embedding 消费端注入；保持外部行为。
+3. M3-C：完整 fingerprint、manifest v2、代际切换、恢复和迁移。
+4. M3-D：状态、诊断、失败矩阵和实机证据。
+
+每个 PR 独立可构建；如需要临时 adapter，在记录中写移除条件。交给 M4：稳定端口、artifact/fingerprint/task-policy 三层身份、fake suites 和存储基线。M4 尚未通过时不把 builtin 加入正式默认选项。
 
 ## 1. 里程碑目标与交付边界
 
@@ -58,7 +122,7 @@ next:
 
 ### 1.4 本阶段范围
 
-本阶段不接入 Transformers.js、WebGPU、WASM、内置模型、模型缓存、远程向量数据库或 ANN 后端。它不修改持久化设置键，也不重写聊天、考试和 rerank provider。内置 embedding 属于 M4/M5，Worker 与更大规模的索引构建属于 M6。
+本阶段不接入 Transformers.js、WebGPU、WASM、内置模型、模型缓存、远程向量数据库或 ANN 后端。持久化设置键保持；为 rerank/utility 增加保持行为的接缝，聊天与考试生成行为不改。内置 embedding 的运行地点与 Worker 可行性先在 M4 验证，M5 实现资源生命周期，M6 完成 Worker 与索引生产化，再交付 M6.1/M6.2。
 
 ## 2. 1.5.2 当前实现与问题定位
 
@@ -105,7 +169,7 @@ ApplicationContainer
 
 ### 2.3 当前基线证据
 
-本文修订时的已验证基线：
+以下是 2026-10-20 文档保留的历史验证记录；2026-10-23 本轮规划修订仅做源码核对，没有重跑这些门禁：
 
 ```text
 branch: master
@@ -211,6 +275,7 @@ export interface EmbeddingProviderDescriptor {
     endpointIdentity: string;
     model: string;
     revision: string;
+    modelDtype: string;
     outputDtype: "float32";
     pooling: string;
     normalization: string;
@@ -260,7 +325,7 @@ export interface EmbeddingProvider {
 - `texts` 为空时抛出 `invalid-request`；
 - 成功结果与输入一一对应，不返回部分成功。
 
-M3 的现有 adapter 可先使用以下明确值：`outputDtype = "float32"`、`pooling = "provider-defined"`、`normalization = "consumer-l2-v1"`，三种 preprocessing 都是 `identity-v1`。这些值描述当前可证明的行为；M5 引入 E5 类前缀、明确 pooling 或量化输出时再更新相应字段与 `implementationVersion`。
+M3 的现有 adapter 可先使用以下明确值：`modelDtype = "provider-defined"`、`outputDtype = "float32"`、`pooling = "provider-defined"`、`normalization = "consumer-l2-v1"`，三种 preprocessing 都是 `identity-v1`。这些值描述当前可证明的行为；M5 引入 E5 类前缀、明确 pooling 或模型量化时再更新相应字段与 `implementationVersion`。
 
 ### 4.3 Fingerprint 比较规则
 
@@ -1270,7 +1335,7 @@ npm test -- tests/app/semantic-graph/semantic-graph-service.test.ts
 
 - 相同字段、不同对象创建顺序：兼容；
 - provider、endpoint identity、model、revision 任一变化：不兼容；
-- dimension、dtype、pooling、normalization 任一变化：不兼容；
+- dimension、modelDtype、outputDtype、pooling、normalization 任一变化：不兼容；
 - document/query/graph 任一预处理规则变化：不兼容；
 - implementation version 变化：不兼容；
 - device、latency、attempts 变化：不影响 fingerprint；
@@ -1623,6 +1688,7 @@ Android：
 
 ## 17. 本次文档修订记录
 
+- 2026-10-23：按《06-实现顺序》补充四类模型职责接缝、LocalAIRuntime 身份分层、modelDtype、PR 切分及 M6.1/M6.2 交接；保留 Step 0–10 的详细指引。此次为规划更新，未执行代码实现或模型基准。
 - 2026-10-20：按 Vault Coach 1.5.2 当前代码重新核对里程碑 3；
 - 将原来的七步设计提纲扩展为 Step 0 到 Step 10 的新人实施流程；
 - 补充每一步的内部依赖、外部依赖、涉及文件、开发动作、完成 Gate、失败处理和提交建议；

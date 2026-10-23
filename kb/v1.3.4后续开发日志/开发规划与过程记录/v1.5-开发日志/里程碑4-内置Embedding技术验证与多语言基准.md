@@ -1,214 +1,140 @@
 ---
-tags: [VaultCoach, v1.5, 里程碑4, Benchmark, ADR]
+tags: [VaultCoach, v1.5, 里程碑4, LocalAIRuntime, Benchmark]
 status: planned
-updated: 2026-10-09
+updated: 2026-10-23
 depends-on: [里程碑3-EmbeddingProvider解耦与索引指纹.md]
 gate: GO-NO-GO
 ---
 
-# 里程碑 4：内置 Embedding 技术验证与多语言基准
+# 里程碑 4：先确定运行地点，再验证内置 Embedding
 
-## 1. 目标
+## 1. 目标和范围
 
-用可复现证据选择内置 embedding 模型与运行方案，并验证 Obsidian 单文件发布、浏览器缓存、WASM/WebGPU、Worker 和移动端是否可行。本里程碑只做 spike 与 benchmark，不把候选模型直接设为产品默认值。
+按 [[01-LocalAIRuntime架构与跨里程碑契约]]，在真实 Obsidian 中验证 Transformers.js/ONNX Runtime Web + Worker + WASM/WebGPU 的可行性，再选择 Embedding 模型。先完成这一 Gate，才能进入 M5；Reranker/Utility 这里只建立候选与评测协议，正式质量 Gate 分别留到 M6.1/M6.2。
 
-学习重点：基准设计、数据标注、性能分析、浏览器运行时、架构决策记录（ADR）和 GO/NO-GO 判断。
+优先评估浏览器兼容栈；sidecar 可以列入被比较方案，但不能无声地变成“内置”的实现，因为它会增加安装和移动端限制。若浏览器方案无法通过发布资产或资源门槛，记录 NO-GO 和替代 ADR，保留现有 HTTP/keyword。
 
-## 2. 必须回答的问题
+## 2. 起点和依赖
 
-1. 中文、英文、德文检索质量是否都有可接受下限？
-2. 冷启动下载、暖启动、索引吞吐、查询延迟和峰值内存是多少？
-3. batch 8/16/32 的收益和内存代价是什么？
-4. 量化 dtype 对质量、体积和运行时有何影响？
-5. 模型、tokenizer、WASM 文件如何被缓存、清理和离线复用？
-6. WebGPU 不可用或失败时，WASM 是否稳定回退？
-7. Worker 能否与当前 esbuild CommonJS 和 release assets 兼容？
-8. Obsidian Mobile 是否能在内存和 API 约束下完成最小索引？
-9. 首次下载时能否获得真实字节进度并取消？
-10. 用户笔记是否始终不离开本机？
+内部：M3 窄端口、modelDtype 指纹、代际 store、fake suite；当前 esbuild/CJS、PDF.js 兼容补丁、manifest 的移动端声明。
 
-## 3. 候选与控制变量
+外部：候选 Transformers.js 确切 npm 版本、匹配的 ONNX Runtime、ONNX 模型资产及许可证、真实 Obsidian 桌面和移动设备。新增依赖只进入隔离 spike，确认依赖树不会意外引入 Node-only 包。官方已发布 v4 公告，优先纳入验证；鉴于文档入口版本提示不一致，仍需核对 npm 实际版本及相应 API，详见共用契约的官方依据。
 
-从产品文档候选开始：multilingual MiniLM、multilingual E5 small、BGE micro/小型多语言模型。实际 model ID、immutable revision、dtype、pooling、normalize、query/document prefix 必须写入 benchmark config，不能只记录营销名称。
+## 3. 文件与产物
 
-至少包含：
-
-- 一个当前外部 provider 作为质量参考，不参与默认本地隐私声明；
-- 每个候选的推荐预处理；
-- 相同 corpus、chunk 与标注；
-- 相同 TopK 和度量；
-- 固定随机种子及硬件/浏览器/Obsidian 版本。
-
-Transformers.js 版本必须固定到 lockfile 中的确切版本。文档当前说明 pipeline 支持 revision、dtype、缓存和进度回调，但不要据此假设任一具体模型能在 Obsidian 运行。
-
-## 4. 基准数据集设计
-
-建议新增：
-
-```text
-benchmarks/retrieval-v1/
-  README.md
-  schema.json
-  corpus.jsonl
-  queries.zh.jsonl
-  queries.en.jsonl
-  queries.de.jsonl
-  model-configs.json
-  expected-metrics.json
-scripts/
-  run-retrieval-benchmark.mjs
-  summarize-retrieval-benchmark.mjs
-benchmark-results/
-  .gitkeep
-```
-
-每种语言至少 20 个经过人工核对的问题；每个问题标注 1 个或多个相关 chunk。问题应覆盖：
-
-- 原词匹配；
-- 同义改写；
-- 跨段概念；
-- 缩写；
-- 专有名词；
-- 易混淆负样本；
-- 短问与长问；
-- PDF 提取后的噪声。
-
-使用可公开、脱敏或自建内容，不提交私人 Vault。两人标注时记录分歧；只有一人时做隔日复核，并在报告中写明限制。
-
-JSONL 示例：
-
-```json
-{"id":"de-001","query":"...","relevantChunkIds":["doc-3#2"],"notes":"paraphrase"}
-```
-
-## 5. 指标与报告
-
-### 5.1 检索质量
-
-- Recall@5、Recall@10；
-- MRR；
-- 每种语言单独报告，再给 macro average；
-- zero-result、语言、query 类型的切片；
-- 混合检索还需固定 RRF 参数，避免把调参收益误归因于 embedding。
-
-### 5.2 运行指标
-
-| 指标 | 冷/暖 | 记录方式 |
+| 文件 | 状态 | 工作 |
 | --- | --- | --- |
-| 下载字节与时间 | 冷 | Network/progress callback |
-| pipeline 初始化 | 冷、暖 | `performance.mark/measure` |
-| query p50/p95 | 暖 | 多轮，去掉首次预热或单列 |
-| chunks/sec | 暖 | batch 8/16/32 |
-| 峰值 JS/WASM/GPU 内存 | 冷、暖 | DevTools + 平台说明 |
-| main.js 增量 | build | 构建前后文件大小 |
-| Cache 占用 | 暖 | Cache API/Storage estimate |
-| 主线程 long task | 索引 | Performance timeline |
+| `package.json`、`package-lock.json`、`esbuild.config.mjs` | 已有 | 隔离 spike 验证版本与 bundle，不提前修改默认路由 |
+| `scripts/spikes/local-ai/embedding-smoke.ts` | 拟新增 | 一句文本→向量、load/dispose、离线加载 |
+| `scripts/spikes/local-ai/worker-smoke.ts` | 拟新增 | 发布三件套环境下的 Worker/WASM smoke |
+| `benchmarks/local-ai/protocol.json` | 拟新增 | 固定指标、预算、设备、预热、失败标准 |
+| `benchmarks/local-ai/models.json` | 拟新增 | 三角色候选账本、资产清单、hash/revision |
+| `benchmarks/retrieval-v1/{corpus,queries.zh,queries.en,queries.de}.jsonl` | 拟新增 | 人工标注语料和相关 chunk |
+| `scripts/run-local-ai-benchmark.mjs` | 拟新增 | 统一测量入口，记录原始结果 |
+| `benchmark-results/local-ai/<run-id>/` | 拟新增产物 | environment、metrics、failures、decision |
+| 本目录 `ADR-LocalAIRuntime运行地点与资产交付.md` | 实施时新增 | 运行地点、打包、缓存和设备结论 |
 
-不得只报最快一次，也不要混用不同设备的数字。报告原始 JSON、汇总脚本版本和 commit。
+新建 benchmark 脚本后才执行它们；上述脚本目前不存在。
 
-## 6. 技术 spike 与涉及文件
+## 4. 候选与证据边界
 
-| 文件/模块 | 任务 |
-| --- | --- |
-| `package.json`、`package-lock.json` | 在 spike 分支固定候选 Transformers.js 版本 |
-| `esbuild.config.mjs` | 验证 Worker/WASM/资源加载策略，不先污染正式配置 |
-| `scripts/spikes/builtin-embedding-smoke.*` | 最小 feature-extraction、revision、dtype、device |
-| `src/infrastructure/embedding/spikes/*` | 必要时隔离原型，GO 后再重写为正式 adapter |
-| `benchmarks/retrieval-v1/*` | corpus、query、标注、模型配置 |
-| `scripts/run-retrieval-benchmark.mjs` | 统一运行与原始结果输出 |
-| `kb/.../ADR-内置Embedding模型与运行时.md` | 记录选择、被拒方案与证据 |
+候选账本至少列出：
 
-Community release 通常只提供 `main.js`、`manifest.json` 和可选 `styles.css`。必须证明 Worker/WASM/运行时资产的加载方案与此发布约束兼容。不要在正式实现后才发现额外文件没有随 release 上传。
+| 角色 | 起步候选范围 | 本阶段结论 |
+| --- | --- | --- |
+| Embedding | 多语言 MiniLM / multilingual E5 small 类有 ONNX 资产的 encoder | 完成中英德质量和完整环境 Gate |
+| Reranker | 小型 cross-encoder；英文小模型可做性能对照，多语言模型独立候选 | 核对资产、pair tokenizer、logits 语义；不承诺默认选型 |
+| Utility | 约 200M–600M instruct 探索范围；Qwen2.5-0.5B ONNX 可做教学起点 | 核对生成 smoke 与资源；不把短 JSON 成功等同业务达标 |
 
-## 7. 手动实施步骤
+名称只是搜索起点。每个候选必须填精确 repo、revision、来源/模型许可证、ONNX 文件、tokenizer、参数量、dtype、下载实测字节、上下文上限、语言覆盖声明、实测支持设备。未填完的候选不能进入正式 policy。
 
-### Step 1：先写 benchmark protocol
+下载容量不等于运行内存；“三模型不到 1 GB”仅是预算假设。量化精度、logits/score 解释、query/document 前缀都必须对应模型说明。
 
-在跑模型前冻结数据 schema、指标、设备信息、预热规则和结果格式。预先写决策门槛，避免看完结果后移动标准。
+## 5. 按步骤实施
 
-### Step 2：建立最小浏览器 smoke
+### Step 1：冻结实验协议
 
-只加载一句文本并生成向量，验证：
+内部依赖：M3 指纹和消费者契约。外部依赖：合法可提交语料、目标设备清单。
 
-- 确切 revision；
-- 输出维数与有限数；
-- query/document preprocessing；
-- WebGPU 与 WASM；
-- 首次下载、缓存命中、断网暖启动；
-- 清缓存后确实重新下载；
-- AbortSignal/worker termination 的行为。
+先为中文、英文、德文各建立至少 20 个人工复核问题，覆盖同义表达、缩写、负样本、PDF 噪声、无答案与跨语言查询。划分调参集与锁定验收集；小样本不作总体质量保证。语料保存 chunk ID 与相关性标注，不包含私人 Vault。
 
-### Step 3：验证打包
+在跑模型前填门槛：每语言 Recall@10 下限、相对基线允许下降、query P95、索引吞吐、冷/暖加载、内存与 bundle/缓存预算。每项写单位、设备、样本数、依据与通过方向。没有数值就保持 pending，不能产生 GO。
 
-研究 `new Worker(new URL(...))` 在当前 esbuild/CJS 输出中的结果。优先验证 inline worker 或 Blob URL，使 release 不依赖未上传 worker 文件；若必须增加 asset，就要同时修改 release contract 和社区安装验证。
+Gate：协议已冻结且可由另一开发者复跑；错误标注有修正记录。
 
-对构建后的 `main.js` 做静态检查，查找指向本地缺失文件、CDN JavaScript 或开发路径的 URL。
+### Step 2：先跑发布形态 smoke
 
-### Step 4：跑质量基准
+内部依赖：当前 esbuild 与 release asset 契约。外部依赖：固定库版本与最小模型。
 
-每个候选先生成 corpus embeddings，再逐语言查询。保存原始排名，不只保存分数，以便检查失败样本。
+在独立干净 Vault 中只放正式安装资产，尝试创建 Worker、定位 WASM、加载一句文本并释放。检查最终 main.js 是否包含缺失路径、CDN import 或 Node-only 依赖。先验证此项再批量跑分，避免选中无法交付的 runtime。
 
-### Step 5：跑性能基准
+Worker JS 和 WASM 的交付方式必须符合发布约束；模型权重可在授权后下载，远程执行代码不能伪装成模型资源。若需要修改发布资产契约，先证明社区安装路径能带齐资源；失败即 NO-GO。
 
-至少一台桌面设备和一台实际移动设备。记录系统、CPU/GPU、内存、Obsidian、Transformers.js、浏览器内核、模型 fingerprint。模拟小知识库和接近当前语义窗口上限的知识库。
+Gate：记录实际文件清单、构建 hash、网络请求、CSP 和真机结论；浏览器网页 demo 不算插件证据。
 
-### Step 6：分析失败样本
+### Step 3：验证资产与离线加载
 
-为每个 query 标记：chunk 问题、语言问题、模型问题、ground truth 问题或 hybrid 组合问题。不要仅通过增加 TopK 掩盖模型弱点。
+内部依赖：M3 descriptor/fingerprint。外部依赖：固定模型 revision 和缓存 API。
 
-### Step 7：写 ADR 和决策
+验证 query/document/graph 预处理、pooling、normalization、dimension、modelDtype；输出条数、有限数和维数符合 contract。分别测试首次下载、取消、缓存缺文件、驱逐、断网重启、清除后重建。
 
-ADR 至少包含：背景、候选、证据、选项、决定、后果、回滚条件、未验证项。
+`allowRemoteModels = false` 只是来源策略；权重、tokenizer、配置和执行资源都齐全才可能离线。记录哪些资源被 HTTP 请求，不上传查询和笔记。
 
-## 8. GO/NO-GO 门槛
+Gate：offline warm 真正无网络且有向量输出；cache marker 单独存在不判 ready。
 
-在跑分前将精确门槛写入 ADR。建议用相对与底线组合：
+### Step 4：分别测质量与性能
 
-- 选定模型 macro Recall@10 与最佳候选差距在预设范围内；
-- 三种语言均达到单独下限，不能由英语平均值掩盖；
-- 下载/缓存占用满足产品预算；
-- Worker 后索引过程无持续主线程卡顿；
-- 目标规模在桌面成功，移动端至少有明确安全上限或降级；
-- 断网缓存命中可用；
-- 清除模型可验证；
-- release 安装后不依赖缺失本地 asset；
-- 内容未发往远程 embedding 服务。
+内部依赖：冻结协议、黄金标注。外部依赖：真实 device/provider。
 
-数字门槛由 M0 基线与真实设备数据填写。若任何关键证据缺失，结论写“未验证”，不是默认通过。
+先对当前外部 embedding 和 keyword 建基线，再比较候选；固定 corpus/chunker/Top-K/RRF，避免归因混乱。测 Recall@5/10、MRR、每语言与失败切片，保存原始排名。
 
-## 9. 测试、调试与 CI 边界
+性能测 batch 1/8/16/32 中设备能承受的组合，记录 query P50/P95、chunks/s、初始化、CPU/GPU内存观察方式、主线程 long task。不要为了凑满 batch 矩阵导致移动端 OOM；失败本身是预算证据。
 
-- PR CI 只跑 parser、metric calculator、fixture 和 fake provider 测试；
-- 真实模型不进入普通 PR CI，避免下载大文件和不稳定 GPU 差异；
-- 可增加 `workflow_dispatch` benchmark，固定 runner 并缓存模型；
-- 原始结果包含 schema version，汇总脚本拒绝未知版本；
-- 故意破坏 relevant ID，验证数据校验能失败；
-- 故意断网、清缓存、禁用 WebGPU、终止 Worker，记录恢复路径；
-- Performance trace 与截图放本地证据或 release 附件，避免提交敏感路径。
+Gate：每组记录冷/暖、重复次数、设备/OS/Obsidian、库/模型版本和完整空间指纹。
 
-## 10. 完成标准
+### Step 5：验证跨角色复用假设
 
-- [ ] 数据集 schema、标注说明和三语言问题齐全；
-- [ ] 指标脚本有小 fixture 的已知答案测试；
-- [ ] 每个候选使用固定 revision 和完整 fingerprint；
-- [ ] 质量、冷/暖性能、内存、体积均有原始证据；
-- [ ] Worker/WASM 打包经过 release 形态验证；
-- [ ] 至少一个实际移动端测试或明确记录未验证；
-- [ ] ADR 给出 GO/NO-GO 及理由；
-- [ ] 没有仅因平均分高就忽略某种语言或平台；
-- [ ] NO-GO 时 M5 不开始默认接入。
+内部依赖：共用架构契约。外部依赖：候选 reranker/utility 资产或 fake loader。
 
-## 11. 实施记录
+做“加载 embedding → dispose → 加载另一 role → dispose”的小实验，记录资源回收和换入耗时。默认按单活跃模型设计；不依据磁盘体积声称可以三模型常驻。
+
+验证 reranker 是否支持真实 pair 输入、正确 scoring head；utility 是否有兼容 chat template、量化和生成算子。不在本阶段优化它们的任务质量，也不要求为此下载所有候选。
+
+Gate：M5 能得到统一 loader/cache/scheduler 所需信息；不兼容项进入各自里程碑，不隐瞒。
+
+### Step 6：输出 ADR 和分平台结论
+
+内部依赖：前五步证据。外部依赖：无。
+
+按“模型 + dtype + runtime + device”给 GO、NO-GO、pending。桌面 GO 不推导移动端 GO。WebGPU API 存在不代表模型运行通过；WASM 也需独立验证速度和内存。
+
+失败时可缩小模型、减少 batch 或调整资产方案后重新执行受影响实验；保持原协议或明确新版本，不篡改旧结果。
+
+## 6. Gate 和交接
+
+- [ ] Embedding 各语言下限通过，失败样本已解释。
+- [ ] 发布形态 Worker/WASM 可运行；无隐式远程代码加载。
+- [ ] 冷/暖/离线/取消/缓存损坏有证据。
+- [ ] 实际平台能力矩阵已记录，未测项保持 pending。
+- [ ] dtype 与前缀进入 M3 fingerprint；数值兼容性有证据。
+- [ ] 三角色候选与资源策略有账本，不把估计当测量。
+- [ ] M5 收到固定 policy、资产 manifest、执行资源交付方案与资源预算。
+
+## 7. 工程练习与记录
+
+练习定位一次“维数正确但召回变差”：检查前缀、pooling、tokenizer、截断和 normalization，不能只增加 Top-K。再复现一次 Worker 资源路径失败，区分构建、安装、运行三层原因。
 
 ```text
-Benchmark commit：
-设备与运行时：
-候选及 fingerprint：
-原始结果路径：
-失败样本分类：
-打包结论：
-移动端结论：
-ADR：
-GO / NO-GO：
-遗留风险：
+实验 commit / Node / npm：
+依赖版本 / 文档版本：
+设备 / Obsidian / 执行后端：
+模型 repo / revision / dtype / license：
+协议版本 / 预登记门槛：
+每语言质量与排名文件：
+下载、磁盘、峰值运行内存：
+发布形态 / 离线 / 故障结果：
+GO / NO-GO / pending：
+交给 M5、M6.1、M6.2 的限制：
 ```
+
+2026-10-23：规划修订，未安装依赖或执行真实 benchmark。官方 API 依据见 [[01-LocalAIRuntime架构与跨里程碑契约]]。

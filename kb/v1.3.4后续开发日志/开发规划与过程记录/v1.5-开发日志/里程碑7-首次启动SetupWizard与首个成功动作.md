@@ -1,232 +1,105 @@
 ---
-tags: [VaultCoach, v1.5, 里程碑7, SetupWizard, UX]
+tags: [VaultCoach, v1.5, SetupWizard, 开发规划]
 status: planned
-updated: 2026-10-09
-depends-on: [里程碑6-Worker化与可观测索引进度.md]
+updated: 2026-10-23
 ---
+# 里程碑 7：首次引导与首个成功动作
 
-# 里程碑 7：首次启动 Setup Wizard 与首个成功动作
+## 1. 为什么在每个增量都执行
 
-## 1. 目标
+M7 接受 M6、M6.1、M6.2 的不同交付状态。增量 A 只展示已验证的本地 Embedding；后续逐步增加重排与辅助任务。不能为了界面整齐显示尚未通过 Gate 的模型能力，也不要求用户先下载所有模型。
 
-实现一个可恢复的首次启动流程：选择知识范围 → 配置聊天 LLM → 准备语义搜索 → 进入第一个 Ask/Test。向导使用 M5/M6 的真实状态，不复制 embedding、索引或设置逻辑。
+首个成功动作是：选范围 → 授权准备本地搜索 → 索引完成 → 找到可核对的来源；用户配置主 LLM 后再完成带引用的回答。本地搜索成功不依赖主聊天服务已配置。
 
-学习重点：显式状态机、草稿与提交、流程恢复、可访问性、端到端调试以及“首次成功”指标设计。
+原规划中扩大到“当前文件”作为扫描范围的设想暂缓。当前正式范围仍是整个 Vault 或指定目录，保持 M2.1 的两层目录选择规则，避免在运行时工作中引入额外索引范围语义。
 
-## 2. 产品流程
+## 2. 依赖与文件
 
-```text
-Step 1  Choose knowledge
-        Current folder（推荐） / Current note / Entire vault / Selected folder
-                         ↓
-Step 2  Connect your AI
-        Chat provider + model + connection test
-        Semantic search: Built in, prepared locally
-                         ↓
-Step 3  Prepare your knowledge
-        Reading notes x/y → Chunking → Downloading model bytes
-        → Embedding chunks x/y → Saving
-                         ↓
-Step 4  Start learning
-        Ask my notes / Test my knowledge
-```
-
-“Current folder”只在当前活动文件有父目录时推荐；根目录、附件或无活动文件要有确定 fallback。向导不能自动发送问题或调用付费 LLM。
-
-## 3. 状态模型
-
-建议使用 discriminated union，而不是多个布尔值：
-
-```ts
-type SetupState =
-  | { step: "knowledge"; draft: KnowledgeDraft }
-  | { step: "chat"; draft: ChatDraft; knowledge: ValidKnowledgeScope }
-  | { step: "preparing"; setupId: string; jobId: string; progress: IndexProgress }
-  | { step: "ready"; completedAt: number; suggestedActions: SetupAction[] }
-  | { step: "error"; from: SetupRecoverableStep; error: SetupError };
-```
-
-持久化字段至少包含 `setupSchemaVersion`、`status`、已确认知识范围、非秘密聊天配置、最近完成步骤和 `completedAt`。API key 使用现有安全/设置存储方式，不复制到 setup state、日志或截图。
-
-## 4. 知识范围扩展
-
-当前 folder 模式不能完整表达“当前笔记”。若产品确认该入口，需正式扩展 scope，而非把文件路径伪装成目录：
-
-```ts
-type KnowledgeScope =
-  | { mode: "vault" }
-  | { mode: "folder"; path: string }
-  | { mode: "file"; path: string };
-```
-
-选择“当前笔记”时保存当时文件路径。后续切换 active file 不应让索引范围静默漂移。rename/delete 事件要么更新路径，要么将 scope 标记为 needs-attention，并给出重新选择操作。
-
-涉及：
-
-- `src/app/config/settings-types.ts` 的知识范围设置；
-- `src/knowledge-base.ts` 的文件发现过滤；
-- inventory/settings signature；
-- 文件 rename/delete listener；
-- settings UI 与测试 fixture；
-- index fingerprint 中的 scope identity。
-
-## 5. 涉及文件与建议模块
-
-| 文件/模块 | 职责 |
+| 类型/模块 | 内容 |
 | --- | --- |
-| `src/app/setup/setup-types.ts` | state、draft、error、action 类型 |
-| `src/app/setup/setup-service.ts` | 状态转换、校验、恢复、完成 |
-| `src/app/setup/setup-migration.ts` | setup schema 读取，完整迁移留 M8 |
-| `src/app/knowledge/knowledge-scope.ts` | scope union、规范化和验证 |
-| `src/app/application-api.ts` | 扩展现有 API：setup commands/state subscription |
-| `src/presentation/controllers/setup-wizard-controller.ts` | 将 UI 事件映射为 use case |
-| `src/presentation/views/setup-wizard-view.ts` | 步骤装配与焦点管理 |
-| `src/presentation/components/setup-knowledge-step.ts` | scope 选择 |
-| `src/presentation/components/setup-chat-step.ts` | 聊天 provider 与连接测试 |
-| `src/presentation/components/setup-progress-step.ts` | 订阅 M6 真实进度 |
-| `src/presentation/components/setup-ready-step.ts` | Ask/Test 首动作 |
-| `src/presentation/vault-coach-view.ts` | 修改现有主 View，根据 setup 状态路由 wizard/main UI |
-| `src/vault-coach-plugin.ts`、`src/app/vault-coach-runtime.ts` | 现有 lifecycle/runtime 负责轻量恢复，不在 onload 执行重任务 |
-| `src/i18n.ts`、`styles.css` | 文案、响应式和可访问状态 |
-| `tests/app/setup/*` | 状态机、恢复、错误测试 |
-| `tests/presentation/setup-*` | DOM、键盘和动作测试 |
+| 内部能力 | M3 配置与索引身份；M5/M6 prepare/status/cancel 及索引进度；M6.1/M6.2 按已交付情况可选 |
+| 内部 UI | src/settings.ts；src/presentation/settings/settings-section-model.ts；components/advanced-disclosure.ts |
+| 内部范围 | src/app/knowledge/knowledge-scope-catalog.ts、knowledge-scope-types.ts 与 knowledge-scope-picker-modal.ts |
+| 内部配置 | src/app/config/settings-types/defaults/schema/migrations/repository.ts（实际文件前缀均为 settings-） |
+| 外部 API | 仓库锁定的 Obsidian Modal/Setting 与 DOM 类型；最低版本兼容路径 |
+| 外部服务 | 用户自主选择的主 LLM；模型下载来源需说明，不作为打开向导的前置条件 |
 
-## 6. 手动实施顺序
+拟新增：
+- src/presentation/setup/setup-wizard.ts：只渲染状态、接收用户操作。
+- src/app/setup/setup-service.ts：准备和索引流程编排。
+- src/app/setup/setup-state.ts：可恢复的状态及版本。
+- tests/setup/：状态、迁移和失败场景。
 
-### Step 1：先画状态与事件表
+不要在向导中复制模型下载器、扫描目录逻辑或 provider factory。基础/进阶两套渲染继续共享现有设置描述，不创建第三套独立默认值。
 
-为每个状态列允许事件：`selectScope`、`saveChat`、`testConnection`、`startPrepare`、`cancel`、`retry`、`openAsk`、`openExam`。非法事件返回可诊断错误，不能悄悄跳步。
+## 3. 按顺序实现
 
-### Step 2：实现纯 setup service
+### Step 1：定义用户状态与能力矩阵
 
-先用内存 repository/fake embedding runtime/fake index coordinator 完成状态机测试。setup service 不创建 DOM，不直接读 Vault。
+至少区分新安装、旧用户升级、主动重新打开向导。旧用户已有 provider、范围和偏好时，不强制清空配置或重新走向导。
 
-### Step 3：实现 knowledge scope
+分别记录 setup schema version、用户是否完成/跳过引导；模型是否真的可用必须实时查询 runtime。持久化的 completed 不能证明缓存仍存在。页面状态建议为：范围选择 → 准备说明 → 准备中 → 可索引 → 索引中 → 可搜索 → 可选主 LLM → 完成。
 
-路径使用 Vault 相对路径并规范化；拒绝越界和不存在目标。文件过滤逻辑只存在一处，index inventory、signature 和 discovery 共用同一 scope。
+**依赖/交付：** M5/M6 状态契约；先写状态转移表和 fake service，覆盖关闭重开、失败重试、已准备模型。
 
-### Step 4：实现聊天连接测试
+### Step 2：接入范围选择与下载授权
 
-测试必须由用户点击触发，并显示正在连接、成功、auth/network/model 错误。优先使用最小能力请求；若 provider 无无计费健康检查，文案要说明可能产生请求。测试成功不等于保存 API key 成功，两者分别处理。
+复用 M2.1 picker，默认整个 Vault。若向导建议一个较小目录，应符合现有两层选择规则且让用户确认，不能自动把深层目录改成其父目录。
 
-### Step 5：连接真实 prepare 进度
+准备前显示：角色用途、模型与 revision、来源、预计下载量、预计磁盘占用、硬件要求、网络需求与可清理入口。总大小来自实际 manifest；无法得知时明确未知，不能继续显示源想法中的“不到 1 GB”作承诺。
 
-用户在 Step 3 开始任务后保存 `setupId/jobId`。View 重新创建时通过 Application API 重新订阅现有 job；不要启动第二次索引。
+用户点击准备后才开始网络请求。跳过时可继续使用已配置外部模型或当前可用的检索模式；onload 不下载模型。
 
-取消后返回可继续的步骤，保留有效草稿并清临时索引。失败展示错误类别和下一动作，而不是只显示 stack trace。
+### Step 3：用能力状态生成准备卡片
 
-### Step 6：实现首个成功动作
+Embedding 是本地向量检索的基础；重排为质量增强；Utility 按任务可选。仅展示已通过对应平台 Gate 的可准备能力；不可用项解释原因，避免无效按钮。
 
-- **Ask my notes**：进入 Ask 页并预填一个可编辑问题，不自动发送；
-- **Test my knowledge**：进入 exam setup，使用已选 scope，不自动调用 LLM；
-- ready 状态持久化后再导航，防止重启重新进入向导。
+进度分为下载、校验、加载、就绪，只有实际总量已知才显示百分比。共享文件按资源去重统计。切换离开页面可保持明确授权的准备任务，但取消/卸载要遵循 M6 契约。
 
-### Step 7：接入主 View
+**依赖/交付：** runtime.subscribe 的订阅与解除、资源状态展示；验证关闭窗口不会泄露监听器、重复打开不会重复下载。
 
-主 View 根据 `needsSetup()` 决定入口。不要在 UI 里通过“有没有消息”猜。旧用户跳过策略和新旧默认由 M8 正式完成，本阶段可使用 feature flag 和测试 fixture。
+### Step 4：编排索引与第一次搜索
 
-### Step 8：可访问性和响应式
+准备完成后显示预计扫描范围和文件数，再由用户启动索引。使用 KnowledgeIndexCoordinator 的入口，读取 M6 的分阶段进度；不在 UI 遍历文件或直接写索引。
 
-- 每步一个明确 heading；
-- Back/Next/Cancel 是可聚焦按钮；
-- 步骤切换后焦点移动到 heading；
-- 进度用 `aria-live` 适度播报，不逐 chunk 刷屏；
-- 错误与输入通过 `aria-describedby` 关联；
-- 不只用颜色表示状态；
-- 窄屏、触屏和软键盘下按钮可用。
+索引成功必须来自已提交 generation；取消或部分失败不能显示完成。显示可检索来源；若当前没有独立搜索入口，可在向导中新增只调用检索应用服务的轻量结果面板，不用虚构聊天回答证明检索成功。
 
-## 7. 验证场景
+首次问题可以由用户输入，也可使用明确标记的示例。没有文档、无匹配或 PDF 无可提取文本时给出对应下一步，不自动扩大扫描范围。
 
-### 自动测试
+### Step 5：主 LLM 与辅助路由分别说明
 
-- 各合法/非法状态转换；
-- draft 未确认时不污染正式设置；
-- folder/file/vault scope 的 discovery；
-- file rename/delete；
-- 重开 View 重连同一 job；
-- stale job event 被忽略；
-- connection error 分类；
-- Ask 只预填不发送；
-- Test 只打开配置不调用 LLM；
-- completed setup 不重复出现；
-- keyboard/focus/ARIA 基本行为。
+主 LLM 配置允许 Ollama 或现有云端兼容接口，保留现有连通性校验。首次检索不强制用户配置它，但生成回答需要可用主 LLM。
 
-### 手工旅程
+基础设置用简明状态说明哪些步骤本地运行；进阶设置保留 provider/模型等覆盖能力。检索模型准备成功，不自动修改主 LLM API 地址或密钥。
 
-1. 全新小 Vault，current folder → 成功 Ask；
-2. current note → 成功 Test；
-3. 整个 Vault → 用户取消并恢复；
-4. 无 active file 打开向导；
-5. chat auth 失败后修改并重试；
-6. 模型下载断网后重试；
-7. 索引时关闭/重开侧栏；
-8. 索引时重载插件；
-9. 窄屏/mobile 完整走一次；
-10. 用户选择的 note 被重命名或删除。
+云端主回答可能接收问题、选中的上下文及相关对话；若 rewrite/memory 仍走外部路径，需单独说明。不要使用“全部离线”笼统描述混合模式。
 
-## 8. 调试练习
+### Step 6：处理失败、恢复与可访问性
 
-1. 为状态转换记录 setup ID、from/to、event、结果，不记录凭据；
-2. 在每步设置断点，观察 draft 何时提交；
-3. 使用 fake clock/controlled promise 模拟慢连接和乱序进度；
-4. 故意在导航前崩溃，验证 completedAt 的事务顺序；
-5. 用 Obsidian Developer Console 检查 View 重建后订阅数；
-6. 使用键盘完成全流程并用 accessibility tree 检查名称。
+- 网络失败保留可重试状态；磁盘不足提示清理方案，不能删用户笔记。
+- 模型不支持设备时展示实际可用路径；不能在 UI 中静默改 provider。
+- 索引取消仍能读取旧的有效 generation；切换模型后的不兼容索引不能混用。
+- 标题折叠沿用 M2.1；按钮支持键盘、焦点返回，状态更新可被辅助技术识别。
+- 日志使用 setup trace 与 runtime/index 子 span，仅记录状态/耗时，不记录目录名和问题正文。
 
-## 9. 产品指标与隐私
+## 4. 验收与新人练习
 
-如果暂时没有经用户同意的 telemetry，用本地开发测量和可复现人工测试：
+| 场景 | 预期证据 |
+| --- | --- |
+| 新安装无模型/无主 LLM | 可跳过；授权后准备并完成搜索 |
+| 旧用户已有云端/Ollama | 配置和 UI 偏好保持，无自动下载 |
+| 只完成增量 A | 不要求重排和 Utility 才能继续 |
+| 离线且缓存完整 | 已验证平台可加载模型并搜索 |
+| 离线且缓存缺失 | 明确缺失原因，可取消/选择已配置路径 |
+| 下载/索引中关闭重开 | 状态一致、无重复任务和 listener |
+| 空范围/无命中 | 正常空状态，无假完成、无虚构答案 |
 
-- 打开向导到 ready 的时间；
-- 首次下载与索引耗时；
-- 每步错误类型；
-- 首次 Ask/Test 是否成功；
-- 中断恢复所需动作数。
+先用 fake services 完成界面流程，再用一个小型测试 Vault 跑实机。不要让 UI 自动化测试每次下载模型。记录用户完成首次搜索与回答的步骤数、耗时和卡点，产品评审据此减步骤。
 
-不要为测量首次成功而新增隐藏遥测。未来若加入 analytics，需明确 opt-in、最小数据、文档和关闭方式。
+本阶段通过后进入 M8。以后新增能力，只重新验证受影响路径及关键旧用户路径。
 
-## 10. 工程实践与原因
+## 5. 开发记录
 
-- 状态机使恢复和非法路径可测试；
-- draft 与正式设置分离，Back/Cancel 不留下半配置；
-- Application 层拥有 job，View 生命周期不等于任务生命周期；
-- scope 是显式 union，避免路径字符串多义；
-- 首动作由用户确认，避免意外费用和外发内容；
-- 真实进度复用 M6，避免向导与 Header 产生两套事实；
-- 可访问性在组件设计时实现，避免发布前补丁式修改。
+状态：规划，未实现。建议 PR 为状态与编排 → 模型卡片 → 索引与首次搜索 → 主 LLM/失败 UX。完成后补充截图、设备、范围、授权证据、取消/恢复结果、commit 和未解决问题。
 
-## 11. PR 切片
-
-1. `test: define setup state machine`；
-2. `feat: add explicit knowledge scope model`；
-3. `feat: add recoverable setup service`；
-4. `feat: build setup wizard steps`；
-5. `feat: connect real index progress`；
-6. `feat: add first ask and exam actions`；
-7. `fix: improve wizard accessibility and mobile layout`。
-
-## 12. 完成标准
-
-- [ ] 新用户只配置知识范围和聊天 LLM；
-- [ ] current note/folder/vault 语义准确且可迁移；
-- [ ] prepare 显示 M6 的真实阶段与计数；
-- [ ] 关闭 View、取消、失败、重启都有确定恢复路径；
-- [ ] API key 不进入 setup 日志或普通 state dump；
-- [ ] Ask/Test 首动作不会自动产生外部请求；
-- [ ] 键盘、ARIA、窄屏验证通过；
-- [ ] 旧用户处理仍受 feature flag，等待 M8 矩阵；
-- [ ] 自动测试、lint、build 和手工旅程通过。
-
-## 13. 实施记录
-
-```text
-Setup schema version：
-状态图偏差：
-Scope 迁移：
-连接测试语义：
-中断恢复结果：
-首次成功用时：
-Accessibility：
-Mobile：
-未解决风险：
-```
+原版详见 [[历史规划-2026-10-23调整前/原M7]]；本文件为当前实施依据。
