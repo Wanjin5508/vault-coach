@@ -632,11 +632,13 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     .setDisabled(status.phase === "downloading" || status.phase === "loading" || status.phase === "clearing")
                     .onClick(() => this.prepareBuiltinEmbedding()));
                 if (status.cached || status.phase === "ready") {
-                    setting.addButton((button) => button
-                        .setButtonText(this.t("settings.builtinEmbedding.clear"))
-                        .setDestructive()
-                        .setDisabled(status.phase === "clearing")
-                        .onClick(() => this.clearBuiltinEmbedding()));
+                    setting.addButton((button) => {
+                        button.buttonEl.addClass("mod-warning");
+                        button
+                            .setButtonText(this.t("settings.builtinEmbedding.clear"))
+                            .setDisabled(status.phase === "clearing")
+                            .onClick(() => this.clearBuiltinEmbedding());
+                    });
                 }
             },
         };

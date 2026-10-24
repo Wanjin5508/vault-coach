@@ -78,9 +78,8 @@ async function prepare(allowDownload: boolean): Promise<void> {
         if (!cachedResponse) {
             if (!allowDownload) throw new Error("Built-in embedding assets are not installed. Run the prepare command while online.");
             postMessage({ type: "progress", progress: index / requiredFiles.length, file });
-            // Dedicated Worker 无法调用 Obsidian requestUrl；此请求仅下载用户明确同意的固定模型文件。
-            // eslint-disable-next-line no-restricted-globals
-            const response = await fetch(url, { cache: "no-store" });
+            // Dedicated Worker 无法导入 Obsidian requestUrl；这里只下载用户明确同意的固定版本资产。
+            const response = await globalThis.fetch(url, { cache: "no-store" });
             if (!response.ok) throw new Error(`Model asset download failed (${response.status}): ${file}`);
             bytes = new Uint8Array(await response.arrayBuffer());
         } else {

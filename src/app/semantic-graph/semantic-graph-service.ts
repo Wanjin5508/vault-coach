@@ -933,7 +933,7 @@ export class SemanticGraphService {
     }
 
     private async appendDecision(decision: UserSemanticDecisionInput): Promise<void> {
-        const complete = { ...decision, id: `decision:${stableSemanticHash(`${this.now()}\u0000${JSON.stringify(decision)}\u0000${this.state.decisions.length}`)}`, createdAt: this.now() } as UserSemanticDecision;
+        const complete: UserSemanticDecision = { ...decision, id: `decision:${stableSemanticHash(`${this.now()}\u0000${JSON.stringify(decision)}\u0000${this.state.decisions.length}`)}`, createdAt: this.now() };
         const next: SemanticGraphState = { ...this.state, decisions: [...this.state.decisions, complete], updatedAt: this.now() };
         this.assertIntegrity(next);
         await this.dependencies.store.save(next);

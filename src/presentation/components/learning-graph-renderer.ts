@@ -99,14 +99,13 @@ export class LearningGraphRenderer {
         this.restorePinnedPositions(options.initialPinnedPositions);
         this.selectedNodeId = options.selectedNodeId;
         this.selectedEdgeId = options.selectedEdgeId;
-        this.canvas = document.createElement("canvas");
-        this.canvas.classList.add("vault-coach-learning-map-canvas");
-        this.canvas.setAttribute("role", "img");
-        this.canvas.setAttribute("aria-label", options.accessibleTitle);
+        this.canvas = this.root.createEl("canvas", {
+            cls: "vault-coach-learning-map-canvas",
+            attr: { role: "img", "aria-label": options.accessibleTitle },
+        });
         const context = this.canvas.getContext("2d");
         if (!context) throw new Error("Canvas 2D context is unavailable.");
         this.context = context;
-        this.root.appendChild(this.canvas);
         this.syncCanvasSize();
         this.resizeObserver = new ResizeObserver(() => {
             if (this.destroyed || !this.syncCanvasSize()) return;
