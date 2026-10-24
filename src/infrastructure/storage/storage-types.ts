@@ -16,12 +16,14 @@ import type { SourceInventoryV1 } from "../../domain/index-lifecycle/source-inve
 
 /**
  * 可重建知识索引的落盘快照。
- * `settingsSignature` 和 `embeddingModel` 用于拒绝与当前运行配置不兼容的缓存。
+ * `settingsSignature` 只保护文本解析、范围和分块语义；向量兼容性以 generation manifest
+ * 中的完整 EmbeddingFingerprint 为准，不能继续依赖旧的模型名字符串。
  */
 export interface KnowledgeBaseSnapshot {
     version: number;
     settingsSignature: string;
-    embeddingModel: string | null;
+    /** 版本 3 及更早的弱兼容签名；版本 4 只从 vector manifest 的完整 fingerprint 判断。 */
+    embeddingModel?: string | null;
     stats: KnowledgeBaseStats;
     vectorStats: VectorIndexStats;
     chunks: IndexedChunk[];

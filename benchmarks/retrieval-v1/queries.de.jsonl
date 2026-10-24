@@ -1,0 +1,20 @@
+{"id":"de-q01","text":"Unter welcher Bedingung dürfen Notizen an einen Cloud-Dienst gesendet werden?","relevantChunkIds":["vc-zh-local-first"],"split":"tuning","tags":["privacy","cross-language"]}
+{"id":"de-q02","text":"Warum gehören Quantisierung und Pooling zum Embedding-Fingerprint?","relevantChunkIds":["vc-zh-fingerprint"],"split":"tuning","tags":["fingerprint","cross-language"]}
+{"id":"de-q03","text":"Wie bleibt der alte Vektorindex bei einem fehlgeschlagenen Aufbau nutzbar?","relevantChunkIds":["vc-zh-generation"],"split":"tuning","tags":["generation","cross-language"]}
+{"id":"de-q04","text":"Wie werden verspätete Antworten eines beendeten Workers verworfen?","relevantChunkIds":["vc-en-worker","vc-zh-cancel"],"split":"tuning","tags":["worker","cancel","cross-language"]}
+{"id":"de-q05","text":"Welche Modellrollen werden getrennt behandelt?","relevantChunkIds":["vc-de-roles"],"split":"acceptance","tags":["roles"]}
+{"id":"de-q06","text":"Reicht navigator.gpu als Beweis für funktionierende Inferenz?","relevantChunkIds":["vc-de-webgpu"],"split":"acceptance","tags":["webgpu"]}
+{"id":"de-q07","text":"Was geschieht mit alten Embeddings ohne vollständigen Fingerprint?","relevantChunkIds":["vc-de-migration"],"split":"acceptance","tags":["migration"]}
+{"id":"de-q08","text":"Welche Lizenzangaben müssen vor der Standardauswahl geprüft werden?","relevantChunkIds":["vc-de-license"],"split":"acceptance","tags":["license"]}
+{"id":"de-q09","text":"Darf ein Desktop-Ergebnis auf iOS übertragen werden?","relevantChunkIds":["vc-de-mobile"],"split":"acceptance","tags":["mobile"]}
+{"id":"de-q10","text":"Was unterscheidet Kaltstart und Warmstart?","relevantChunkIds":["vc-de-cold-warm"],"split":"acceptance","tags":["startup"]}
+{"id":"de-q11","text":"Wie wird ein warmer Offline-Cache überprüft?","relevantChunkIds":["vc-en-offline-cache"],"split":"acceptance","tags":["offline","cross-language"]}
+{"id":"de-q12","text":"Welche Kennzahlen beschreiben die Suchqualität?","relevantChunkIds":["vc-en-metrics"],"split":"acceptance","tags":["metrics","cross-language"]}
+{"id":"de-q13","text":"Warum dürfen Worker- und WASM-Code nicht vom CDN nachgeladen werden?","relevantChunkIds":["vc-en-runtime-assets"],"split":"acceptance","tags":["assets","cross-language"]}
+{"id":"de-q14","text":"Wie werden große Batches und Speicherfehler dokumentiert?","relevantChunkIds":["vc-en-batching"],"split":"acceptance","tags":["performance","cross-language"]}
+{"id":"de-q15","text":"Warum ist der Branch main keine feste Modellversion?","relevantChunkIds":["vc-en-revision"],"split":"acceptance","tags":["revision","cross-language"]}
+{"id":"de-q16","text":"Wie arbeitet die Suche weiter, wenn der Vektorindex beschädigt ist?","relevantChunkIds":["vc-zh-fallback"],"split":"acceptance","tags":["fallback","cross-language"]}
+{"id":"de-q17","text":"Welche vertraulichen Daten dürfen nicht im Fehlerprotokoll stehen?","relevantChunkIds":["vc-zh-privacy"],"split":"acceptance","tags":["privacy","cross-language"]}
+{"id":"de-q18","text":"Wie soll ein durch PDF-Rauschen verursachter Suchfehler ausgewertet werden?","relevantChunkIds":["vc-en-metrics"],"split":"acceptance","tags":["pdf-noise","failure-slice"]}
+{"id":"de-q19","text":"Welche Funktion berechnet die Einkommensteuererklärung?","relevantChunkIds":[],"split":"acceptance","tags":["no-answer","negative"]}
+{"id":"de-q20","text":"Wie bestellt das Plugin Lebensmittel nach Hause?","relevantChunkIds":[],"split":"acceptance","tags":["no-answer","negative"]}

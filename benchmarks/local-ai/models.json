@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-24",
+  "candidates": [
+    {
+      "id": "multilingual-e5-small-uint8",
+      "role": "embedding",
+      "status": "candidate",
+      "repository": "Xenova/multilingual-e5-small",
+      "revision": "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+      "task": "feature-extraction",
+      "dtype": "uint8",
+      "modelFile": "onnx/model_uint8.onnx",
+      "modelFileSha256": "ee13574a23e4384619a172d4c0c8c6b825528fde30258c56130d5e3efcc9c8f1",
+      "modelFileBytes": 118000000,
+      "license": {
+        "declared": null,
+        "status": "pending-manual-verification",
+        "upstream": "intfloat/multilingual-e5-small"
+      },
+      "dimension": 384,
+      "maxTokens": 512,
+      "pooling": "mean",
+      "normalize": true,
+      "prefixes": {
+        "query": "query: ",
+        "document": "passage: ",
+        "graph": "passage: "
+      },
+      "languages": ["zh", "en", "de"],
+      "allowedDevices": ["cpu", "wasm", "webgpu"],
+      "notes": [
+        "候选 revision 和 uint8 权重 SHA-256 已锁定。",
+        "仓库许可证仍需人工核对；许可证状态未通过前不得成为正式默认模型。"
+      ]
+    },
+    {
+      "id": "all-minilm-l6-v2-fp32-control",
+      "role": "embedding",
+      "status": "english-performance-control",
+      "repository": "onnx-community/all-MiniLM-L6-v2-ONNX",
+      "revision": "main",
+      "task": "feature-extraction",
+      "dtype": "fp32",
+      "license": {
+        "declared": "apache-2.0",
+        "status": "declared-by-model-card"
+      },
+      "dimension": 384,
+      "pooling": "mean",
+      "normalize": true,
+      "prefixes": {
+        "query": "",
+        "document": "",
+        "graph": ""
+      },
+      "languages": ["en"],
+      "allowedDevices": ["cpu", "wasm", "webgpu"],
+      "notes": [
+        "仅作为英文性能对照，不得用它的英文结果推断中文或德文质量。",
+        "正式运行前必须把 revision 从 main 改为不可变 commit。"
+      ]
+    }
+  ]
+}

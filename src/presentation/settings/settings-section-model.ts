@@ -6,6 +6,7 @@ export type SettingsTier = "basic" | "advanced";
 export type SettingsVirtualItemId =
     | "knowledgeScope"
     | "semanticStatus"
+    | "builtinEmbeddingRuntime"
     | "cloudApiKey"
     | "embeddingLocalBaseUrl"
     | "embeddingCloudApiKey";
@@ -43,7 +44,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
         tier: "advanced",
         titleKey: "settings.category.embedding",
         itemKeys: [
-            "embeddingProvider", "embeddingLocalBaseUrl", "embeddingModel", "cloudEmbeddingBaseUrl",
+            "embeddingProvider", "builtinEmbeddingRuntime", "embeddingLocalBaseUrl", "embeddingModel", "cloudEmbeddingBaseUrl",
             "cloudEmbeddingModel", "embeddingCloudApiKey", "enableVectorRetrieval",
         ],
     },

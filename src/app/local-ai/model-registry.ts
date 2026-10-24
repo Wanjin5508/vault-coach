@@ -1,0 +1,26 @@
+export const BUILTIN_EMBEDDING_POLICY = {
+    id: "multilingual-e5-small-uint8-v1",
+    role: "embedding",
+    repository: "Xenova/multilingual-e5-small",
+    revision: "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+    dtype: "uint8",
+    dimension: 384,
+    pooling: "mean",
+    normalize: true,
+    modelBytes: 118_054_630,
+    license: "MIT",
+    files: {
+        config: "config.json",
+        tokenizer: "tokenizer.json",
+        tokenizerConfig: "tokenizer_config.json",
+        model: "onnx/model_uint8.onnx",
+    },
+    assetSha256: {
+        "config.json": "cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1",
+        "tokenizer.json": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+        "tokenizer_config.json": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b",
+        "onnx/model_uint8.onnx": "ee13574a23e4384619a172d4c0c8c6b825528fde30258c56130d5e3efcc9c8f1",
+    },
+    modelSha256: "ee13574a23e4384619a172d4c0c8c6b825528fde30258c56130d5e3efcc9c8f1",
+    prefixes: { query: "query: ", document: "passage: ", graph: "passage: " },
+} as const;

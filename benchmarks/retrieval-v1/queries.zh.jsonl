@@ -1,0 +1,20 @@
+{"id":"zh-q01","text":"什么时候才可以把笔记发给云端？","relevantChunkIds":["vc-zh-local-first"],"split":"tuning","tags":["privacy","paraphrase"]}
+{"id":"zh-q02","text":"向量模型换了量化精度，旧索引还能继续算相似度吗？","relevantChunkIds":["vc-zh-fingerprint"],"split":"tuning","tags":["fingerprint","dtype"]}
+{"id":"zh-q03","text":"新索引构建到一半失败会不会破坏原索引？","relevantChunkIds":["vc-zh-generation"],"split":"tuning","tags":["failure","generation"]}
+{"id":"zh-q04","text":"如何避免取消后的迟到结果写回状态？","relevantChunkIds":["vc-zh-cancel","vc-en-worker"],"split":"tuning","tags":["cancel","cross-language"]}
+{"id":"zh-q05","text":"诊断日志允许记录哪些模型信息？","relevantChunkIds":["vc-zh-privacy"],"split":"acceptance","tags":["privacy"]}
+{"id":"zh-q06","text":"指纹中为什么要包含 pooling 和 normalization？","relevantChunkIds":["vc-zh-fingerprint"],"split":"acceptance","tags":["fingerprint"]}
+{"id":"zh-q07","text":"active 指针应该在什么时候切换？","relevantChunkIds":["vc-zh-generation"],"split":"acceptance","tags":["generation"]}
+{"id":"zh-q08","text":"向量损坏以后问答功能如何继续工作？","relevantChunkIds":["vc-zh-fallback"],"split":"acceptance","tags":["fallback"]}
+{"id":"zh-q09","text":"离线暖启动怎样证明没有访问网络？","relevantChunkIds":["vc-en-offline-cache"],"split":"acceptance","tags":["offline","cross-language"]}
+{"id":"zh-q10","text":"Worker 和 WASM 文件能不能运行时从 CDN 下载？","relevantChunkIds":["vc-en-runtime-assets"],"split":"acceptance","tags":["assets","security","cross-language"]}
+{"id":"zh-q11","text":"关键词检索在什么情况下成为降级方案？","relevantChunkIds":["vc-zh-fallback"],"split":"acceptance","tags":["keyword"]}
+{"id":"zh-q12","text":"软取消和硬取消的差别是什么？","relevantChunkIds":["vc-zh-cancel"],"split":"acceptance","tags":["cancel"]}
+{"id":"zh-q13","text":"索引吞吐量应该怎样测试不同 batch？","relevantChunkIds":["vc-en-batching"],"split":"acceptance","tags":["performance","cross-language"]}
+{"id":"zh-q14","text":"为什么不能只用模型仓库的 main 作为版本身份？","relevantChunkIds":["vc-en-revision"],"split":"acceptance","tags":["revision","cross-language"]}
+{"id":"zh-q15","text":"桌面端 WebGPU 跑通是否意味着手机也支持？","relevantChunkIds":["vc-de-mobile"],"split":"acceptance","tags":["mobile","cross-language"]}
+{"id":"zh-q16","text":"模型下载大小和冷启动、暖启动应该如何区分记录？","relevantChunkIds":["vc-de-cold-warm"],"split":"acceptance","tags":["startup","cross-language"]}
+{"id":"zh-q17","text":"PDF 提取出现乱码时，检索基准应该保存失败切片吗？","relevantChunkIds":["vc-en-metrics"],"split":"acceptance","tags":["pdf-noise","metrics"]}
+{"id":"zh-q18","text":"用户确认过的图谱关系在重建 embedding 时会被删除吗？","relevantChunkIds":["vc-de-migration"],"split":"acceptance","tags":["migration","cross-language"]}
+{"id":"zh-q19","text":"Vault Coach 的股票交易手续费是多少？","relevantChunkIds":[],"split":"acceptance","tags":["no-answer","negative"]}
+{"id":"zh-q20","text":"插件是否提供在线视频剪辑和字幕渲染？","relevantChunkIds":[],"split":"acceptance","tags":["no-answer","negative"]}

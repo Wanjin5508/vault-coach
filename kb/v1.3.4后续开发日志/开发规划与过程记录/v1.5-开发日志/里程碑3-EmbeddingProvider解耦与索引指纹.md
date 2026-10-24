@@ -6,8 +6,8 @@ tags:
   - EmbeddingProvider
   - 索引指纹
   - 架构重构
-status: planned
-updated: 2026-10-23
+status: implemented-pending-manual-validation
+updated: 2026-10-24
 baseline: 1.5.2
 depends-on:
   - 里程碑2.1-设置页目录选择与信息层级优化.md
@@ -53,7 +53,7 @@ M3 只交付窄接口和保持现有行为的 adapter，加上完整 embedding �
 - `src/infrastructure/utility/legacy-chat-utility-adapter.ts`：调用原 ChatProvider 的 rewrite/memory，保持原行为。
 - `tests/domain/rerank/rerank-provider.contract.test.ts`、`tests/domain/utility/utility-provider.contract.test.ts`：fake 测试，无模型下载。
 
-接口示意（实际实现需导入/补齐现有 DTO）：
+接口示意（实际实现需导入/补齐现有 **DTO**）：
 
 ```ts
 interface RerankProvider {
@@ -65,7 +65,7 @@ interface RerankProvider {
 }
 ```
 
-关闭 rerank 时直接跳过端口，保持当前候选截断和排序行为；旧远程接口如果只返回 Top-N，adapter 返回已评分的稳定 ID 子集。M3 的兼容消费层仍按现有规则处理未返回项和混合分数，并将缺失标记为“无模型评分”，不能把用于旧排序的补 0 描述成真实模型评分。M6.1 再通过实验引入严格校验与新的完整/部分响应策略，避免在 M3 重构时悄悄改变排序。
+**关闭 rerank 时直接跳过端口**，保持当前候选截断和排序行为；旧远程接口如果只返回 Top-N，adapter 返回已评分的稳定 ID 子集。M3 的兼容消费层仍按现有规则处理未返回项和混合分数，并将缺失标记为“**无模型评分**”，不能把用于旧排序的补 0 描述成真实模型评分。M6.1 再通过实验引入严格校验与新的完整/部分响应策略，避免在 M3 重构时悄悄改变排序。
 
 旧 ChatProvider 可以暂保留 rewrite/memory 方法用于兼容；新消费者使用窄端口，M6.2 才移除所有旧调用后收窄主聊天接口。不为了“统一”把考试生成/评分和概念抽取自动送给 Utility SLM。
 
@@ -102,7 +102,7 @@ interface RerankProvider {
 - 用领域层 `EmbeddingProvider` port 表达应用需要的 embedding 能力；
 - 把 Ollama 与 OpenAI-compatible 网络细节放进 infrastructure adapter；
 - 由 `ApplicationContainer` 统一创建和注入 provider；
-- 用结构化 fingerprint 描述向量的语义兼容条件；
+- 用结构化 fingerprint 描述向量的**语义兼容条件**；
 - 在持久化层保存完整 fingerprint，并在搜索前再次校验；
 - 为全量构建提供 build then activate 的代际切换；
 - 用同一套 contract tests 约束不同 provider；
@@ -112,7 +112,7 @@ interface RerankProvider {
 
 新人完成本阶段后，应能解释并实践：
 
-- 依赖反转：业务代码依赖能力接口，不依赖 HTTP 服务或第三方 SDK；
+- **依赖反转**：业务代码依赖能力接口，不依赖 HTTP 服务或第三方 SDK；
 - composition root：具体实现只在应用启动装配处出现；
 - contract test：多个 adapter 必须满足同一组可观察行为；
 - schema 演进：区分用户事实、可再生派生数据和兼容读取；
@@ -230,15 +230,15 @@ presentation → app → domain ← infrastructure
 
 ### 3.4 用户事实与派生数据的边界
 
-| 数据 | 分类 | 不兼容时的动作 |
-| --- | --- | --- |
-| 设置 | 用户偏好 | 兼容迁移并保留 |
-| Markdown/PDF | 用户源事实 | 不修改 |
-| 对话、考试、Assessment | 用户学习数据 | 不删除 |
-| M3 governance decisions | 用户决策事实 | 保留审计记录 |
-| 文本 chunk / keyword index | 可再生派生数据 | 只在来源或解析设置变化时失效 |
-| RAG vectors | 可再生派生数据 | fingerprint 不兼容时标 stale |
-| semantic embeddings / similarity candidates | 可再生模型数据 | 失效并重算，不清空整个语义图谱 |
+| 数据                                          | 分类      | 不兼容时的动作                 |
+| ------------------------------------------- | ------- | ----------------------- |
+| 设置                                          | 用户偏好    | 兼容迁移并保留                 |
+| Markdown/PDF                                | 用户源事实   | 不修改                     |
+| 对话、考试、Assessment                            | 用户学习数据  | 不删除                     |
+| M3 governance decisions                     | 用户决策事实  | 保留审计记录                  |
+| 文本 chunk / keyword index                    | 可再生派生数据 | 只在来源或解析设置变化时失效          |
+| RAG vectors                                 | 可再生派生数据 | fingerprint 不兼容时标 stale |
+| semantic embeddings / similarity candidates | 可再生模型数据 | 失效并重算，不清空整个语义图谱         |
 
 ## 4. 核心契约设计
 
@@ -319,7 +319,7 @@ export interface EmbeddingProvider {
 
 - `describe()` 是本地、无网络、无副作用操作，插件启动不会因模型服务离线而阻塞；
 - endpoint identity 是去除 userinfo、query、fragment 并统一尾部斜线后的 canonical endpoint；它只在本地 manifest 中比较，不进入普通日志和 UI；
-- `preprocessing` 保存三种 purpose 的完整规则，因此 document/query 可使用不同前缀并保持同一空间 fingerprint；
+- `preprocessing` 保存三种 purpose 的**完整规则**，因此 document/query 可使用不同前缀并保持同一空间 fingerprint；
 - 远程协议无法稳定报告 revision 时使用明确值 `unreported`，并令 `revisionVerified = false`；
 - fingerprint 能阻止已知配置混用。远端在相同模型名下静默替换权重仍是协议限制，状态页与实施记录要说明；
 - `texts` 为空时抛出 `invalid-request`；
@@ -1697,3 +1697,183 @@ Android：
 - 补充旧 vector、旧 semantic embedding 与用户治理决策的迁移边界；
 - 增加 contract test、故障注入、调试路径、隐私日志和真实 Obsidian 验证矩阵；
 - 文档修订前已在 `master` 1.5.2 执行 lint、245 项测试和 production build，均通过；这只证明修订时基线正常，不代表 M3 已实现。
+
+## 18. 里程碑 3 开发日志：代码状态快照（2026-10-24）
+
+> 快照结论：M3 的代码实现和自动化门禁已经完成，真实 Ollama、OpenAI-compatible 服务以及 Obsidian Desktop/iOS/Android 的手工联调仍是发布前置条件。因此本文状态为 `implemented-pending-manual-validation`，不把“自动化通过”写成“已经可以发布”。
+
+### 18.1 快照身份与环境
+
+```text
+branch: feature/v1.5-m3
+base commit: 3ec527d
+snapshot date: 2026-10-24
+Node.js: v18.16.0
+npm: 9.5.1
+implementation state: working tree，尚未创建提交
+baseline gate: 59 test files / 245 tests，lint 与 production build 通过
+current gate: 64 test files / 261 tests，lint、tests、production build、git diff --check 通过
+```
+
+本快照记录的是工作区中的源码状态，`base commit` 只是本次开发开始时的 Git 基线，不代表 M3 已提交。提交前应再次核对 `git status`，避免把 Vault 的 `.obsidian/workspace.json` 或构建产物带入提交。
+
+### 18.2 本次交付的架构接缝
+
+最终调用链如下：
+
+```text
+Settings（持久化 provider 配置）
+  -> ApplicationContainer（组合根）
+  -> EmbeddingProviderRouter（每次调用时读取当前设置）
+  -> OllamaEmbeddingProvider / OpenAiCompatibleEmbeddingProvider
+  -> EmbeddingHttpTransport（唯一 Obsidian HTTP 边界）
+  -> EmbeddingBatch（vectors + fingerprint + diagnostics）
+  -> AdvancedRagEngine / SemanticGraphService
+  -> VectorStore（写入和搜索前校验完整 fingerprint）
+```
+
+本次建立了四组窄接口：
+
+1. `EmbeddingProvider`：负责 embedding 的描述、批量推理、指纹和诊断；
+2. `RerankProvider`：使用稳定的 candidate ID 传入和返回分数，避免远端数组位置污染领域层；
+3. `QueryRewritePort`：隔离 query rewrite；
+4. `MemoryExtractionPort`：隔离长期记忆抽取。
+
+`LocalModelClient` 已不再暴露 embedding 方法，也不再决定 embedding provider。M3 通过 legacy adapter 保持现有 rerank、rewrite 和 memory 行为，为 M6.1、M6.2 的内置模型实现保留替换点。聊天生成仍由 `ChatProvider` 承担，未在 M3 中引入浏览器内置聊天模型。
+
+### 18.3 新增文件快照
+
+| 模块 | 文件 | 当前职责 |
+|---|---|---|
+| Embedding 领域契约 | `src/domain/embedding/embedding-provider.ts` | Provider、descriptor、fingerprint、batch、diagnostics 和 purpose 类型 |
+| Embedding 错误 | `src/domain/embedding/embedding-error.ts` | 稳定错误码和 `EmbeddingError` |
+| 指纹规则 | `src/domain/embedding/embedding-fingerprint.ts` | 创建、校验、完整比较、descriptor 兼容判断和展示短 ID |
+| Provider 路由 | `src/app/embedding/embedding-provider-router.ts` | 按当前设置选择 provider，不缓存旧设置快照 |
+| HTTP 边界 | `src/infrastructure/embedding/embedding-http-transport.ts` | 统一 `requestUrl`、端点规范化和脱敏错误映射 |
+| Provider 共用校验 | `src/infrastructure/embedding/embedding-provider-utils.ts` | 输入、批量数量、向量维数与有限值校验 |
+| Ollama adapter | `src/infrastructure/embedding/ollama-embedding-provider.ts` | `/api/embed`、旧 `/api/embeddings` 兼容和一次有界 CPU fallback |
+| OpenAI-compatible adapter | `src/infrastructure/embedding/openai-compatible-embedding-provider.ts` | `/embeddings` 协议、index 顺序恢复和完整批量校验 |
+| Rerank 端口与适配器 | `src/domain/rerank/rerank-provider.ts`、`src/infrastructure/rerank/legacy-rerank-adapter.ts` | 用稳定 ID 隔离旧远程 rerank 响应 |
+| Utility 端口与适配器 | `src/domain/utility/*`、`src/infrastructure/utility/legacy-chat-utility-adapter.ts` | 隔离 rewrite 和 memory 抽取 |
+
+### 18.4 修改文件与行为快照
+
+| 文件/模块 | 已实现状态 |
+|---|---|
+| `src/app/application-container.ts` | 只创建一个共享 embedding router，并注入 RAG 与 semantic graph；指纹不兼容时通知 `KnowledgeIndexCoordinator` 将向量索引标为 dirty |
+| `src/rag-engine.ts` | 文档、查询使用明确 purpose；完整批量构建成功后才切换 generation；不兼容查询标记 stale 并回退关键词；M3 的增量更新暂时执行原子全量重建 |
+| `src/vector-store.ts` | schema v2、不可变 generation、`active.json.next -> active.json` 切换、`.bak` 恢复、严格 fingerprint/维数/shard 长度校验 |
+| `src/persistent-store.ts` | 增加索引路径存在性、移动和 generation 目录枚举能力 |
+| `src/app/vault-coach-runtime.ts` | snapshot 升级到 v4；恢复时以 VectorStore inspection 为准；失败、取消和设置变化不再先清空可恢复的 active generation |
+| `src/app/semantic-graph/semantic-graph-service.ts` | 使用同一 provider 与完整 fingerprint；旧 embedding 进入 stale 迁移；保留用户确认/拒绝的关系治理决策和用户事实 |
+| `src/infrastructure/storage/json-semantic-graph-store.ts` | JSON 与二进制元数据都持久化完整 `embeddingFingerprint`，内容 hash 也包含该字段 |
+| `src/presentation/components/vault-coach-header.ts`、`src/i18n.ts` | 区分 stale、corrupt 与普通 dirty 状态，并提供中英文提示 |
+| `src/model-client.ts` | 移除 embedding 传输、provider 选择和响应解析，只保留 chat/rerank/rewrite/memory 的旧实现 |
+
+### 18.5 指纹与存储契约
+
+完整 fingerprint 当前包含：
+
+```text
+providerId
+endpointIdentity
+model
+revision
+modelDtype
+outputDtype
+pooling
+normalization
+preprocessing.document/query/graph
+implementationVersion
+dimension
+```
+
+端点 identity 会移除用户名、密码、query 和 fragment，指纹、日志及错误信息均不保存 API key 或输入文本。当前远端 provider 不能证明服务端模型 revision 时写入 `unverified`，不会凭模型名虚构 revision。
+
+向量文件布局为：
+
+```text
+knowledge-index/vectors/
+  active.json
+  active.json.bak
+  generations/
+    generation-<timestamp>-<sequence>/
+      manifest.json
+      shard-000001.bin
+```
+
+写入过程先完成 shard 和 manifest，再从磁盘读取并验证，随后写入 `active.json.next` 并切换 active 指针。切换失败时恢复 `.bak`。启动时若 active 损坏但 backup 可读，则恢复 backup。旧 schema v1 `vectors/manifest.json` 只会被标为 `legacy/stale`，不会被猜测为当前模型生成，也不会在启动阶段触发网络调用。
+
+成功切换后只保留 active 与 backup 对应的 generation。显式“清除索引”仍会删除整个 vectors 子树。
+
+### 18.6 兼容性与迁移结果
+
+- 没有新增或改名用户设置字段，现有 `loadData()` / `saveData()` 兼容路径保持不变；
+- 旧用户的 Ollama/OpenAI-compatible 选择、URL、模型名和密钥引用仍按原配置工作；
+- snapshot 中已移除仅依赖 `embeddingModel` 字符串的弱身份，v4 只保存可恢复的统计状态，权威兼容判断来自 vector manifest；
+- 旧向量 manifest 缺少完整 fingerprint 时标记 stale，等待用户或自动索引流程重建；
+- 旧 semantic embedding 缺少完整 fingerprint 时不参与新 similarity 计算；已有用户治理决策和用户事实保留；
+- provider、端点、模型、revision、dtype、pooling、归一化、预处理版本或维数变化时，旧向量不会参与点积。
+
+### 18.7 自动化验证快照
+
+新增测试文件：
+
+- `tests/domain/embedding/embedding-fingerprint.test.ts`；
+- `tests/infrastructure/embedding/embedding-providers.test.ts`；
+- `tests/infrastructure/rerank/legacy-rerank-adapter.test.ts`；
+- `tests/vector-store.test.ts`；
+- `tests/rag-engine.test.ts`。
+
+既有 semantic graph 和 architecture boundary 测试也已更新。当前自动化覆盖以下关键风险：
+
+- 完整 fingerprint 相等与不相等；
+- 动态 provider 路由；
+- Ollama modern、legacy 和一次 CPU fallback；
+- OpenAI-compatible 返回乱序、部分批次拒绝和端点脱敏；
+- 错误维数整批拒绝且旧 active generation 可继续查询；
+- active 指针切换失败后恢复旧代际；
+- active shard 损坏后从 backup 恢复；
+- v1 manifest 进入 legacy 状态且不伪造 fingerprint；
+- 查询指纹不兼容时通知协调器、标记 stale 并回退关键词；
+- semantic graph 的旧 embedding 迁移保留用户治理结果；
+- RAG、semantic graph 和 `LocalModelClient` 的导入边界。
+
+最终门禁结果：
+
+```text
+npm run lint: PASS
+npm test: PASS (64 files, 261 tests)
+npm run build: PASS
+git diff --check: PASS
+```
+
+### 18.8 尚未执行的发布前手工验证
+
+以下项目未在本次命令行开发环境中执行，不能从 mock contract test 推断为真实服务已经通过：
+
+| 验证项 | 当前状态 | 发布前要求 |
+|---|---|---|
+| 真实 Ollama `/api/embed` | 未执行 | 用当前推荐模型完成建库、查询和重启恢复 |
+| 真实 Ollama legacy endpoint | 未执行 | 使用仍返回旧协议的版本验证逐文本 fallback |
+| Ollama GPU 失败后的 CPU fallback | 未执行 | 确认只回退一次、后续复用 CPU 状态并显示诊断提示 |
+| 真实 OpenAI-compatible 服务 | 未执行 | 验证鉴权、base URL 路径和批量顺序 |
+| Obsidian Desktop | 未执行 | 验证升级、设置切换、取消、重启和索引状态文案 |
+| iOS / Android | 未执行 | 至少验证插件加载；再依据远程 endpoint 的平台能力决定是否开放向量功能 |
+| 隐私日志抽查 | 未执行 | 搜索控制台输出，确认没有 API key、完整输入文本和带凭据 URL |
+
+### 18.9 已知限制与后续交接
+
+1. M3 只支持现有 Ollama 与 OpenAI-compatible embedding；内置 Transformers/WebGPU provider 属于 M4/M5；
+2. `requestUrl` 不提供可传递的底层 `AbortSignal`，因此当前 adapter 在请求前后检查取消，但不能保证立即中断已经发出的 HTTP 请求；
+3. M3 的 `syncVectorIndex()` 为保证原子性，对任何 chunk 变化执行全量 generation 重建；可恢复增量 writer 交给 M6；
+4. 全量构建会同时持有 chunk embedding 和新 shard，大 Vault 的峰值内存仍需在 M4 基准和 M6 分批写入中优化；
+5. 远端服务无法提供可验证 revision 时，fingerprint 只能记录 `unverified`。同一 URL 与模型名背后静默替换权重的风险，需要未来通过服务端 digest 或管理员提供的 revision 解决；
+6. 当前保留 active 与一个 backup generation，发布前应在真实 Vault 上确认磁盘占用和清理时机；
+7. 本次未创建 Git commit。建议手工验证完成后再按 port、provider、generation storage、consumer migration 分组审查提交。
+
+### 18.10 M3 完成判定
+
+代码层面的完成条件已经满足：领域接口、两个远端 adapter、完整 fingerprint、原子 generation、旧数据保守迁移、RAG/semantic graph 接入、状态展示和自动化测试均已落地。
+
+发布层面的完成条件尚未满足：必须补齐 18.8 的真实服务与设备验证，并把实际 Obsidian 版本、操作步骤、结果和异常记录回本节。后续开发可以开始 M4 的技术验证，但不能据此直接发布 1.5。

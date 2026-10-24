@@ -24,6 +24,7 @@ import type { SettingsMigrationWarning } from "../app/config/settings-schema";
 import type { SourceInventoryStatus } from "../domain/index-lifecycle/source-inventory";
 import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
 import type { KnowledgeScopeOption, KnowledgeScopeSelection } from "../app/knowledge/knowledge-scope-types";
+import type { LocalAiStatus } from "../domain/local-ai/local-ai-types";
 
 /**
  * UI 层和设置页能调用的插件能力。
@@ -57,6 +58,10 @@ export interface VaultCoachPluginApi {
     getKnowledgeIndexBusyState(): KnowledgeIndexBusyState;
     getKnowledgeBaseStats(): KnowledgeBaseStats;
     getVectorIndexStats(): VectorIndexStats;
+    getLocalAiStatus(): LocalAiStatus;
+    subscribeLocalAiStatus(listener: (status: LocalAiStatus) => void): () => void;
+    prepareBuiltinEmbedding(): Promise<void>;
+    clearBuiltinEmbedding(): Promise<void>;
     getLocalizedKnowledgeScopeDescription(): string;
 
     getEffectiveDefaultGreeting(): string;

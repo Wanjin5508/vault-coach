@@ -1,7 +1,6 @@
 import { DEFAULT_RRF_K } from "./constants";
 import type { DocumentIndexReader } from "./domain/documents/document-index-reader";
 import { normalizeObsidianMarkdown } from "./markdown-normalizer";
-import { LocalModelClient } from "./model-client";
 import { detectQuestionLanguage, type QuestionLanguage } from "./question-language";
 import type {
     AnswerSource,
@@ -13,7 +12,6 @@ import type {
     RetrievalMode,
     RetrievalPreference,
     RetrievalResolution,
-    RerankResultItem,
     VectorIndexStats,
     VectorRecord,
     VectorSearchHit,
@@ -27,6 +25,12 @@ import type { IndexedChunk, KnowledgeBaseSyncResult } from "./domain/documents/d
 import type { LocalChatMessage } from "./domain/model/model-types";
 import type { ChatProvider } from "./domain/model/chat-provider";
 import type { VaultCoachSettings } from "./app/config/settings-types";
+import type { EmbeddingFingerprint, EmbeddingProvider } from "./domain/embedding/embedding-provider";
+import { areEmbeddingFingerprintsEqual, isFingerprintCompatibleWithDescriptor } from "./domain/embedding/embedding-fingerprint";
+import { isEmbeddingError } from "./domain/embedding/embedding-error";
+import type { RerankProvider } from "./domain/rerank/rerank-provider";
+import type { QueryRewritePort } from "./domain/utility/query-rewrite-port";
+import type { MemoryExtractionPort } from "./domain/utility/memory-extraction-port";
 
 /**
  * RAG 引擎模块。
@@ -55,6 +59,23 @@ interface RetrievalExecution {
     resolution: RetrievalResolution;
 }
 
+interface EmbeddingBuildResult {
+    records: VectorRecord[];
+    fingerprint: EmbeddingFingerprint;
+}
+
+type VectorIncompatibilityReason = "fingerprint-mismatch" | "dimension-mismatch";
+
+export interface AdvancedRagEngineDependencies {
+    chatProvider: ChatProvider;
+    embeddingProvider: EmbeddingProvider;
+    rerankProvider: RerankProvider;
+    queryRewrite: QueryRewritePort;
+    memoryExtraction: MemoryExtractionPort;
+    /** 向量代际与当前查询不兼容时，通知应用层安排重建并刷新状态。 */
+    onVectorIncompatible?(reasonCode: VectorIncompatibilityReason): void;
+}
+
 /**
  * 高级 RAG 引擎。
  */
@@ -63,8 +84,13 @@ export class AdvancedRagEngine {
     private readonly vectorStore: VectorStore;
     private readonly getSettings: () => VaultCoachSettings;
     private readonly getRuntimeRetrievalPreference: () => RetrievalPreference;
-    private readonly client: LocalModelClient;
     private readonly chatProvider: ChatProvider;
+    private readonly embeddingProvider: EmbeddingProvider;
+    private readonly rerankProvider: RerankProvider;
+    private readonly queryRewrite: QueryRewritePort;
+    private readonly memoryExtraction: MemoryExtractionPort;
+    private readonly onVectorIncompatible?: (reasonCode: VectorIncompatibilityReason) => void;
+    private embeddingCpuFallbackUsed = false;
 
     private vectorStats: VectorIndexStats = {
         ready: false,
@@ -78,14 +104,20 @@ export class AdvancedRagEngine {
         vectorStore: VectorStore,
         getSettings: () => VaultCoachSettings,
         getRuntimeRetrievalPreference: () => RetrievalPreference,
-        getCloudApiKey: () => string | null,
+        dependencies: AdvancedRagEngineDependencies,
     ) {
         this.documentIndex = documentIndex;
         this.vectorStore = vectorStore;
         this.getSettings = getSettings;
         this.getRuntimeRetrievalPreference = getRuntimeRetrievalPreference;
-        this.client = new LocalModelClient(getSettings, getCloudApiKey);
-        this.chatProvider = this.client;
+        this.chatProvider = dependencies.chatProvider;
+        this.embeddingProvider = dependencies.embeddingProvider;
+        this.rerankProvider = dependencies.rerankProvider;
+        this.queryRewrite = dependencies.queryRewrite;
+        this.memoryExtraction = dependencies.memoryExtraction;
+        this.onVectorIncompatible = dependencies.onVectorIncompatible
+            ? (reasonCode: VectorIncompatibilityReason) => dependencies.onVectorIncompatible?.(reasonCode)
+            : undefined;
     }
 
     /**
@@ -99,7 +131,9 @@ export class AdvancedRagEngine {
      * 消费 Ollama embedding CPU fallback 标记。
      */
     consumeOllamaEmbeddingCpuFallbackUsed(): boolean {
-        return this.client.consumeOllamaEmbeddingCpuFallbackUsed();
+        const used = this.embeddingCpuFallbackUsed;
+        this.embeddingCpuFallbackUsed = false;
+        return used;
     }
 
     /**
@@ -113,12 +147,18 @@ export class AdvancedRagEngine {
      * 从 VectorStore 重新读取向量索引统计。
      */
     async refreshVectorStatsFromStore(): Promise<VectorIndexStats> {
-        const stats: VectorStoreStats = await this.vectorStore.getStats();
+        const inspection = await this.vectorStore.inspect();
+        const stats: VectorStoreStats = inspection.stats;
+        const compatible = inspection.status === "ready" && inspection.fingerprint !== null
+            && isFingerprintCompatibleWithDescriptor(inspection.fingerprint, this.embeddingProvider.describe());
         this.vectorStats = {
-            ready: stats.vectorCount > 0,
+            ready: compatible && stats.vectorCount > 0,
             vectorCount: stats.vectorCount,
             dimension: stats.dimension,
             lastBuiltAt: stats.lastUpdatedAt,
+            compatibility: compatible ? "compatible"
+                : inspection.status === "corrupt" ? "corrupt"
+                    : inspection.status === "absent" ? "absent" : "stale",
         };
         return this.getVectorIndexStats();
     }
@@ -129,26 +169,22 @@ export class AdvancedRagEngine {
     async rebuildVectorIndex(signal?: AbortSignal): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
         signal?.throwIfAborted();
-        await this.vectorStore.clear();
-        this.vectorStats = {
-            ready: false,
-            vectorCount: 0,
-            dimension: null,
-            lastBuiltAt: null,
-        };
-
-        if (!settings.enableVectorRetrieval || this.getActiveEmbeddingModel(settings).length === 0) {
+        if (!settings.enableVectorRetrieval || this.embeddingProvider.describe().model.length === 0) {
+            await this.vectorStore.clear();
+            this.vectorStats = { ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null, compatibility: "absent" };
             return this.getVectorIndexStats();
         }
 
         const chunks: IndexedChunk[] = this.documentIndex.getAllChunks();
         if (chunks.length === 0) {
+            await this.vectorStore.clear();
+            this.vectorStats = { ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null, compatibility: "absent" };
             return this.getVectorIndexStats();
         }
 
-        const items: VectorRecord[] = await this.buildChunkEmbeddings(chunks, signal);
+        const build = await this.buildChunkEmbeddings(chunks, signal);
         signal?.throwIfAborted();
-        await this.vectorStore.upsert(items);
+        await this.vectorStore.replaceAll(build.records, build.fingerprint);
         await this.refreshVectorStatsFromStore();
 
         return this.getVectorIndexStats();
@@ -157,46 +193,29 @@ export class AdvancedRagEngine {
     /**
      * 增量同步向量索引。
      *
-     * 删除已移除 chunk 的向量，只为 changedChunks 重新生成 embedding。
+     * M3 使用全量 generation 切换保证原子性；M6 再引入可恢复的增量 staging writer。
      */
     async syncVectorIndex(syncResult: KnowledgeBaseSyncResult, signal?: AbortSignal): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
         signal?.throwIfAborted();
 
-        if (!settings.enableVectorRetrieval || this.getActiveEmbeddingModel(settings).length === 0) {
+        if (!settings.enableVectorRetrieval || this.embeddingProvider.describe().model.length === 0) {
             await this.vectorStore.clear();
             this.vectorStats = {
                 ready: false,
                 vectorCount: 0,
                 dimension: null,
                 lastBuiltAt: null,
+                compatibility: "absent",
             };
             return this.getVectorIndexStats();
         }
 
-        if (syncResult.removedChunkIds.length > 0) {
-            signal?.throwIfAborted();
-            await this.vectorStore.remove(syncResult.removedChunkIds);
+        if (syncResult.removedChunkIds.length > 0 || syncResult.changedChunks.length > 0) {
+            // M3 优先保证 generation 原子切换。M6 再引入 staging 增量 writer，降低大 Vault 的重建成本。
+            return this.rebuildVectorIndex(signal);
         }
-
-        if (syncResult.changedChunks.length > 0) {
-            const items: VectorRecord[] = await this.buildChunkEmbeddings(syncResult.changedChunks, signal);
-            signal?.throwIfAborted();
-            await this.vectorStore.upsert(items);
-        }
-
-        await this.refreshVectorStatsFromStore();
-
-        return this.getVectorIndexStats();
-    }
-
-    /**
-     * 根据设置读取当前 embedding 模型名。
-     */
-    private getActiveEmbeddingModel(settings: VaultCoachSettings): string {
-        return settings.embeddingProvider === "openai-compatible"
-            ? settings.cloudEmbeddingModel.trim()
-            : settings.embeddingModel.trim();
+        return this.refreshVectorStatsFromStore();
     }
 
     /**
@@ -386,11 +405,12 @@ export class AdvancedRagEngine {
         assistantText: string,
         messages: ChatMessage[],
     ): Promise<string[]> {
-        return this.chatProvider.extractMemoryStatements(
-            this.buildConversationContext(messages),
-            userText,
-            assistantText,
-        );
+        const statements = await this.memoryExtraction.extractMemoryStatements({
+            conversationContext: this.buildConversationContext(messages),
+            latestUserText: userText,
+            latestAssistantText: assistantText,
+        });
+        return [...statements];
     }
 
     /**
@@ -403,11 +423,11 @@ export class AdvancedRagEngine {
         memoryContext: string,
     ): Promise<PreparedAnswer> {
         const settings: VaultCoachSettings = this.getSettings();
-        const rewriteResult: QueryRewriteResult = await this.chatProvider.rewriteQuery(
-            userText,
-            this.buildConversationContext(messages),
+        const rewriteResult: QueryRewriteResult = await this.queryRewrite.rewriteQuery({
+            originalQuery: userText,
+            conversationContext: this.buildConversationContext(messages),
             scopeDescription,
-        );
+        });
 
         const initialResolution = this.resolveEffectiveRetrievalMode();
         const retrievalQuery: string = rewriteResult.rewrittenQuery;
@@ -514,16 +534,24 @@ export class AdvancedRagEngine {
      * 执行向量召回。
      */
     private async searchVector(query: string): Promise<VectorSearchHit[]> {
-        const queryEmbeddings: number[][] = await this.client.embedTexts([query]);
-        const queryEmbedding: number[] | undefined = queryEmbeddings[0];
-        if (!queryEmbedding) {
-            return [];
+        const batch = await this.embeddingProvider.embed({ texts: [query], purpose: "query" });
+        const queryEmbedding = batch.vectors[0];
+        if (!queryEmbedding) return [];
+        this.embeddingCpuFallbackUsed ||= batch.diagnostics.cpuFallbackUsed;
+        let vectorHits: VectorStoreHit[];
+        try {
+            vectorHits = await this.vectorStore.search(
+                queryEmbedding,
+                batch.fingerprint,
+                { topK: this.getSettings().vectorSearchTopK },
+            );
+        } catch (error: unknown) {
+            if (isEmbeddingError(error) && (error.code === "fingerprint-mismatch" || error.code === "dimension-mismatch")) {
+                this.vectorStats = { ...this.vectorStats, ready: false, compatibility: "stale" };
+                this.onVectorIncompatible?.(error.code);
+            }
+            throw error;
         }
-
-        const vectorHits: VectorStoreHit[] = await this.vectorStore.search(
-            new Float32Array(queryEmbedding),
-            { topK: this.getSettings().vectorSearchTopK },
-        );
         const chunksById: Map<string, IndexedChunk> = new Map<string, IndexedChunk>(
             this.documentIndex.getChunksByIds(vectorHits.map((hit: VectorStoreHit) => hit.chunkId))
                 .map((chunk: IndexedChunk) => [chunk.id, chunk]),
@@ -672,13 +700,11 @@ export class AdvancedRagEngine {
      * 调用独立 rerank 服务进行重排。
      */
     private async remoteRerank(query: string, candidates: RetrievalCandidate[]): Promise<RerankedCandidate[]> {
-        const documents: string[] = candidates.map((candidate: RetrievalCandidate) => this.buildRerankDocument(candidate.chunk));
-        const results: RerankResultItem[] = await this.client.rerankDocuments(query, documents);
-        const scoreByIndex: Map<number, number> = new Map<number, number>();
-
-        for (const item of results) {
-            scoreByIndex.set(item.index, item.relevance_score);
-        }
+        const results = await this.rerankProvider.rerank({
+            query,
+            candidates: candidates.map((candidate) => ({ id: candidate.chunk.id, text: this.buildRerankDocument(candidate.chunk) })),
+        });
+        const scoreById = new Map(results.map((result) => [result.candidateId, result.score]));
 
         const reranked: RerankedCandidate[] = [];
         for (let index = 0; index < candidates.length; index += 1) {
@@ -687,7 +713,7 @@ export class AdvancedRagEngine {
                 continue;
             }
 
-            const rerankScore: number = scoreByIndex.get(index) ?? 0;
+            const rerankScore: number = scoreById.get(candidate.chunk.id) ?? 0;
             reranked.push({
                 ...candidate,
                 retrievalScore: candidate.score,
@@ -1179,28 +1205,33 @@ export class AdvancedRagEngine {
     /**
      * 分批为 chunk 生成 embedding 记录。
      */
-    private async buildChunkEmbeddings(chunks: IndexedChunk[], signal?: AbortSignal): Promise<VectorRecord[]> {
+    private async buildChunkEmbeddings(chunks: IndexedChunk[], signal?: AbortSignal): Promise<EmbeddingBuildResult> {
         const batchSize = 16;
         const items: VectorRecord[] = [];
+        let buildFingerprint: EmbeddingFingerprint | null = null;
 
         for (let start = 0; start < chunks.length; start += batchSize) {
             signal?.throwIfAborted();
             const batchChunks: IndexedChunk[] = chunks.slice(start, start + batchSize);
             const batchTexts: string[] = batchChunks.map((chunk: IndexedChunk) => chunk.searchableText);
-            const embeddings: number[][] = await this.client.embedTexts(batchTexts);
+            const batch = await this.embeddingProvider.embed({ texts: batchTexts, purpose: "document", signal });
             signal?.throwIfAborted();
-
-            const pairCount: number = Math.min(batchChunks.length, embeddings.length);
-            for (let index = 0; index < pairCount; index += 1) {
+            this.embeddingCpuFallbackUsed ||= batch.diagnostics.cpuFallbackUsed;
+            if (buildFingerprint && !areEmbeddingFingerprintsEqual(buildFingerprint, batch.fingerprint)) {
+                throw new Error("Embedding fingerprint changed during vector index construction.");
+            }
+            buildFingerprint ??= batch.fingerprint;
+            if (batch.vectors.length !== batchChunks.length) throw new Error("Embedding batch is incomplete.");
+            for (let index = 0; index < batchChunks.length; index += 1) {
                 const chunk: IndexedChunk | undefined = batchChunks[index];
-                const vector: number[] | undefined = embeddings[index];
+                const vector: Float32Array | undefined = batch.vectors[index];
 
                 if (chunk && vector) {
                     const pageStart: number | undefined = chunk.locator.type === "pdf" ? chunk.locator.pageStart : undefined;
                     const pageEnd: number | undefined = chunk.locator.type === "pdf" ? chunk.locator.pageEnd : undefined;
                     items.push({
                         chunkId: chunk.id,
-                        vector: new Float32Array(vector),
+                        vector,
                         metadata: {
                             documentId: chunk.documentId,
                             documentType: chunk.documentType,
@@ -1213,6 +1244,7 @@ export class AdvancedRagEngine {
             }
         }
 
-        return items;
+        if (!buildFingerprint || items.length !== chunks.length) throw new Error("Embedding build did not produce a complete generation.");
+        return { records: items, fingerprint: buildFingerprint };
     }
 }

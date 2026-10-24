@@ -32,3 +32,8 @@ data.json
 runtime-state.json
 index-snapshot.json
 knowledge-index/
+
+# Milestone 4 local AI spike outputs and model cache
+.m4-smoke-plugin/
+.m4-model-cache/
+benchmark-results/local-ai/*/

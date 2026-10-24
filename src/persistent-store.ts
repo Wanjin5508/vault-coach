@@ -107,6 +107,33 @@ export class VaultCoachPersistentStore {
         await this.removePath(this.getKnowledgeIndexPath(relativePath));
     }
 
+    /** 判断 knowledge-index 内的文件或目录是否存在。 */
+    async knowledgeIndexPathExists(relativePath: string): Promise<boolean> {
+        return this.app.vault.adapter.exists(this.getKnowledgeIndexPath(relativePath));
+    }
+
+    /**
+     * 移动 knowledge-index 内的文件。调用方负责先处理目标文件；该原语用于可恢复指针切换，
+     * 不把不同 adapter 的 rename 能力夸大为跨文件事务。
+     */
+    async moveKnowledgeIndexPath(fromRelativePath: string, toRelativePath: string): Promise<void> {
+        const from = this.getKnowledgeIndexPath(fromRelativePath);
+        const to = this.getKnowledgeIndexPath(toRelativePath);
+        await this.ensureParentDir(to);
+        await this.app.vault.adapter.rename(from, to);
+    }
+
+    /** 列出 knowledge-index 子目录的直接下级目录名，用于清理不再被指针引用的 generation。 */
+    async listKnowledgeIndexFolders(relativePath: string): Promise<string[]> {
+        const path = this.getKnowledgeIndexPath(relativePath);
+        if (!(await this.app.vault.adapter.exists(path))) return [];
+        const listed = await this.app.vault.adapter.list(path);
+        const prefix = `${path}/`;
+        return listed.folders.map((folder) => normalizePath(folder).startsWith(prefix)
+            ? normalizePath(folder).slice(prefix.length)
+            : normalizePath(folder).split("/").pop() ?? "");
+    }
+
     /**
      * 删除指定 vault 相对路径。
      */

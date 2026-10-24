@@ -12,6 +12,32 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === "production");
 
+const localAiWasm = await readFile("node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm");
+const localAiWorkerBuild = await esbuild.build({
+	entryPoints: ["src/infrastructure/local-ai/local-ai.worker.ts"],
+	bundle: true,
+	write: false,
+	platform: "browser",
+	format: "iife",
+	target: "es2020",
+	conditions: ["browser"],
+	// M5 只启用 WASM CPU 推理。Transformers.js 默认引用 WebGPU 入口，其 Asyncify 工厂与
+	// 当前固定的标准 WASM 二进制不兼容；在 Worker 边界改用官方 WASM 专用入口。
+	alias: {
+		"onnxruntime-web/webgpu": "onnxruntime-web/wasm",
+	},
+	minify: prod,
+	sourcemap: false,
+	define: {
+		// Obsidian 桌面端的 Worker 可能暴露 Electron 的 Node process。Transformers.js 会据此误选
+		// Node 后端，但当前 Worker 构建只包含浏览器版 ONNX Runtime，因此必须固定为 Web 环境。
+		process: "undefined",
+		__VAULT_COACH_ORT_WASM_BASE64__: JSON.stringify(localAiWasm.toString("base64")),
+	},
+});
+const localAiWorkerSource = localAiWorkerBuild.outputFiles[0]?.text;
+if (!localAiWorkerSource) throw new Error("Unable to bundle the local AI worker.");
+
 const pdfjsGlobalName = "global" + "This";
 const pdfjsTopLevelAwaitSnippet = `__webpack_exports__ = ${pdfjsGlobalName}.pdfjsLib = await (${pdfjsGlobalName}.pdfjsLibPromise = __webpack_exports__);`;
 const pdfjsTopLevelAwaitReplacement = "var __vaultCoachPdfJsLibPromise = Promise.resolve(__webpack_exports__);";
@@ -82,6 +108,9 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
+	define: {
+		__VAULT_COACH_LOCAL_AI_WORKER_SOURCE__: JSON.stringify(localAiWorkerSource),
+	},
 	plugins: [
 		patchPdfjsForObsidianPluginPlugin,
 	],

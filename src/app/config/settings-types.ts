@@ -5,10 +5,11 @@
  * 不能保存明文凭据。影响解析、分块或向量模型的字段变更必须使相应索引失效。
  */
 import type { RetrievalMode, RetrievalPreference } from "../../domain/retrieval/retrieval-types";
+import type { EmbeddingProviderId } from "../../domain/embedding/embedding-provider";
 
 export type KnowledgeScopeMode = "wholeVault" | "specificFolder";
 export type ModelProvider = "ollama" | "openai-compatible";
-export type EmbeddingProvider = "ollama" | "openai-compatible";
+export type EmbeddingProvider = EmbeddingProviderId;
 
 /** 仅影响设置页展示，不参与知识库、检索或模型行为。 */
 export interface SettingsUiPreferences {
@@ -52,7 +53,7 @@ export interface VaultCoachSettings {
     llmBaseUrl: string;
     chatModel: string;
     embeddingModel: string;
-    embeddingProvider: EmbeddingProvider;
+    embeddingProvider: EmbeddingProviderId;
     cloudEmbeddingBaseUrl: string;
     cloudEmbeddingModel: string;
     rerankBaseUrl: string;

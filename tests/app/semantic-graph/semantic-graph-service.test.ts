@@ -9,6 +9,46 @@ import type { SemanticGraphStore } from "../../../src/domain/semantic-graph/sema
 import { createEmptySemanticGraphState, type SectionExtractionRecord, type SemanticGraphState, type SemanticModelMetadata } from "../../../src/domain/semantic-graph/semantic-graph-types";
 import { createDefaultSettings } from "../../../src/settings";
 import type { SectionExtractionInput } from "../../../src/app/semantic-graph/section-extraction-input";
+import type { EmbeddingProvider } from "../../../src/domain/embedding/embedding-provider";
+import { createEmbeddingFingerprint } from "../../../src/domain/embedding/embedding-fingerprint";
+
+function embeddingProvider(
+    embedTexts: (texts: readonly string[]) => Promise<readonly (readonly number[])[]>,
+): EmbeddingProvider {
+    const descriptor = {
+        providerId: "ollama" as const,
+        endpointIdentity: "http://localhost:11434",
+        model: "test-embedding",
+        revision: "test",
+        modelDtype: "fp32",
+        outputDtype: "float32" as const,
+        pooling: "test",
+        normalization: "consumer-l2-v1",
+        preprocessing: { document: "identity-v1", query: "identity-v1", graph: "identity-v1" },
+        implementationVersion: 1,
+    };
+    return {
+        id: "ollama",
+        describe: () => descriptor,
+        embed: async (request) => {
+            const raw = await embedTexts(request.texts);
+            const vectors = raw.map((vector) => new Float32Array(vector));
+            const dimension = vectors[0]?.length ?? 1;
+            return {
+                vectors,
+                fingerprint: createEmbeddingFingerprint(descriptor, dimension),
+                diagnostics: {
+                    providerId: "ollama",
+                    transport: "ollama-modern",
+                    latencyMs: 0,
+                    attempts: 1,
+                    cpuFallbackUsed: false,
+                    revisionVerified: true,
+                },
+            };
+        },
+    };
+}
 
 describe("SemanticGraphService", () => {
     it("exhausts every pending Section in fair document rounds and persists each checkpoint", async () => {
@@ -24,7 +64,7 @@ describe("SemanticGraphService", () => {
                     return emptyExtraction(input, model);
                 },
             } as never,
-            embeddingGateway: { embedTexts: async () => [] },
+            embeddingProvider: embeddingProvider(async () => []),
             getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true, semanticGraphMaxSectionsPerRun: 1 }),
             getNow: () => 10,
         });
@@ -71,7 +111,7 @@ describe("SemanticGraphService", () => {
                         { name: "Ranking", aliases: [], description: "Order evidence.", source_excerpt_ids: ["E1"] },
                     ] }),
             }),
-            embeddingGateway: { embedTexts: async (texts) => texts.map((_text, index) => index === 0 ? [1, 0, 0] : [0, 1, 0]) },
+            embeddingProvider: embeddingProvider(async (texts) => texts.map((_text, index) => index === 0 ? [1, 0, 0] : [0, 1, 0])),
             getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true, semanticGraphMaxSectionsPerRun: 10 }),
             getNow: () => 10,
         });
@@ -141,7 +181,7 @@ describe("SemanticGraphService", () => {
             documentIndex: {} as never,
             store: new MemorySemanticStore(state),
             extractionService: {} as never,
-            embeddingGateway: {} as never,
+            embeddingProvider: {} as never,
             getSettings: createDefaultSettings,
             getNow: () => 10,
         });
@@ -156,6 +196,48 @@ describe("SemanticGraphService", () => {
         expect(projection.candidates).toEqual([expect.objectContaining({ fingerprint: "candidate:tail-pair" })]);
     });
 
+    it("keeps confirmed legacy similarity facts but removes unconfirmed legacy candidates from the active projection", async () => {
+        const state = createEmptySemanticGraphState(10);
+        state.concepts = [reviewConcept(1), reviewConcept(2)];
+        state.embeddings = state.concepts.map((concept) => ({
+            conceptId: concept.id,
+            modelSignature: "ollama:legacy",
+            inputHash: "legacy",
+            vector: [1, 0],
+            updatedAt: 10,
+        }));
+        state.candidates = ["confirmed", "pending"].map((fingerprint, index) => ({
+            fingerprint,
+            type: "same_as" as const,
+            sourceConceptId: state.concepts[0]?.id ?? "",
+            targetConceptId: state.concepts[1]?.id ?? "",
+            confidence: 0.9 - index * 0.1,
+            origin: "similarity" as const,
+            evidence: [],
+            model: null,
+            createdAt: 10,
+            updatedAt: 10,
+        }));
+        state.decisions = [{ id: "decision:1", kind: "confirm-candidate", candidateFingerprint: "confirmed", createdAt: 10 }];
+        const rebuild = vi.fn();
+        const service = new SemanticGraphService({
+            graphService: {} as never,
+            documentIndex: {} as never,
+            store: new MemorySemanticStore(state),
+            extractionService: {} as never,
+            embeddingProvider: embeddingProvider(async () => []),
+            similarityIndex: { rebuild, clear: vi.fn(), upsert: vi.fn(), remove: vi.fn(), findNearest: vi.fn() },
+            getSettings: createDefaultSettings,
+        });
+
+        await service.load();
+
+        expect(rebuild).toHaveBeenCalledWith([]);
+        expect(service.getReviewProjection().relations).toEqual([expect.objectContaining({ candidateFingerprint: "confirmed" })]);
+        expect(service.getReviewProjection().candidates).toEqual([]);
+        expect(service.getGovernanceImpact().decisionCount).toBe(1);
+    });
+
     it("pauses automatic semantic sync at the local warning budget without changing existing graph reads", async () => {
         const service = new SemanticGraphService({
             graphService: { getSnapshot: () => null } as never,
@@ -165,7 +247,7 @@ describe("SemanticGraphService", () => {
             } as never,
             store: new MemorySemanticStore(),
             extractionService: {} as never,
-            embeddingGateway: {} as never,
+            embeddingProvider: {} as never,
             getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true, enableSemanticGraphAutoSync: true }),
         });
         await service.load();
@@ -187,7 +269,7 @@ describe("SemanticGraphService", () => {
             documentIndex: capacityReader() as DocumentIndexReader,
             store: new MemorySemanticStore(),
             extractionService: { extract } as never,
-            embeddingGateway: { embedTexts: async () => [] },
+            embeddingProvider: embeddingProvider(async () => []),
             getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true }),
         });
         await service.load();
@@ -210,7 +292,7 @@ describe("SemanticGraphService", () => {
                     return emptyExtraction(input, model);
                 },
             } as never,
-            embeddingGateway: { embedTexts: async () => [] },
+            embeddingProvider: embeddingProvider(async () => []),
             getSettings: () => ({
                 ...createDefaultSettings(),
                 enableSemanticGraph: true,
@@ -261,7 +343,7 @@ describe("SemanticGraphService", () => {
                         { name: "Ranking", aliases: [], description: "Order evidence.", source_excerpt_ids: ["E1"] },
                     ] }),
             }),
-            embeddingGateway: { embedTexts: async (texts) => texts.map((_text, index) => index === 0 ? [1, 0] : [0, 1]) },
+            embeddingProvider: embeddingProvider(async (texts) => texts.map((_text, index) => index === 0 ? [1, 0] : [0, 1])),
             getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true, semanticGraphMaxSectionsPerRun: 10 }),
             getNow: () => 10,
         });

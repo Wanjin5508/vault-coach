@@ -50,6 +50,18 @@ describe("settings migration", () => {
         });
     });
 
+    it("accepts the built-in embedding provider without changing existing user defaults", () => {
+        const existing = migrateSettings({ ...fixture("legacy-local.json") as object, embeddingProvider: "builtin" });
+        expect(existing.status).toBe("ready");
+        if (existing.status !== "ready") return;
+        expect(existing.settings.embeddingProvider).toBe("builtin");
+
+        const fresh = migrateSettings(null);
+        expect(fresh.status).toBe("ready");
+        if (fresh.status !== "ready") return;
+        expect(fresh.settings.embeddingProvider).toBe("ollama");
+    });
+
     it("round-trips an existing deep knowledge folder without a schema bump", async () => {
         const migrated = migrateSettings(fixture("legacy-local.json"));
         expect(migrated.status).toBe("ready");

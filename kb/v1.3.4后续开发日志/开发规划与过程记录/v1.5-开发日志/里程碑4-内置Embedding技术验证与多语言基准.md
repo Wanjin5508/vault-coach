@@ -1,7 +1,7 @@
 ---
 tags: [VaultCoach, v1.5, 里程碑4, LocalAIRuntime, Benchmark]
-status: planned
-updated: 2026-10-23
+status: code-ready-pending-manual-validation
+updated: 2026-10-24
 depends-on: [里程碑3-EmbeddingProvider解耦与索引指纹.md]
 gate: GO-NO-GO
 ---
@@ -25,26 +25,29 @@ gate: GO-NO-GO
 | 文件 | 状态 | 工作 |
 | --- | --- | --- |
 | `package.json`、`package-lock.json`、`esbuild.config.mjs` | 已有 | 隔离 spike 验证版本与 bundle，不提前修改默认路由 |
-| `scripts/spikes/local-ai/embedding-smoke.ts` | 拟新增 | 一句文本→向量、load/dispose、离线加载 |
-| `scripts/spikes/local-ai/worker-smoke.ts` | 拟新增 | 发布三件套环境下的 Worker/WASM smoke |
-| `benchmarks/local-ai/protocol.json` | 拟新增 | 固定指标、预算、设备、预热、失败标准 |
-| `benchmarks/local-ai/models.json` | 拟新增 | 三角色候选账本、资产清单、hash/revision |
-| `benchmarks/retrieval-v1/{corpus,queries.zh,queries.en,queries.de}.jsonl` | 拟新增 | 人工标注语料和相关 chunk |
-| `scripts/run-local-ai-benchmark.mjs` | 拟新增 | 统一测量入口，记录原始结果 |
-| `benchmark-results/local-ai/<run-id>/` | 拟新增产物 | environment、metrics、failures、decision |
-| 本目录 `ADR-LocalAIRuntime运行地点与资产交付.md` | 实施时新增 | 运行地点、打包、缓存和设备结论 |
+| `scripts/spikes/local-ai/embedding-smoke.mjs` | 已新增 | 一句文本→向量、load/dispose、离线加载 |
+| `scripts/spikes/local-ai/worker-smoke.mjs` | 已新增 | 发布形态下的 Worker/WASM/WebGPU smoke worker |
+| `scripts/spikes/local-ai/obsidian-smoke-plugin.mjs` | 已新增 | 独立 smoke 插件、显式下载授权、取消与结果落盘 |
+| `scripts/spikes/local-ai/build-obsidian-smoke.mjs` | 已新增 | 构建临时插件并复制本地 WASM/JSEP 资产 |
+| `benchmarks/local-ai/protocol.json` | 已新增 | 固定指标、预算、设备、预热、失败标准；当前待负责人批准 |
+| `benchmarks/local-ai/models.json` | 已新增 | 候选账本、资产清单、hash/revision 与许可证状态 |
+| `benchmarks/retrieval-v1/{corpus,queries.zh,queries.en,queries.de}.jsonl` | 已新增 | 18 个合成 chunk、中英德各 20 个复核问题 |
+| `scripts/run-local-ai-benchmark.mjs` | 已新增 | 统一测量、关键词基线、原始排名和决策结果 |
+| `benchmark-results/local-ai/<run-id>/` | 运行时产物 | environment、metrics、failures、decision；默认忽略生成结果 |
+| 本目录 `ADR-LocalAIRuntime运行地点与资产交付.md` | 已新增 | 候选运行地点、资产契约与 GO/NO-GO 条件 |
+| 本目录 `M4-内置Embedding手工技术验证指南.md` | 已新增 | 安装、命令、Obsidian 真机和故障注入步骤 |
 
-新建 benchmark 脚本后才执行它们；上述脚本目前不存在。
+脚本已存在，但真实模型下载、benchmark 和真机 smoke 不会由普通测试自动触发。必须按 [[M4-内置Embedding手工技术验证指南]]显式执行。
 
 ## 4. 候选与证据边界
 
 候选账本至少列出：
 
-| 角色 | 起步候选范围 | 本阶段结论 |
-| --- | --- | --- |
-| Embedding | 多语言 MiniLM / multilingual E5 small 类有 ONNX 资产的 encoder | 完成中英德质量和完整环境 Gate |
-| Reranker | 小型 cross-encoder；英文小模型可做性能对照，多语言模型独立候选 | 核对资产、pair tokenizer、logits 语义；不承诺默认选型 |
-| Utility | 约 200M–600M instruct 探索范围；Qwen2.5-0.5B ONNX 可做教学起点 | 核对生成 smoke 与资源；不把短 JSON 成功等同业务达标 |
+| 角色        | 起步候选范围                                                 | 本阶段结论                                 |
+| --------- | ------------------------------------------------------ | ------------------------------------- |
+| Embedding | 多语言 MiniLM / multilingual E5 small 类有 ONNX 资产的 encoder | 完成中英德质量和完整环境 Gate                     |
+| Reranker  | 小型 cross-encoder；英文小模型可做性能对照，多语言模型独立候选                 | 核对资产、pair tokenizer、logits 语义；不承诺默认选型 |
+| Utility   | 约 200M–600M instruct 探索范围；Qwen2.5-0.5B ONNX 可做教学起点     | 核对生成 smoke 与资源；不把短 JSON 成功等同业务达标      |
 
 名称只是搜索起点。每个候选必须填精确 repo、revision、来源/模型许可证、ONNX 文件、tokenizer、参数量、dtype、下载实测字节、上下文上限、语言覆盖声明、实测支持设备。未填完的候选不能进入正式 policy。
 
@@ -136,5 +139,178 @@ Gate：M5 能得到统一 loader/cache/scheduler 所需信息；不兼容项进�
 GO / NO-GO / pending：
 交给 M5、M6.1、M6.2 的限制：
 ```
+
+## 8. 2026-10-24 开发日志：代码与文档快照
+
+### 8.1 已完成
+
+- 锁定 `@huggingface/transformers@4.3.1` 为开发依赖并更新 lockfile；正式 `src/` 未引用该依赖；
+- 增加 `m4:validate`、`m4:smoke:embedding`、`m4:benchmark`、`m4:build:obsidian-smoke` 四个显式命令；
+- 实现 Node 文件缓存配置、向量 contract 校验、cosine 排名、Recall/MRR、延迟分位数、关键词基线和原子结果写入；
+- 构建独立 `vault-coach-m4-smoke` 插件，支持 WASM/WebGPU、下载确认、offline-only、Worker 取消和结果落盘；
+- 建立 18 个公开合成 chunk 和中英德各 20 个 query；验收集包含跨语言、PDF 噪声和 no-answer；
+- 建立候选模型账本。默认候选锁定 `Xenova/multilingual-e5-small` revision `761b726dd34fb83930e26aab4e9ac3899aa1fa78` 和 uint8 权重 SHA-256；许可证仍 pending；
+- 写入 [[M4-内置Embedding手工技术验证指南]]和 [[ADR-LocalAIRuntime运行地点与资产交付]]。
+
+### 8.2 已执行验证
+
+```text
+npm run m4:validate: PASS
+dataset: 18 chunks / 60 queries / 2 candidates
+npx eslint scripts/spikes/local-ai scripts/run-local-ai-benchmark.mjs: PASS
+npm run m4:build:obsidian-smoke: PASS
+smoke output: approximately 42 MiB
+worker bundle: approximately 1.3 MiB
+Node model smoke preflight before environment upgrade: BLOCKED on Node v18.16.0; script correctly required Node >= 20.9.0 and saved a failure snapshot
+Development environment upgrade: Node v20.20.2 / npm 10.8.2
+npm ci, npm run lint, npm test (261), npm run build: PASS on Node v20.20.2
+```
+
+构建成功只证明工具链可以产出文件，不证明模型已经在 Obsidian 运行。
+
+### 8.3 尚未完成
+
+- 协议负责人批准；
+- 模型和 upstream 许可证人工核对；
+- 真实模型下载和 Node smoke；
+- 三语真实 benchmark；
+- Obsidian Desktop WASM/WebGPU、离线重启、取消和缓存损坏验证；
+- iOS / Android 验证；
+- 最终 GO/NO-GO 和 accepted ADR。
+
+### 8.4 工程限制
+
+- 项目以 `.nvmrc` 和 `package.json#engines` 固定 Node 20 开发基线，Release workflow 读取同一版本文件；
+- Node CLI 使用 Transformers.js Node 入口，只提供质量和 CPU/WebGPU 参考，不把 `onnxruntime-node` 结果冒充浏览器 Worker/WASM 证据；
+- 约 42 MiB 是同时携带 WASM 与 JSEP 的 spike 体积，M5 必须重新决定生产资产组合；
+- benchmark 的 Node RSS 不是精确 GPU 显存；
+- 协议状态不是 `approved` 时，脚本最多输出 pending；
+- `.m4-smoke-plugin/`、`.m4-model-cache/` 和普通 run 结果均不进入版本控制。
+
+### 8.5 真实 CPU smoke 结果与分析
+
+2026-10-24 在 Node v20.20.2、macOS arm64、CPU、Transformers.js 4.3.1 环境执行：
+
+```bash
+npm run m4:smoke:embedding -- --allow-download --device cpu
+```
+
+联网首次运行结果为 `pass`，原始结果位于忽略目录：
+
+```text
+benchmark-results/local-ai/embedding-smoke-2026-10-24T18-58-08-453Z/smoke.json
+```
+
+| 观察项 | 结果 | 解释 |
+| --- | ---: | --- |
+| 候选 | multilingual-e5-small-uint8 | revision `761b726dd34fb83930e26aab4e9ac3899aa1fa78` |
+| loadMs | 9,067.46 ms | 包含首次下载/冷准备，不能与 5,000 ms 暖加载门槛比较 |
+| inferenceMs | 27.28 ms | 三次单文本 smoke 的一次汇总，不是 query P95 |
+| dimension | 384 | 符合候选 contract |
+| query/document/graph norm | 约 1.0 | normalize 生效，向量为有限值 |
+| RSS | 594.59 MiB | 低于 1,024 MiB 建议门槛，但只是进程时点 RSS，不是可靠峰值 |
+| cachedBefore / cachedAfter | false / true | 首次运行写入了模型缓存 |
+| 缓存目录体积 | 129 MiB | 包含配置、tokenizer 和 uint8 ONNX 权重 |
+| 权重 SHA-256 | `ee13574a...cc9c8f1` | 与候选账本完全一致 |
+
+该结果证明：Node CPU 入口可以在联网状态下载候选、实例化 pipeline，并为 query、document 和 graph 前缀生成符合 384 维及归一化 contract 的向量。它不证明检索质量、P95、吞吐、暖加载、Obsidian Worker/WASM/WebGPU 或移动端可用。
+
+请求日志同时出现 `resolve/main/...` 和锁定 revision 路径。虽然最终 revision 目录中的 ONNX 权重哈希匹配，前置的 `main` 请求仍破坏了“所有候选资产都来自不可变 revision”的严格证据边界。正式实现必须找出请求来源，并确保配置、tokenizer 和权重全部按锁定 revision 获取和验证。
+
+随后在新进程中禁止下载执行：
+
+```bash
+npm run m4:smoke:embedding -- --device cpu
+```
+
+离线复跑结果为 `fail`，原始结果位于：
+
+```text
+benchmark-results/local-ai/embedding-smoke-2026-10-24T19-03-42-016Z/smoke.json
+```
+
+失败信息：
+
+```text
+TypeError: this.tokenizer is not a function
+```
+
+该运行没有产生网络请求，说明 offline-only 门禁生效；但磁盘缓存重新加载后的 pipeline tokenizer 没有形成可调用对象。当前证据指向 Transformers.js v4 Node FS cache 重载路径、ModelRegistry 预取路径或两者组合的缓存兼容问题。尚未完成根因定位，不能直接归因于模型文件损坏，因为 tokenizer 文件存在且模型权重哈希正确。
+
+本轮判定：
+
+```text
+Node CPU 首次联网 smoke：PASS
+权重完整性：PASS
+离线进程重启：FAIL
+暖加载指标：UNMEASURED
+检索质量和吞吐：UNMEASURED
+Obsidian WASM/WebGPU：UNMEASURED
+M4 GO/NO-GO：PENDING（离线缓存是阻断项）
+```
+
+进入下一轮验证前必须：
+
+1. 为离线 pipeline 加载问题建立最小复现，检查 tokenizer 实例类型及 FS cache 路径；
+2. 消除或解释 `resolve/main` 请求，保证全部资产由不可变 revision 约束；
+3. 修复后重新执行一次允许下载、两次独立进程 offline-only，并保存三次结果；
+4. 只有离线重启通过后，才运行三语 retrieval benchmark，避免在失效缓存路径上生成无意义性能结论。
+
+### 8.6 离线缓存修复与首轮三语 benchmark
+
+#### 根因与修复
+
+`@huggingface/transformers@4.3.1` 的 `pipeline()` 会先调用内部 `get_pipeline_files()` 判断 pipeline 需要哪些资产，但该预扫描没有转发调用方提供的 `revision`、`cache_dir` 和 `local_files_only`。`AutoTokenizer.from_pretrained()` 的 tokenizer 文件发现也存在同类行为。由此产生两个现象：
+
+1. 联网运行额外查询 `main`；
+2. 离线运行无法通过仓库 ID 发现锁定 revision 中已经缓存的 tokenizer，最后构造出不可调用的 tokenizer。
+
+修复策略：
+
+- 不再用 `pipeline()` 创建 Node 参考 pipeline；
+- 显式调用 `AutoTokenizer` 和 `AutoModel`，再构造 `FeatureExtractionPipeline`；
+- offline-only 模式直接以 `.m4-model-cache/<repo>/<revision>/` 作为本地模型目录，完全绕过 Hub 元数据发现；
+- 不再用存在相同 revision 缺陷的 `ModelRegistry` 判断 Node 缓存，改为检查账本要求的四个具体文件；
+- 保留 ONNX SHA-256 校验作为内容完整性证据。
+
+为确认修复不依赖遗留的 `main/config.json`，验证前将该文件移出缓存目录。随后两个独立 Node 进程连续通过：
+
+| 运行 | loadMs | 三文本 inferenceMs | RSS MiB | 网络请求 | 结果 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| offline-1 | 493.42 | 19.56 | 697.56 | 0 | PASS |
+| offline-2 | 496.14 | 18.19 | 684.61 | 0 | PASS |
+
+两次运行均为 `cachedBefore=true`、`cachedAfter=true`，向量维度为 384，三个向量 norm 与首次联网运行一致。由此关闭“Node FS cache 无法离线重启”的阻断项。该修复只证明 Node 参考路径；Obsidian Cache API、Worker 和 WASM 仍需独立验证。
+
+#### 首轮 acceptance benchmark
+
+修复后以 CPU、batch size 8、offline-only 运行三语 acceptance 集。首次运行发现 benchmark 局部变量 `performance` 遮蔽 Node 全局对象，导致 temporal dead zone；将结果变量改名为 `performanceMetrics` 后运行成功。结果文件位于忽略目录：
+
+```text
+benchmark-results/local-ai/retrieval-benchmark-2026-10-24T19-11-53-105Z/benchmark.json
+```
+
+性能结果：
+
+| 指标 | 结果 | 建议门槛 | 本轮判断 |
+| --- | ---: | ---: | --- |
+| 暖加载 | 504.38 ms | ≤ 5,000 ms | 通过建议值 |
+| corpus throughput | 179.13 chunks/s | ≥ 8 chunks/s | 通过建议值 |
+| query latency P95 | 4.58 ms | ≤ 300 ms | 通过建议值 |
+| RSS | 752.41 MiB | ≤ 1,024 MiB | 通过建议值，但仍是 Node 时点 RSS |
+
+质量结果：
+
+| 语言 | Recall@10 | 门槛 | MRR | 门槛 | 结果 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 中文 | 0.9286 | ≥ 0.80 | 0.5110 | ≥ 0.60 | MRR 未通过 |
+| 英文 | 0.9643 | ≥ 0.80 | 0.6495 | ≥ 0.60 | 通过建议值 |
+| 德文 | 0.9286 | ≥ 0.80 | 0.5643 | ≥ 0.60 | MRR 未通过 |
+
+Embedding 的三语 Recall@10 均高于关键词基线；英文 MRR 明显高于关键词基线，中文 MRR 略低于关键词基线，德文 MRR 仅小幅提高。说明候选有较好的候选集覆盖能力，但中文和德文的首个相关结果排序仍需通过 hybrid、query 前缀/标注复核或 rerank 改善。
+
+无答案查询只有每语言 2 个，且 embedding Top1 cosine 仍较高（中文约 0.867–0.877、英文约 0.801–0.806、德文约 0.773–0.789）。样本不足以确定拒答阈值，同时说明 cosine 绝对值不能跨语言直接套用单一阈值。
+
+本轮状态仍为 `pending`，原因是协议尚未批准、中文和德文 MRR 未达到建议值，并且 Obsidian 与移动端矩阵尚未执行。离线缓存已经从阻断项变为 PASS。
 
 2026-10-23：规划修订，未安装依赖或执行真实 benchmark。官方 API 依据见 [[01-LocalAIRuntime架构与跨里程碑契约]]。

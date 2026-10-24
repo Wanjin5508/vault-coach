@@ -8,10 +8,9 @@ const { minAppVersion } = manifest;
 manifest.version = targetVersion;
 writeFileSync("manifest.json", JSON.stringify(manifest, null, "\t"));
 
-// 当前兼容逻辑仅在该最低 Obsidian 版本首次出现时写入映射。
-// 发布前必须另外确认 versions.json 已包含目标插件版本键。
+// versions.json 的键是插件版本，不是最低 Obsidian 版本；每次发版都必须写入目标版本。
 const versions = JSON.parse(readFileSync('versions.json', 'utf8'));
-if (!Object.values(versions).includes(minAppVersion)) {
+if (versions[targetVersion] !== minAppVersion) {
     versions[targetVersion] = minAppVersion;
     writeFileSync('versions.json', JSON.stringify(versions, null, '\t'));
 }

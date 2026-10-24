@@ -32,7 +32,22 @@ export default tseslint.config(
 		"main.js",
 		"kb/**",
 		".history/**",
+		".m4-smoke-plugin/**",
+		".m4-model-cache/**",
+		"benchmark-results/local-ai/**",
 	]),
+	{
+		files: ["scripts/**/*.mjs"],
+		languageOptions: {
+			globals: {
+				...globals.node,
+				...globals.browser,
+			},
+		},
+		rules: {
+			"import/no-nodejs-modules": "off",
+		},
+	},
 	{
 		files: ["tests/**/*.ts", "vitest.config.ts"],
 		languageOptions: {

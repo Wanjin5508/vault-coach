@@ -5,6 +5,8 @@ export interface ConfirmActionModalOptions {
     description: string;
     confirmLabel: string;
     cancelLabel: string;
+    /** 仅破坏性操作使用警告按钮；下载等可逆操作使用普通主按钮。 */
+    danger?: boolean;
     onConfirm(): Promise<void>;
 }
 
@@ -23,7 +25,7 @@ export class ConfirmActionModal extends Modal {
         const cancel = actions.createEl("button", { text: this.options.cancelLabel, attr: { type: "button" } });
         const confirm = actions.createEl("button", {
             text: this.options.confirmLabel,
-            cls: "mod-warning",
+            cls: this.options.danger === false ? "mod-cta" : "mod-warning",
             attr: { type: "button" },
         });
         cancel.addEventListener("click", () => this.close());

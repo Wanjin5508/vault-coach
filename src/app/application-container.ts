@@ -45,6 +45,14 @@ import type { ExamEvaluationMetadata, ExamScopeSelection } from "../domain/exam/
 import type { AssessmentSessionStore } from "../domain/assessment/assessment-types";
 import type { VectorStore } from "../domain/retrieval/retrieval-types";
 import type { StorageFootprint } from "../domain/index-lifecycle/storage-footprint";
+import { ObsidianEmbeddingHttpTransport } from "../infrastructure/embedding/embedding-http-transport";
+import { OllamaEmbeddingProvider } from "../infrastructure/embedding/ollama-embedding-provider";
+import { OpenAiCompatibleEmbeddingProvider } from "../infrastructure/embedding/openai-compatible-embedding-provider";
+import { EmbeddingProviderRouter } from "./embedding/embedding-provider-router";
+import { LegacyRerankAdapter } from "../infrastructure/rerank/legacy-rerank-adapter";
+import { LegacyChatUtilityAdapter } from "../infrastructure/utility/legacy-chat-utility-adapter";
+import { LocalAIRuntime } from "./local-ai/local-ai-runtime";
+import { BuiltinEmbeddingProvider } from "../infrastructure/embedding/builtin-embedding-provider";
 
 /** 将应用服务接入 Obsidian 插件生命周期所需的最小宿主回调。 */
 export interface ApplicationContainerDependencies {
@@ -92,6 +100,7 @@ export interface ApplicationContainerServices {
     recommendationService: RecommendationService;
     knowledgeEngineClient: KnowledgeEngineClient;
     adaptiveExamPlanner: AdaptiveExamPlanner;
+    localAIRuntime: LocalAIRuntime;
 }
 
 /**
@@ -116,12 +125,40 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
     const knowledgeBase = new VaultKnowledgeBase(dependencies.app, () => dependencies.getSettings());
     const vectorStore = new EmbeddedExactVectorStore(persistentStore);
     const chatService = new ChatService(() => dependencies.getSettings());
+    const modelClient = new LocalModelClient(
+        () => dependencies.getSettings(),
+        () => dependencies.getCloudApiKey(),
+    );
+    const embeddingTransport = new ObsidianEmbeddingHttpTransport();
+    const localAIRuntime = new LocalAIRuntime();
+    const embeddingProvider = new EmbeddingProviderRouter(
+        () => dependencies.getSettings(),
+        [
+            new OllamaEmbeddingProvider(() => dependencies.getSettings(), embeddingTransport),
+            new OpenAiCompatibleEmbeddingProvider(
+                () => dependencies.getSettings(),
+                () => dependencies.getCloudApiKey(),
+                embeddingTransport,
+            ),
+            new BuiltinEmbeddingProvider(localAIRuntime),
+        ],
+    );
+    let application: VaultCoachApplication | null = null;
+    const indexCoordinator = new KnowledgeIndexCoordinator(() => application?.notifyIndexStateChanged());
+    const utilityAdapter = new LegacyChatUtilityAdapter(modelClient);
     const ragEngine = new AdvancedRagEngine(
         knowledgeBase,
         vectorStore,
         () => dependencies.getSettings(),
         () => chatService.getRuntimeRetrievalPreference(),
-        () => dependencies.getCloudApiKey(),
+        {
+            chatProvider: modelClient,
+            embeddingProvider,
+            rerankProvider: new LegacyRerankAdapter(modelClient),
+            queryRewrite: utilityAdapter,
+            memoryExtraction: utilityAdapter,
+            onVectorIncompatible: () => indexCoordinator.setVectorDirty(true),
+        },
     );
     const memoryService = new LongTermMemoryService(
         () => dependencies.getSettings(),
@@ -148,16 +185,12 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         new DeterministicGraphBuilder(),
         new JsonGraphStore(dependencies.app.vault.adapter),
     );
-    const semanticModelClient = new LocalModelClient(
-        () => dependencies.getSettings(),
-        () => dependencies.getCloudApiKey(),
-    );
     const semanticGraphService = new SemanticGraphService({
         graphService: knowledgeGraphService,
         documentIndex: knowledgeBase,
         store: new JsonSemanticGraphStore(dependencies.app.vault.adapter),
-        extractionService: new ConceptExtractionService(semanticModelClient),
-        embeddingGateway: semanticModelClient,
+        extractionService: new ConceptExtractionService(modelClient),
+        embeddingProvider,
         getSettings: () => dependencies.getSettings(),
         getVectorIndexStats: () => ragEngine.getVectorIndexStats(),
         onStateChanged: () => application?.notifySemanticGraphStateChanged(),
@@ -204,9 +237,6 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
     const assessmentEventFactory = new AssessmentEventFactory({
         createEventId: () => createAssessmentEventId(assessmentEventSequence++),
     });
-
-    let application: VaultCoachApplication | null = null;
-    const indexCoordinator = new KnowledgeIndexCoordinator(() => application?.notifyIndexStateChanged());
 
     chatService.setDependencies({
         ragEngine,
@@ -284,10 +314,12 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             recommendationService,
             knowledgeEngineClient,
             adaptiveExamPlanner,
+            localAIRuntime,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();
             indexCoordinator.dispose();
+            await localAIRuntime.dispose();
         },
     };
 }

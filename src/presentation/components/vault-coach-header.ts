@@ -288,6 +288,8 @@ export class VaultCoachHeader {
 
     private getVectorIndexStatusText(vectorStats: VectorIndexStats): string {
         if (!this.plugin.settings.enableVectorRetrieval) return this.t("view.indexStatus.vectorDisabled");
+        if (vectorStats.compatibility === "corrupt") return this.t("view.indexStatus.vectorCorrupt");
+        if (vectorStats.compatibility === "stale") return this.t("view.indexStatus.vectorStale");
         if (this.plugin.isVectorIndexDirty()) return this.t("view.indexStatus.dirty");
         return vectorStats.ready
             ? this.t("view.indexStatus.vectorReady", { count: vectorStats.vectorCount })
