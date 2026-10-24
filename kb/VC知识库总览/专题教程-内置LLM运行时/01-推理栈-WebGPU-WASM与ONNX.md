@@ -1,7 +1,7 @@
 ---
 tags: [VaultCoach, 教程, WebGPU, WASM, ONNX, TransformersJS]
 status: tutorial
-updated: 2026-10-18
+updated: 2026-10-25
 previous: 00-教程总览与学习路线.md
 next: 02-模型量化-内存与质量取舍.md
 ---
@@ -16,7 +16,7 @@ next: 02-模型量化-内存与质量取舍.md
 2. 解释 ONNX Runtime、execution provider、WebGPU 和 WASM 的分工；
 3. 设计 WebGPU 优先、WASM 回退且不会无限重试的状态机；
 4. 在 Obsidian 中区分 API 可见、session 成功和真实生成成功；
-5. 找出 Worker、WASM 和社区插件单文件发布之间的冲突。
+5. 解释 Worker JavaScript 与 WASM 二进制为什么采用不同交付方式。
 
 ## 2. 一次聊天请求经过哪些层
 
@@ -263,18 +263,44 @@ ONNX Runtime Web 生产部署至少涉及：
 - 可能的 Worker 代码；
 - 模型和 tokenizer 文件。
 
-官方部署文档说明，如果 WASM 文件没有复制到预期路径，runtime 会初始化失败，并允许通过 `wasmPaths` 指定位置。[ONNX Runtime Web deployment](https://onnxruntime.ai/docs/tutorials/web/deploy.html)
+官方部署文档说明，如果 WASM 文件没有复制到预期路径，runtime 会初始化失败，并允许通过 `wasmPaths` 或显式二进制配置提供资产。[ONNX Runtime Web deployment](https://onnxruntime.ai/docs/tutorials/web/deploy.html)
 
-Vault Coach 的社区插件形态目前以根目录 `main.js`、`manifest.json` 和 `styles.css` 为正式资产，因而必须在 spike 中验证：
+Vault Coach 的社区插件形态以根目录 `main.js`、`manifest.json` 和 `styles.css` 为正式 Release 资产。1.5.4 已经选择如下边界：
+
+```text
+随 Release 交付
+  → Worker RPC/业务代码
+  → Transformers.js orchestration
+  → onnxruntime-web JavaScript factory
+
+用户明确点击准备后下载
+  → exact-version ort-wasm-simd-threaded.wasm
+  → byte length + SHA-256 校验
+  → 独立 Cache Storage
+  → transfer ArrayBuffer 到 Worker
+```
+
+因而发布审查要验证：
 
 1. esbuild 将哪些 runtime 代码打入 `main.js`；
-2. `.wasm` 是否仍以外部 URL 请求；
+2. `.wasm` 是否只从 policy 中 exact-version URL 请求；
 3. Worker 是否引用开发机路径或未发布 chunk；
-4. 是否会从 CDN 下载 WASM runtime 代码；
+4. 下载结果是否在执行前通过大小与 SHA-256 双重校验；
 5. 干净 Vault 只安装正式 release 资产后是否可运行；
 6. Mobile 是否采用相同 URL/origin 和缓存行为。
 
-生产版本不应依赖远程 CDN JavaScript、Worker 或 WASM 代码。模型权重下载属于显式模型数据下载，也必须固定来源/revision并向用户披露；runtime 代码应随插件受版本管理。最终如何内联/定位 WASM 必须由构建 spike 证明，不能仅凭开发服务器成功决定。
+当前生产版本不下载远程 JavaScript 或 Worker，也不使用 `latest` runtime URL。WASM 虽然是可执行二进制，但其 identity 由已安装的插件版本预先固定，CDN 只是传输渠道；不匹配 policy 的字节不能进入 Worker。更换 ORT 版本、文件或 hash 需要发布新的 Vault Coach 版本。
+
+Worker 初始化中还必须显式固定：
+
+```ts
+wasmBackend.numThreads = 1;
+wasmBackend.proxy = false;
+wasmBackend.wasmPaths = undefined;
+wasmBackend.wasmBinary = verifiedRuntime.wasmBinary;
+```
+
+`wasmPaths = undefined` 防止 ORT 自行发起相对路径/CDN 请求；`wasmBinary` 是唯一的 WASM 来源。Worker bundle 使用 browser conditions、WASM 专用入口和 `process: undefined`，避免 Electron 环境误入 `worker_threads` 分支。
 
 ## 7. Vault Coach 中的 runtime 归属
 
@@ -382,7 +408,9 @@ interface RuntimeProbeResult {
 3. 断言 runtime 最终为 `ready`、`actualDevice === "wasm"`，并保存一次 fallback reason；
 4. 再让 WASM 失败，断言不会进行第三次 load；
 5. 设计 unload 测试，确认进行中的 prepare 被取消且 pipeline dispose 只调用一次；
-6. 打开生产 `main.js`，检查是否包含外部 `.wasm`、Worker 或 CDN URL。
+6. 打开生产 `main.js`，确认它包含固定 runtime policy URL，但不包含 WASM Base64 或开发机路径；
+7. 运行 `npm run release:verify`，确认 `main.js <= 4,500,000 bytes`；
+8. 运行 `npm run m4:smoke:browser-runtime`，验证外置 WASM 可建立 session 并生成有限数向量。
 
 ## 11. 本章完成标准
 
@@ -394,4 +422,3 @@ interface RuntimeProbeResult {
 - [ ] 记录冷/暖启动和实际设备；
 - [ ] 明确 WASM/Worker 的 release 资产验证方法；
 - [ ] 没有把一次 demo 运行写成正式产品 Gate 通过。
-

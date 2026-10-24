@@ -1,8 +1,9 @@
 ---
 tags: [VaultCoach, 教程, WebWorker, 调试, 测试, CICD, GO-NO-GO]
 status: tutorial
-updated: 2026-10-18
+updated: 2026-10-25
 previous: 04-VaultCoach内置LLM最小原型.md
+next: 06-实现顺序.md
 ---
 
 # 05：Worker、调试、测试与 CI/CD 门禁
@@ -18,6 +19,17 @@ previous: 04-VaultCoach内置LLM最小原型.md
 5. 写出有证据的 Built-in Chat GO/NO-GO 决策。
 
 ## 2. 为什么要用 Worker
+
+### 2.1 当前实现状态
+
+1.5.4 的 Built-in Embedding 已经采用 Dedicated Worker：
+
+- Worker 入口是 `src/infrastructure/local-ai/local-ai.worker.ts`；
+- esbuild 以 browser platform 单独打包 Worker，再把源码字符串注入 `main.js`；
+- Worker 内持有 tokenizer、ONNX model 和 `FeatureExtractionPipeline`；
+- 主线程负责 runtime WASM 的下载、SHA-256 校验和 Cache Storage；
+- `ArrayBuffer` 通过 transfer list 进入 Worker；
+- 当前实现是 WASM CPU 单线程，不代表 Built-in Chat 的 WebGPU/流式协议已完成。
 
 即使推理使用 WebGPU，以下工作仍可能占用主线程：
 
@@ -150,25 +162,31 @@ terminate Worker
 
 ## 6. Worker 打包
 
-当前 `esbuild.config.mjs` 只有 `src/main.ts` 一个入口，输出一个 CommonJS `main.js`。常见选择：
+项目最终仍只发布一个 CommonJS `main.js`，但构建过程已经包含两个 esbuild 步骤：
+
+1. 以 `local-ai.worker.ts` 为入口生成 browser/IIFE Worker source；
+2. 以 `src/main.ts` 为入口生成 CommonJS `main.js`，并把 Worker source 作为编译期常量注入。
+
+可选方案的取舍仍如下：
 
 | 方案 | 优点 | 风险 |
 | --- | --- | --- |
 | 单独 worker asset | 实现直接、调试容易 | 社区安装是否携带额外文件需要改变发布契约 |
-| 构建时内联 worker source + Blob URL | 保持单 `main.js` | bundle 大、CSP/Blob/WebGPU/WASM 路径需验证 |
+| 构建时内联 worker source + Blob URL | 保持单 `main.js`；当前已采用 | Worker 代码会增加 bundle；CSP/Blob 和 runtime 初始化需验证 |
 | data URL worker | 单文件 | 大体积、URL/CSP/调试和浏览器限制 |
 | 主线程运行 | 最简单 | UI long task，不能作为正式方案 |
 
-M4/M6 已要求验证 inline Worker/Blob。不要手写复制 Worker 源码字符串；应让 esbuild 对 Worker entry 单独构建，再把产物以受控方式注入主 bundle。
+1.5.4 不手写复制 Worker 源码字符串；esbuild 对 Worker entry 单独构建，再把产物以受控方式注入主 bundle。ORT WASM 不再做 Base64 注入，而是首次使用时下载、校验和缓存。
 
 构建后检查：
 
 ```bash
 npm run build
-rg -n "file://|/Users/|node_modules/.+wasm|https://.+\.wasm|worker\.js" main.js
+npm run release:verify
+rg -n "file://|/Users/|node_modules/.+wasm|__VAULT_COACH_ORT_WASM_BASE64__" main.js
 ```
 
-搜索结果需要人工解释。存在 URL 字符串不必然代表运行时请求，但任何开发绝对路径或未发布 worker asset 都是阻断项。
+搜索结果需要人工解释。当前 `main.js` 应当包含 runtime policy 的 exact-version CDN URL，因为它定义允许下载的唯一资产；不应包含开发绝对路径、缺失的 Worker asset 引用或 WASM Base64 标记。
 
 ONNX Runtime 官方文档说明 proxy worker 与 WebGPU 有限制，自定义 Worker 中使用 WebGPU 需要单独加载 runtime；不能简单打开一个 flag 就假设两种后端都可用。[ORT env flags](https://onnxruntime.ai/docs/tutorials/web/env-flags-and-session-options.html)
 
@@ -241,7 +259,9 @@ class TextChunkBuffer {
 
 - `main.js` 可构建；
 - 不引用缺失 Worker/WASM 文件；
-- bundle size 增量记录；
+- `main.js <= 4,500,000 bytes`；
+- 不包含已移除的 WASM Base64 marker；
+- package/manifest/versions 版本映射一致；
 - release 目录只保留允许资产时 smoke 可运行；
 - 插件卸载后无 Worker/interval/listener 泄漏。
 
@@ -376,8 +396,9 @@ cancel latency = cancelled - cancel-click
 ```bash
 npm ci
 npm run lint
-npm test -- --run
+npm test
 npm run build
+npm run release:verify
 git diff --check
 ```
 
@@ -388,7 +409,9 @@ git diff --check
 - 测试不访问网络；
 - build artifact 不含绝对开发路径；
 - Worker protocol validator 有未知版本测试；
-- bundle size 与基线比较并记录阈值。
+- bundle size 与基线比较并强制 `4,500,000 bytes` 阈值；
+- runtime policy 由实际 Transformers.js 依赖的 ORT 资产生成；
+- `main.js` 不包含 ORT WASM Base64。
 
 ### 13.2 手动 benchmark workflow
 
@@ -419,13 +442,30 @@ workflow_dispatch inputs:
 2. 不保留源码、node_modules 或开发缓存；
 3. 启用插件；
 4. 用户显式 prepare；
-5. 验证 runtime/WASM/Worker 资产；
+5. 验证 exact-version runtime 请求、字节数、SHA-256、Worker 初始化与缓存 namespace；
 6. 重启并断网暖启动；
 7. Ask 流式回答；
 8. 取消、清除、重载；
 9. 检查 Console 和存储残留。
 
 开发 checkout 可运行而 release 安装失败时，Gate 必须失败。
+
+### 13.4 1.5.4 已经执行的自动 Gate
+
+```text
+Node 20.20.2 / npm 10.8.2
+npm run lint                         PASS
+npm test                             PASS (66 files / 276 tests)
+npm run build                        PASS
+npm run release:verify               PASS
+main.js                              2,872,234 bytes
+npm run m4:smoke:browser-runtime     PASS
+                                      dimension=384
+                                      finite=true
+                                      transferred=true
+```
+
+Chrome Worker smoke 证明了生产 Worker 入口、bundle 内 ORT factory、外置 WASM transfer 和真实 ONNX session 能共同工作。它不替代 Obsidian Desktop/Mobile 的手工平台验证。
 
 ## 14. GO/NO-GO 模板
 
