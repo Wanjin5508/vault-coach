@@ -1,5 +1,6 @@
 import type { DocumentLocator } from "../documents/document-types";
 import type { GraphCapacityAssessment } from "../graph-capacity/graph-capacity-types";
+import type { EmbeddingFingerprint } from "../embedding/embedding-provider";
 
 /** 持久化语义图 schema 与 M2 `GraphSnapshotV1` 明确分离。 */
 export const SEMANTIC_GRAPH_SCHEMA_VERSION = 1;
@@ -188,7 +189,10 @@ export type UserSemanticDecisionInput = WithoutDecisionIdentity<UserSemanticDeci
 
 export interface SemanticEmbeddingRecord {
     conceptId: string;
+    /** 1.5.2 及更早版本的弱签名；仅用于识别旧数据和兼容读取。 */
     modelSignature: string;
+    /** 新记录的完整向量空间身份；缺失时视为 stale，不进入相似度索引。 */
+    embeddingFingerprint?: EmbeddingFingerprint;
     inputHash: string;
     vector: number[];
     updatedAt: number;

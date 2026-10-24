@@ -138,8 +138,12 @@ export class VaultCoachRuntime {
     }
 
     markVectorIndexDirty(): void {
-        void this.services.vectorStore.clear();
-        this.services.ragEngine.hydrateVectorStats({ ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null });
+        const current = this.services.ragEngine.getVectorIndexStats();
+        this.services.ragEngine.hydrateVectorStats({
+            ...current,
+            ready: false,
+            compatibility: current.vectorCount > 0 ? "stale" : "absent",
+        });
         this.vectorIndexDirty = this.settings.enableVectorRetrieval;
     }
 
@@ -321,6 +325,11 @@ export class VaultCoachRuntime {
                 if (isAbortError(error)) throw error;
                 console.error("[VaultCoachRuntime] 向量索引建立失败，将回退到关键词检索。", error);
                 vectorBuildWarning = this.getVectorIndexFailureNotice(error);
+                this.services.ragEngine.hydrateVectorStats({
+                    ...this.services.ragEngine.getVectorIndexStats(),
+                    ready: false,
+                    compatibility: "stale",
+                });
                 this.vectorIndexDirty = true;
             }
             let graphRebuilt = false;
@@ -357,8 +366,14 @@ export class VaultCoachRuntime {
             if (isAbortError(error)) {
                 console.warn("[VaultCoachRuntime] 索引构建已停止。", error);
                 this.services.knowledgeBase.clearIndexData();
-                await this.services.vectorStore.clear();
-                this.services.ragEngine.hydrateVectorStats({ ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null });
+                const retained = await this.services.vectorStore.getStats();
+                this.services.ragEngine.hydrateVectorStats({
+                    ready: false,
+                    vectorCount: retained.vectorCount,
+                    dimension: retained.dimension,
+                    lastBuiltAt: retained.lastUpdatedAt,
+                    compatibility: retained.vectorCount > 0 ? "stale" : "absent",
+                });
                 this.knowledgeBaseDirty = true;
                 this.vectorIndexDirty = this.settings.enableVectorRetrieval;
                 if (showNotice) this.notice("notice.index.stopped");
@@ -558,6 +573,7 @@ export class VaultCoachRuntime {
             } catch (error: unknown) {
                 if (isAbortError(error)) throw error;
                 console.error("[VaultCoachRuntime] 自动向量增量同步失败，将回退到关键词检索。", error);
+                this.markActiveVectorIndexStale();
                 this.vectorIndexDirty = this.settings.enableVectorRetrieval;
             }
             try {
@@ -624,11 +640,13 @@ export class VaultCoachRuntime {
         } catch (error: unknown) {
             if (isAbortError(error)) {
                 console.warn("[VaultCoachRuntime] 向量索引构建已停止。", error);
+                this.markActiveVectorIndexStale();
                 this.vectorIndexDirty = this.settings.enableVectorRetrieval;
                 if (showNotice) this.notice("notice.index.stopped");
                 return;
             }
             console.error("[VaultCoachRuntime] 向量索引重建失败", error);
+            this.markActiveVectorIndexStale();
             this.vectorIndexDirty = true;
             if (showNotice) this.host.showNotice(this.getVectorIndexFailureNotice(error));
         } finally {
@@ -683,17 +701,9 @@ export class VaultCoachRuntime {
             return false;
         }
         this.services.knowledgeBase.loadFromSnapshot(snapshot);
-        this.services.ragEngine.hydrateVectorStats(snapshot.vectorStats);
         this.knowledgeBaseDirty = false;
-        const needsVectorStoreMigration = (snapshot.version ?? 0) < 2;
-        if (needsVectorStoreMigration || snapshot.embeddingModel !== this.getEmbeddingIndexSignature()) {
-            await this.services.vectorStore.clear();
-            this.services.ragEngine.hydrateVectorStats({ ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null });
-            this.vectorIndexDirty = this.settings.enableVectorRetrieval;
-            this.setSourceInventoryStatus("ready", null);
-            return true;
-        }
-        this.vectorIndexDirty = false;
+        const vectorStats = await this.services.ragEngine.refreshVectorStatsFromStore();
+        this.vectorIndexDirty = this.settings.enableVectorRetrieval && !vectorStats.ready;
         this.setSourceInventoryStatus("ready", null);
         return true;
     }
@@ -724,11 +734,20 @@ export class VaultCoachRuntime {
         });
     }
 
+    /** 保留最后一个完整 generation 供恢复诊断，但阻止当前配置继续查询它。 */
+    private markActiveVectorIndexStale(): void {
+        const current = this.services.ragEngine.getVectorIndexStats();
+        this.services.ragEngine.hydrateVectorStats({
+            ...current,
+            ready: false,
+            compatibility: current.vectorCount > 0 ? "stale" : "absent",
+        });
+    }
+
     private async persistKnowledgeBaseSnapshot(includeSourceInventory: boolean = true): Promise<void> {
         await this.services.persistentStore.saveKnowledgeBaseSnapshot({
-            version: 3,
+            version: 4,
             settingsSignature: this.services.knowledgeBase.getSettingsSignature(),
-            embeddingModel: this.getEmbeddingIndexSignature(),
             stats: this.services.knowledgeBase.getStats(),
             vectorStats: this.services.ragEngine.getVectorIndexStats(),
             chunks: this.services.knowledgeBase.getAllChunks(),
@@ -759,22 +778,6 @@ export class VaultCoachRuntime {
             changedRatio: diff.changedRatio,
             isPossibleDomainSwitch: diff.isPossibleDomainSwitch,
         } : null;
-    }
-
-    private getEmbeddingIndexSignature(): string | null {
-        if (!this.settings.enableVectorRetrieval) return null;
-        if (this.settings.embeddingProvider === "openai-compatible") {
-            return [
-                this.settings.embeddingProvider,
-                this.settings.cloudEmbeddingBaseUrl.trim().replace(/\/+$/, ""),
-                this.settings.cloudEmbeddingModel.trim(),
-            ].join("::");
-        }
-        return [
-            this.settings.embeddingProvider,
-            this.settings.llmBaseUrl.trim().replace(/\/+$/, ""),
-            this.settings.embeddingModel.trim(),
-        ].join("::");
     }
 
     private clearAutoIndexTimers(): void {

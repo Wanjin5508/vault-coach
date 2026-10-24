@@ -10,8 +10,8 @@ import { detectQuestionLanguage, type QuestionLanguage } from "./question-langua
 /**
  * 模型客户端模块。
  *
- * 统一封装本地 Ollama 与 OpenAI-compatible 服务调用，包括聊天、流式回答、
- * embedding、rerank、query rewrite 和长期记忆抽取。
+ * 统一封装本地 Ollama 与 OpenAI-compatible 生成服务调用，包括聊天、流式回答、
+ * rerank、query rewrite 和长期记忆抽取。Embedding 已由独立领域端口和基础设施 adapter 负责。
  * 上层 RAG 引擎只依赖本客户端提供的语义能力，不直接拼接 HTTP 请求。
  */
 
@@ -22,22 +22,6 @@ interface OllamaChatResponse {
     message?: {
         content?: string;
     }
-    error?: string;
-}
-
-/**
- * Ollama 新版 /api/embed 响应。
- */
-interface OllamaEmbedResponse {
-    embeddings?: number[][];
-    error?: string;
-}
-
-/**
- * Ollama 旧版 /api/embeddings 响应。
- */
-interface OllamaLegacyEmbeddingResponse {
-    embedding?: number[];
     error?: string;
 }
 
@@ -99,19 +83,6 @@ interface CloudChatCompletionStreamChunk {
 }
 
 /**
- * OpenAI-compatible embedding 响应。
- */
-interface CloudEmbeddingResponse {
-    data?: Array<{
-        embedding?: number[];
-    }>;
-
-    error?: {
-        message?: string;
-    };
-}
-
-/**
  * 模型请求错误。
  *
  * 保留目标 URL 和 HTTP 状态码，便于上层判断是否需要 fallback 或展示具体提示。
@@ -133,8 +104,7 @@ class ModelRequestError extends Error {
  * LocalModelClient 负责和本地模型服务通信。
  *
  * 当前版本默认按“Ollama 风格 REST 接口”实现：
- * - /api/chat     用于 query rewrite 与最终回答生成
- * - /api/embed    用于 embedding
+ * - /api/chat 用于 query rewrite 与最终回答生成
  *
  * 对于 rerank：
  * - 由于不同本地部署方案的接口差异较大，因此这里采用“可选独立 rerank 服务”的策略；
@@ -145,11 +115,6 @@ export class LocalModelClient implements ChatProvider {
     // 使用函数注入设置读取器，避免持有构造时的旧配置快照。
     private readonly getSettings: () => VaultCoachSettings;
     private readonly getCloudApiKey: () => string | null;
-
-    // 这两个字段只影响本插件会话内的 Ollama embedding。
-    // fallbackUsed 用于向 UI 发一次 Notice；preferCpu 用于后续 batch 直接走 CPU，避免反复触发 GPU 崩溃。
-    private ollamaEmbeddingCpuFallbackUsed = false;
-    private preferOllamaEmbeddingCpu = false;
 
     constructor(getSettings: () => VaultCoachSettings, getCloudApiKey: () => string | null) {
         this.getSettings = getSettings;
@@ -170,31 +135,6 @@ export class LocalModelClient implements ChatProvider {
      */
     private shouldUseCloudChat(settings: VaultCoachSettings): boolean {
         return settings.modelProvider === "openai-compatible"
-    }
-
-    /**
-     * 根据 embedding provider 获取当前有效模型名。
-     */
-    private getActiveEmbeddingModel(settings: VaultCoachSettings): string {
-        return settings.embeddingProvider === "openai-compatible"
-            ? settings.cloudEmbeddingModel.trim()
-            : settings.embeddingModel.trim();
-    }
-
-    /**
-     * 判断 embedding 请求是否走 OpenAI-compatible 服务。
-     */
-    private shouldUseCloudEmbedding(settings: VaultCoachSettings): boolean {
-        return settings.embeddingProvider === "openai-compatible";
-    }
-
-    /**
-     * 消费本轮会话中的 Ollama embedding CPU fallback 标记。
-     */
-    consumeOllamaEmbeddingCpuFallbackUsed(): boolean {
-        const fallbackWasUsed: boolean = this.ollamaEmbeddingCpuFallbackUsed;
-        this.ollamaEmbeddingCpuFallbackUsed = false;
-        return fallbackWasUsed;
     }
 
     /**
@@ -630,201 +570,6 @@ export class LocalModelClient implements ChatProvider {
     }
 
     /**
-     * 批量生成 embedding。
-     *
-     * Ollama 的 /api/embed 支持 string 或 string[] 输入，
-     * 因此这里直接一次发送一个小批次，避免为每个 chunk 单独发请求。
-     */
-    async embedTexts(texts: string[], options: { allowWhenVectorRetrievalDisabled?: boolean } = {}): Promise<number[][]> {
-        const settings: VaultCoachSettings = this.getSettings();
-        const activeEmbeddingModel: string = this.getActiveEmbeddingModel(settings);
-        if ((!settings.enableVectorRetrieval && !options.allowWhenVectorRetrievalDisabled) || activeEmbeddingModel.length === 0) {
-            return [];
-        } 
-
-        if (texts.length === 0) {
-            return [];
-        }
-
-        if (this.shouldUseCloudEmbedding(settings)) {
-            return this.embedTextsWithCloudApi(settings, texts);
-        }
-
-        const preferredOllamaEmbeddingOptions: Record<string, number> | undefined = this.preferOllamaEmbeddingCpu
-            ? { num_gpu: 0 }
-            : undefined;
-
-        try {
-            return await this.embedTextsWithModernOllamaApi(settings, texts, preferredOllamaEmbeddingOptions);
-        } catch (error: unknown) {
-            // Windows 上 Ollama 的 GPU/CUDA 后端可能在 embedding 阶段返回 500。
-            // 这种情况不应该直接放弃语义检索，先用 num_gpu: 0 强制 CPU 重试。
-            if (!this.preferOllamaEmbeddingCpu && this.shouldRetryOllamaEmbeddingOnCpu(error)) {
-                return this.embedTextsWithModernOllamaApiOnCpu(settings, texts, error);
-            }
-
-            if (!this.isNotFoundError(error)) {
-                throw error;
-            }
-
-            console.warn("[VaultCoach] /api/embed 不可用，尝试使用旧版 /api/embeddings 接口。", error);
-            try {
-                return await this.embedTextsWithLegacyOllamaApi(settings, texts, preferredOllamaEmbeddingOptions);
-            } catch (legacyError: unknown) {
-                // 旧版 embedding 接口也可能触发同类 GPU 后端错误，因此同样保留 CPU fallback。
-                if (!this.preferOllamaEmbeddingCpu && this.shouldRetryOllamaEmbeddingOnCpu(legacyError)) {
-                    return this.embedTextsWithLegacyOllamaApiOnCpu(settings, texts, legacyError);
-                }
-
-                throw legacyError;
-            }
-        }
-    }
-
-    /**
-     * 调用 Ollama 新版 /api/embed 批量生成向量。
-     */
-    private async embedTextsWithModernOllamaApi(
-        settings: VaultCoachSettings,
-        texts: string[],
-        options?: Record<string, number>,
-    ): Promise<number[][]> {
-        const responseText: string = await this.postJson(
-            settings.llmBaseUrl,
-            "/api/embed",
-            {
-                model: settings.embeddingModel,
-                input: texts,
-                truncate: true,
-                ...(options ? { options } : {}),
-            },
-        );
-        const parsed: OllamaEmbedResponse = JSON.parse(responseText) as OllamaEmbedResponse;
-        if (parsed.error) {
-            throw new Error(parsed.error);
-
-        }
-        const embeddings: number[][] | undefined = parsed.embeddings;
-        if (!embeddings || embeddings.length === 0) {
-            throw new Error("embedding 接口返回为空。");
-        }
-
-        return embeddings;
-    }
-
-    /**
-     * 在 Ollama GPU embedding 失败后强制使用 CPU 重试新版接口。
-     */
-    private async embedTextsWithModernOllamaApiOnCpu(
-        settings: VaultCoachSettings,
-        texts: string[],
-        originalError: unknown,
-    ): Promise<number[][]> {
-        console.warn("[VaultCoach] Ollama GPU embedding 失败，尝试使用 CPU 重新生成 embedding。", originalError);
-        // Ollama 会把 options 透传给底层运行器；num_gpu: 0 表示本次请求不把层卸载到 GPU。
-        const embeddings: number[][] = await this.embedTextsWithModernOllamaApi(settings, texts, { num_gpu: 0 });
-        this.ollamaEmbeddingCpuFallbackUsed = true;
-        this.preferOllamaEmbeddingCpu = true;
-        return embeddings;
-    }
-
-    /**
-     * 调用 OpenAI-compatible /embeddings 接口生成向量。
-     */
-    private async embedTextsWithCloudApi(
-        settings: VaultCoachSettings,
-        texts: string[],
-    ): Promise<number[][]> {
-        const apiKey: string | null = this.getCloudApiKey();
-
-        if (settings.cloudEmbeddingModel.trim().length === 0) {
-            throw new Error("未配置云端 embedding 模型。");
-        }
-
-        if (!apiKey) {
-            throw new Error("未配置云端模型 API key。请先在设置页选择 SecretStorage 条目。");
-        }
-
-        const responseText: string = await this.postJson(
-            settings.cloudEmbeddingBaseUrl,
-            this.getCloudEmbeddingsPath(settings.cloudEmbeddingBaseUrl),
-            {
-                model: settings.cloudEmbeddingModel,
-                input: texts,
-            },
-            { Authorization: `Bearer ${apiKey}` },
-        );
-
-        const parsed: CloudEmbeddingResponse = JSON.parse(responseText) as CloudEmbeddingResponse;
-        if (parsed.error?.message) {
-            throw new Error(parsed.error.message);
-        }
-
-        const embeddings: number[][] = (parsed.data ?? [])
-            .map((item: { embedding?: number[] }) => item.embedding)
-            .filter((embedding: number[] | undefined): embedding is number[] => {
-                return Array.isArray(embedding) && embedding.length > 0;
-            });
-
-        if (embeddings.length === 0) {
-            throw new Error("云端 embedding 接口返回为空。");
-        }
-
-        return embeddings;
-    }
-
-    /**
-     * 调用 Ollama 旧版 /api/embeddings 接口逐条生成向量。
-     */
-    private async embedTextsWithLegacyOllamaApi(
-        settings: VaultCoachSettings,
-        texts: string[],
-        options?: Record<string, number>,
-    ): Promise<number[][]> {
-        const embeddings: number[][] = [];
-
-        for (const text of texts) {
-            const responseText: string = await this.postJson(
-                settings.llmBaseUrl,
-                "/api/embeddings",
-                {
-                    model: settings.embeddingModel,
-                    prompt: text,
-                    ...(options ? { options } : {}),
-                },
-            );
-
-            const parsed: OllamaLegacyEmbeddingResponse = JSON.parse(responseText) as OllamaLegacyEmbeddingResponse;
-            if (parsed.error) {
-                throw new Error(parsed.error);
-            }
-
-            if (!parsed.embedding || parsed.embedding.length === 0) {
-                throw new Error("旧版 embedding 接口返回为空。");
-            }
-
-            embeddings.push(parsed.embedding);
-        }
-
-        return embeddings;
-    }
-
-    /**
-     * 在 Ollama GPU embedding 失败后强制使用 CPU 重试旧版接口。
-     */
-    private async embedTextsWithLegacyOllamaApiOnCpu(
-        settings: VaultCoachSettings,
-        texts: string[],
-        originalError: unknown,
-    ): Promise<number[][]> {
-        console.warn("[VaultCoach] 旧版 Ollama GPU embedding 失败，尝试使用 CPU 重新生成 embedding。", originalError);
-        const embeddings: number[][] = await this.embedTextsWithLegacyOllamaApi(settings, texts, { num_gpu: 0 });
-        this.ollamaEmbeddingCpuFallbackUsed = true;
-        this.preferOllamaEmbeddingCpu = true;
-        return embeddings;
-    }
-
-    /**
      * 调用独立 rerank 服务。
      *
      * 这里采用常见的 /v1/rerank 风格：
@@ -966,23 +711,6 @@ export class LocalModelClient implements ChatProvider {
         }
 
         return "/v1/chat/completions";
-    }
-
-    /**
-     * 根据用户配置的云端 baseUrl 推导 embedding 接口路径。
-     */
-    private getCloudEmbeddingsPath(baseUrl: string): string {
-        const normalizedBase: string = baseUrl.trim().replace(/\/+$/, "");
-
-        if (normalizedBase.endsWith("/embeddings")) {
-            return "";
-        }
-
-        if (normalizedBase.endsWith("/v1")) {
-            return "/embeddings";
-        }
-
-        return "/v1/embeddings";
     }
 
     /**
@@ -1189,16 +917,8 @@ export class LocalModelClient implements ChatProvider {
             return "";
         }
 
-        if (this.isOllamaModelNotFoundMessage(errorMessage) && this.isOllamaEmbeddingUrl(targetUrl)) {
-            return "Ollama 已启动，但找不到当前配置的 embedding 模型。请先运行 ollama list 确认模型列表；如果使用默认配置，请执行 ollama pull embeddinggemma；如果设置中填写了其他 embedding 模型，请拉取对应模型。";
-        }
-
         if (this.isOllamaModelNotFoundMessage(errorMessage) && targetUrl.includes("/api/chat")) {
             return "Ollama 已启动，但找不到当前配置的聊天模型。请先运行 ollama list 确认模型列表；如果使用默认配置，请执行 ollama pull gemma3:4b；如果设置中填写了其他聊天模型，请拉取对应模型。";
-        }
-
-        if (targetUrl.includes("/api/embed")) {
-            return "如果你使用的是旧版 Ollama，插件会自动尝试 /api/embeddings；如果仍失败，请确认本地推理服务地址只填写根地址，例如 http://127.0.0.1:11434。";
         }
 
         if (targetUrl.includes("/api/chat")) {
@@ -1209,10 +929,6 @@ export class LocalModelClient implements ChatProvider {
             return "请确认云端模型服务地址与模型提供商匹配，例如 OpenAI 兼容服务通常填写到 /v1 或服务根地址。";
         }
 
-        if (targetUrl.includes("/embeddings")) {
-            return "请确认云端 embedding 服务地址与模型提供商匹配，例如 OpenAI 兼容服务通常填写到 /v1 或服务根地址。";
-        }
-
         return "请确认对应模型服务地址和接口路径是否正确。";
     }
 
@@ -1220,14 +936,7 @@ export class LocalModelClient implements ChatProvider {
      * 判断 URL 是否是 Ollama API。
      */
     private isOllamaApiUrl(targetUrl: string): boolean {
-        return /\/api\/(?:chat|embed|embeddings)\b/i.test(targetUrl);
-    }
-
-    /**
-     * 判断 URL 是否是 Ollama embedding API。
-     */
-    private isOllamaEmbeddingUrl(targetUrl: string): boolean {
-        return /\/api\/(?:embed|embeddings)\b/i.test(targetUrl);
+        return /\/api\/chat\b/i.test(targetUrl);
     }
 
     /**
@@ -1242,31 +951,6 @@ export class LocalModelClient implements ChatProvider {
      */
     private isOllamaModelNotFoundMessage(message: string): boolean {
         return /model.+not found|not found.+model|try pulling/i.test(message);
-    }
-
-    /**
-     * 判断错误是否是 404。
-     */
-    private isNotFoundError(error: unknown): boolean {
-        if (error instanceof ModelRequestError) {
-            return error.status === 404;
-        }
-
-        return this.extractStatusCode(error) === 404;
-    }
-
-    /**
-     * 判断 Ollama embedding 失败是否值得使用 CPU fallback 重试。
-     */
-    private shouldRetryOllamaEmbeddingOnCpu(error: unknown): boolean {
-        const status: number | null = this.extractStatusCode(error);
-        if (status !== null && status < 500) {
-            return false;
-        }
-
-        const message: string = this.getErrorMessage(error);
-        // requestUrl 在部分环境下只给出泛化的 HTTP 500，因此同时匹配状态码和常见 GPU 崩溃关键词。
-        return /cuda|gpu|ptx|llama-server|unsupported toolchain|0xc0000409|server error|status 500|http 500/i.test(message);
     }
 
     /**

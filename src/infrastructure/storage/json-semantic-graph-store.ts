@@ -42,6 +42,7 @@ interface DecisionsShard { decisions: SemanticGraphState["decisions"]; }
 interface SemanticEmbeddingMetadata {
     conceptId: string;
     modelSignature: string;
+    embeddingFingerprint?: SemanticGraphState["embeddings"][number]["embeddingFingerprint"];
     inputHash: string;
     updatedAt: number;
 }
@@ -259,6 +260,7 @@ export class JsonSemanticGraphStore implements SemanticGraphStore {
                 .map((embedding) => ({
                     conceptId: embedding.conceptId,
                     modelSignature: embedding.modelSignature,
+                    embeddingFingerprint: embedding.embeddingFingerprint,
                     inputHash: embedding.inputHash,
                     vector: [...embedding.vector],
                     updatedAt: embedding.updatedAt,
@@ -277,6 +279,7 @@ export class JsonSemanticGraphStore implements SemanticGraphStore {
         return shard.embeddings.map((embedding, index) => ({
             conceptId: embedding.conceptId,
             modelSignature: embedding.modelSignature,
+            embeddingFingerprint: embedding.embeddingFingerprint,
             inputHash: embedding.inputHash,
             vector: Array.from(values.slice(index * storage.dimension, (index + 1) * storage.dimension)),
             updatedAt: embedding.updatedAt,
@@ -298,6 +301,7 @@ export class JsonSemanticGraphStore implements SemanticGraphStore {
         const fingerprint = stableSemanticHash(sorted.map((embedding) => [
             embedding.conceptId,
             embedding.modelSignature,
+            embedding.embeddingFingerprint ? JSON.stringify(embedding.embeddingFingerprint) : "legacy",
             embedding.inputHash,
             embedding.updatedAt,
             // 向量本身参与内容寻址。通常输入哈希会在 embedding 变化前改变，但将向量载荷纳入地址，
@@ -316,6 +320,7 @@ export class JsonSemanticGraphStore implements SemanticGraphStore {
             embeddings: sorted.map((embedding) => ({
                 conceptId: embedding.conceptId,
                 modelSignature: embedding.modelSignature,
+                embeddingFingerprint: embedding.embeddingFingerprint,
                 inputHash: embedding.inputHash,
                 updatedAt: embedding.updatedAt,
             })),

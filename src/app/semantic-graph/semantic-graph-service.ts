@@ -39,11 +39,8 @@ import { createSectionExtractionInputs, type SectionExtractionInput } from "./se
 import { assessGraphCapacity } from "../../domain/graph-capacity/graph-capacity-assessment";
 import type { GraphCapacityAssessment, GraphCapacityInput } from "../../domain/graph-capacity/graph-capacity-types";
 import type { VectorIndexStats } from "../../domain/retrieval/retrieval-types";
-
-/** 语义概念向量生成端口；是否允许调用模型由应用设置和容量门禁共同决定。 */
-export interface SemanticEmbeddingGateway {
-    embedTexts(texts: string[], options?: { allowWhenVectorRetrievalDisabled?: boolean }): Promise<number[][]>;
-}
+import type { EmbeddingProvider } from "../../domain/embedding/embedding-provider";
+import { getEmbeddingFingerprintDisplayId, isFingerprintCompatibleWithDescriptor } from "../../domain/embedding/embedding-fingerprint";
 
 /** 语义图协调器使用的领域端口、设置读取器和状态通知回调。 */
 export interface SemanticGraphServiceDependencies {
@@ -51,7 +48,7 @@ export interface SemanticGraphServiceDependencies {
     documentIndex: DocumentIndexReader;
     store: SemanticGraphStore;
     extractionService: ConceptExtractionService;
-    embeddingGateway: SemanticEmbeddingGateway;
+    embeddingProvider: EmbeddingProvider;
     getSettings(): VaultCoachSettings;
     similarityIndex?: ConceptSimilarityIndex;
     getNow?(): number;
@@ -95,9 +92,9 @@ export class SemanticGraphService {
     async load(): Promise<void> {
         try {
             const loaded = await this.dependencies.store.load();
-            this.state = loaded ?? createEmptySemanticGraphState(this.now());
+            this.state = this.migrateLegacyEmbeddingState(loaded ?? createEmptySemanticGraphState(this.now()));
             this.assertIntegrity(this.state);
-            await this.similarityIndex.rebuild(this.state.embeddings.map(toConceptEmbeddingRecord));
+            await this.similarityIndex.rebuild(this.getCompatibleEmbeddings().map(toConceptEmbeddingRecord));
             this.similarityInitialized = true;
             this.dirty = false;
             this.lastError = null;
@@ -178,7 +175,7 @@ export class SemanticGraphService {
         this.assertIntegrity(next);
         await this.dependencies.store.save(next);
         this.state = next;
-        await this.similarityIndex.rebuild(next.embeddings.map(toConceptEmbeddingRecord));
+        await this.similarityIndex.rebuild(next.embeddings.filter((embedding) => !!embedding.embeddingFingerprint).map(toConceptEmbeddingRecord));
         this.similarityInitialized = true;
         this.dirty = true;
         this.lastError = "知识来源已变更；未抽取的当前 Section 需要重建语义概念图谱。";
@@ -794,29 +791,34 @@ export class SemanticGraphService {
     }
 
     private async refreshEmbeddings(changedConceptIds: ReadonlySet<string>, signal: AbortSignal): Promise<void> {
-        const modelSignature = this.getEmbeddingSignature();
+        const descriptor = this.dependencies.embeddingProvider.describe();
         const knownConceptIds = new Set(this.state.concepts.map((concept) => concept.id));
         const existing = new Map(this.state.embeddings.map((embedding) => [embedding.conceptId, embedding]));
         const required = this.state.concepts.filter((concept) => changedConceptIds.has(concept.id));
         const missing = required.filter((concept) => {
             const embedding = existing.get(concept.id);
-            return !embedding || embedding.modelSignature !== modelSignature || embedding.inputHash !== conceptEmbeddingHash(concept);
+            return !embedding || !embedding.embeddingFingerprint
+                || !isFingerprintCompatibleWithDescriptor(embedding.embeddingFingerprint, descriptor)
+                || embedding.inputHash !== conceptEmbeddingHash(concept);
         });
         try {
             for (let index = 0; index < missing.length; index += 8) {
                 signal.throwIfAborted();
                 const batch = missing.slice(index, index + 8);
-                const vectors = await this.dependencies.embeddingGateway.embedTexts(
-                    batch.map(conceptEmbeddingText),
-                    { allowWhenVectorRetrievalDisabled: true },
-                );
-                for (let vectorIndex = 0; vectorIndex < Math.min(batch.length, vectors.length); vectorIndex += 1) {
+                const embeddingBatch = await this.dependencies.embeddingProvider.embed({
+                    texts: batch.map(conceptEmbeddingText),
+                    purpose: "graph",
+                    signal,
+                });
+                const modelSignature = getEmbeddingFingerprintDisplayId(embeddingBatch.fingerprint);
+                for (let vectorIndex = 0; vectorIndex < batch.length; vectorIndex += 1) {
                     const concept = batch[vectorIndex];
-                    const vector = vectors[vectorIndex];
+                    const vector = embeddingBatch.vectors[vectorIndex];
                     if (!concept || !vector || vector.length === 0) continue;
                     existing.set(concept.id, {
                         conceptId: concept.id,
                         modelSignature,
+                        embeddingFingerprint: embeddingBatch.fingerprint,
                         inputHash: conceptEmbeddingHash(concept),
                         vector: [...vector],
                         updatedAt: this.now(),
@@ -832,13 +834,13 @@ export class SemanticGraphService {
             .filter((embedding) => knownConceptIds.has(embedding.conceptId))
             .sort((left, right) => left.conceptId.localeCompare(right.conceptId));
         if (!this.similarityInitialized) {
-            await this.similarityIndex.rebuild(this.state.embeddings.map(toConceptEmbeddingRecord));
+            await this.similarityIndex.rebuild(this.getCompatibleEmbeddings().map(toConceptEmbeddingRecord));
             this.similarityInitialized = true;
             return;
         }
         const removedIds = Array.from(changedConceptIds).filter((conceptId) => !knownConceptIds.has(conceptId));
         await this.similarityIndex.remove(removedIds);
-        await this.similarityIndex.upsert(this.state.embeddings
+        await this.similarityIndex.upsert(this.getCompatibleEmbeddings()
             .filter((embedding) => changedConceptIds.has(embedding.conceptId))
             .map(toConceptEmbeddingRecord));
     }
@@ -1030,11 +1032,26 @@ export class SemanticGraphService {
         };
     }
 
-    private getEmbeddingSignature(): string {
-        const settings = this.dependencies.getSettings();
-        const provider = settings.embeddingProvider;
-        const model = provider === "openai-compatible" ? settings.cloudEmbeddingModel.trim() : settings.embeddingModel.trim();
-        return `${provider}:${model}`;
+    private getCompatibleEmbeddings(): SemanticEmbeddingRecord[] {
+        if (this.state.embeddings.length === 0) return [];
+        const descriptor = this.dependencies.embeddingProvider.describe();
+        return this.state.embeddings.filter((embedding) => embedding.embeddingFingerprint
+            && isFingerprintCompatibleWithDescriptor(embedding.embeddingFingerprint, descriptor));
+    }
+
+    /**
+     * 旧记录没有完整 fingerprint，不能继续参与自动相似度推断。已确认候选属于用户治理事实，
+     * 因此保留其候选载体和决策审计；未确认的旧 similarity 候选从当前投影移除。
+     */
+    private migrateLegacyEmbeddingState(state: SemanticGraphState): SemanticGraphState {
+        if (!state.embeddings.some((embedding) => !embedding.embeddingFingerprint)) return state;
+        const confirmed = new Set(this.projector.project(state).relations
+            .map((relation) => relation.candidateFingerprint)
+            .filter((value): value is string => !!value));
+        return {
+            ...state,
+            candidates: state.candidates.filter((candidate) => candidate.origin !== "similarity" || confirmed.has(candidate.fingerprint)),
+        };
     }
 
     private assertConceptExists(conceptId: string): void {

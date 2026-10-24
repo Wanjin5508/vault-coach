@@ -115,6 +115,17 @@ export type {
 } from "./app/config/settings-types";
 
 export type {
+    EmbeddingBatch,
+    EmbeddingDiagnostics,
+    EmbeddingFingerprint,
+    EmbeddingPreprocessingDescriptor,
+    EmbeddingProviderDescriptor,
+    EmbeddingProviderId,
+    EmbeddingPurpose,
+    EmbeddingRequest,
+} from "./domain/embedding/embedding-provider";
+
+export type {
     KnowledgeIndexBusyPhase,
     KnowledgeIndexBusyState,
 } from "./app/index/index-types";

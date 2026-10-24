@@ -29,6 +29,16 @@ describe("architecture import boundaries", () => {
         expect(violations.map((path) => relative(sourceRoot, path))).toEqual([]);
     });
 
+    it("keeps embedding consumers behind domain ports and concrete adapters in infrastructure", () => {
+        const ragSource = sourceOf(join(sourceRoot, "rag-engine.ts"));
+        const semanticGraphSource = sourceOf(join(sourceRoot, "app", "semantic-graph", "semantic-graph-service.ts"));
+        const modelClientSource = sourceOf(join(sourceRoot, "model-client.ts"));
+
+        expect(ragSource).not.toMatch(/model-client|new\s+LocalModelClient|embeddingProvider\s*===/);
+        expect(semanticGraphSource).not.toMatch(/SemanticEmbeddingGateway|embeddingGateway|cloudEmbeddingModel|embeddingModel\.trim/);
+        expect(modelClientSource).not.toMatch(/embedTexts|\/api\/embeddings?\b|getCloudEmbeddingsPath/);
+    });
+
     it("keeps graph domain pure and excludes graph facts from runtime persistence", () => {
         const graphFiles = getTypeScriptFilesIfPresent(join(sourceRoot, "domain", "graph"));
         const forbiddenGraphImports = /from\s+["'][^"']*(?:obsidian|model-client|rag-engine|exam(?:-|\b)|presentation|graphology|sigma|vault-coach-runtime|application-container)[^"']*["']/;

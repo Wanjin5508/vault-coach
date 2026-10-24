@@ -5,6 +5,7 @@
  * 不共享数值尺度。基础设施实现不得把向量存储的内部记录泄露给展示层。
  */
 import type { DocumentLocator, IndexedChunk, KnowledgeDocumentType } from "../documents/document-types";
+import type { EmbeddingFingerprint } from "../embedding/embedding-provider";
 
 export type { KeywordSearchHit } from "../documents/document-types";
 
@@ -74,6 +75,15 @@ export interface VectorStoreStats {
     lastUpdatedAt: number | null;
 }
 
+export type VectorCompatibilityStatus = "absent" | "compatible" | "stale" | "corrupt";
+
+export interface VectorStoreInspection {
+    status: "absent" | "ready" | "legacy" | "corrupt";
+    fingerprint: EmbeddingFingerprint | null;
+    stats: VectorStoreStats;
+    reasonCode?: "unsupported-schema" | "missing-file" | "invalid-manifest" | "invalid-shard";
+}
+
 export interface VectorSearchHit {
     chunk: IndexedChunk;
     score: number;
@@ -106,6 +116,7 @@ export interface VectorIndexStats {
     vectorCount: number;
     dimension: number | null;
     lastBuiltAt: number | null;
+    compatibility?: VectorCompatibilityStatus;
 }
 
 export interface AssistantAnswer {
@@ -129,9 +140,11 @@ export interface RerankResultItem {
  */
 export interface VectorStore {
     initialize(): Promise<void>;
-    upsert(records: VectorRecord[]): Promise<void>;
-    remove(chunkIds: string[]): Promise<void>;
-    search(queryVector: Float32Array, options: VectorSearchOptions): Promise<VectorStoreHit[]>;
+    replaceAll(records: readonly VectorRecord[], fingerprint: EmbeddingFingerprint): Promise<VectorStoreStats>;
+    upsert(records: readonly VectorRecord[], fingerprint: EmbeddingFingerprint): Promise<void>;
+    remove(chunkIds: readonly string[]): Promise<void>;
+    search(queryVector: Float32Array, queryFingerprint: EmbeddingFingerprint, options: VectorSearchOptions): Promise<VectorStoreHit[]>;
+    inspect(): Promise<VectorStoreInspection>;
     clear(): Promise<void>;
     getStats(): Promise<VectorStoreStats>;
     close(): Promise<void>;
