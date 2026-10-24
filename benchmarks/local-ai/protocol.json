@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "protocolId": "vault-coach-local-ai-v1",
+  "status": "pending-owner-approval",
+  "createdAt": "2026-10-24",
+  "runtime": {
+    "library": "@huggingface/transformers",
+    "version": "4.3.1",
+    "executionProviders": ["wasm", "webgpu"],
+    "nodeReferenceProviders": ["cpu", "webgpu"],
+    "forbidRemoteRuntimeCode": true
+  },
+  "dataset": {
+    "corpus": "benchmarks/retrieval-v1/corpus.jsonl",
+    "queries": {
+      "zh": "benchmarks/retrieval-v1/queries.zh.jsonl",
+      "en": "benchmarks/retrieval-v1/queries.en.jsonl",
+      "de": "benchmarks/retrieval-v1/queries.de.jsonl"
+    },
+    "minimumQueriesPerLanguage": 20,
+    "lockedSplit": "acceptance"
+  },
+  "measurement": {
+    "warmupRuns": 2,
+    "measuredRuns": 5,
+    "batchSizes": [1, 8, 16, 32],
+    "topK": [5, 10],
+    "recordRawRankings": true
+  },
+  "thresholds": {
+    "approvalRequired": true,
+    "recallAt10MinimumByLanguage": {
+      "zh": 0.8,
+      "en": 0.8,
+      "de": 0.8
+    },
+    "mrrMinimumByLanguage": {
+      "zh": 0.6,
+      "en": 0.6,
+      "de": 0.6
+    },
+    "queryP95MsDesktopMaximum": 300,
+    "indexChunksPerSecondDesktopMinimum": 8,
+    "warmLoadMsDesktopMaximum": 5000,
+    "peakMemoryMbDesktopMaximum": 1024
+  },
+  "decisionRules": {
+    "goRequiresApprovedProtocol": true,
+    "goRequiresAllAcceptanceThresholds": true,
+    "desktopResultDoesNotImplyMobile": true,
+    "unmeasuredPlatformStatus": "pending"
+  },
+  "notes": [
+    "阈值是预登记建议值。负责人必须在首次正式运行前审阅并把 status 改为 approved。",
+    "调参集可以用于诊断；acceptance 集结果产生后不得修改阈值或相关性标注来制造 GO。",
+    "该合成语料用于工程管线验证，不代表真实用户 Vault 的总体质量。"
+  ]
+}

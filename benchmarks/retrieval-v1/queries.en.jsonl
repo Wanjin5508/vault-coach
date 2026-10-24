@@ -1,0 +1,20 @@
+{"id":"en-q01","text":"When may vault notes be sent to an external model provider?","relevantChunkIds":["vc-zh-local-first"],"split":"tuning","tags":["privacy","cross-language"]}
+{"id":"en-q02","text":"Which semantic fields make two embedding spaces incompatible?","relevantChunkIds":["vc-zh-fingerprint"],"split":"tuning","tags":["fingerprint","cross-language"]}
+{"id":"en-q03","text":"How does an index replacement survive a failed activation?","relevantChunkIds":["vc-zh-generation"],"split":"tuning","tags":["generation","cross-language"]}
+{"id":"en-q04","text":"What identifiers keep stale worker responses from being accepted?","relevantChunkIds":["vc-en-worker","vc-zh-cancel"],"split":"tuning","tags":["worker","cancel"]}
+{"id":"en-q05","text":"What must an offline warm-cache test actually do?","relevantChunkIds":["vc-en-offline-cache"],"split":"acceptance","tags":["offline"]}
+{"id":"en-q06","text":"Which retrieval quality metrics are saved by the benchmark?","relevantChunkIds":["vc-en-metrics"],"split":"acceptance","tags":["metrics"]}
+{"id":"en-q07","text":"Why must WASM and worker code ship with the installed plugin?","relevantChunkIds":["vc-en-runtime-assets"],"split":"acceptance","tags":["assets"]}
+{"id":"en-q08","text":"How should batch size affect index and query measurements?","relevantChunkIds":["vc-en-batching"],"split":"acceptance","tags":["performance"]}
+{"id":"en-q09","text":"What makes a model revision reproducible?","relevantChunkIds":["vc-en-revision"],"split":"acceptance","tags":["revision"]}
+{"id":"en-q10","text":"Can a WebGPU feature check replace a real inference test?","relevantChunkIds":["vc-de-webgpu"],"split":"acceptance","tags":["webgpu","cross-language"]}
+{"id":"en-q11","text":"What happens to retrieval when vector fingerprints differ?","relevantChunkIds":["vc-zh-fallback","vc-zh-fingerprint"],"split":"acceptance","tags":["fallback","fingerprint"]}
+{"id":"en-q12","text":"Which information must never appear in diagnostic logs?","relevantChunkIds":["vc-zh-privacy"],"split":"acceptance","tags":["privacy","cross-language"]}
+{"id":"en-q13","text":"Are all local model roles expected to remain resident at once?","relevantChunkIds":["vc-de-roles"],"split":"acceptance","tags":["roles","cross-language"]}
+{"id":"en-q14","text":"How are user-confirmed semantic relationships handled during migration?","relevantChunkIds":["vc-de-migration"],"split":"acceptance","tags":["migration","cross-language"]}
+{"id":"en-q15","text":"What licensing evidence is required before selecting a default model?","relevantChunkIds":["vc-de-license"],"split":"acceptance","tags":["license","cross-language"]}
+{"id":"en-q16","text":"Does a desktop pass prove that the same runtime works on Android?","relevantChunkIds":["vc-de-mobile"],"split":"acceptance","tags":["mobile","cross-language"]}
+{"id":"en-q17","text":"How are cold-load and warm-load measurements separated?","relevantChunkIds":["vc-de-cold-warm"],"split":"acceptance","tags":["startup","cross-language"]}
+{"id":"en-q18","text":"A PDF parser produced noisy fragments; where should retrieval failures be visible?","relevantChunkIds":["vc-en-metrics"],"split":"acceptance","tags":["pdf-noise","failure-slice"]}
+{"id":"en-q19","text":"What cryptocurrency wallet is bundled with the plugin?","relevantChunkIds":[],"split":"acceptance","tags":["no-answer","negative"]}
+{"id":"en-q20","text":"How can the plugin book a hotel room?","relevantChunkIds":[],"split":"acceptance","tags":["no-answer","negative"]}
