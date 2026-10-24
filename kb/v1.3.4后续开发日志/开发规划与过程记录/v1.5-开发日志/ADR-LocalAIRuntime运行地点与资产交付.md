@@ -1,11 +1,14 @@
 ---
 tags: [VaultCoach, ADR, LocalAIRuntime, Worker, WASM, WebGPU]
-status: proposed-pending-m4-evidence
+status: superseded-by-m4.1-hotfix
 updated: 2026-10-24
 decision: pending
 ---
 
 # ADR：LocalAIRuntime 运行地点与资产交付
+
+> [!warning] 历史决策已被替代
+> 本文保留 M4 阶段的候选假设和验证记录。其中“Worker/WASM 执行资源必须随 `main.js` 交付”的结论已被 [[里程碑4.1-hotfix-Embedding运行时按需交付与发布瘦身]]替代。后续实现以固定版本 runtime 首次下载、SHA-256 校验、本机缓存和离线恢复方案为准。
 
 ## 背景
 

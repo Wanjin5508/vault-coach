@@ -12,7 +12,6 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === "production");
 
-const localAiWasm = await readFile("node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm");
 const localAiWorkerBuild = await esbuild.build({
 	entryPoints: ["src/infrastructure/local-ai/local-ai.worker.ts"],
 	bundle: true,
@@ -32,7 +31,6 @@ const localAiWorkerBuild = await esbuild.build({
 		// Obsidian 桌面端的 Worker 可能暴露 Electron 的 Node process。Transformers.js 会据此误选
 		// Node 后端，但当前 Worker 构建只包含浏览器版 ONNX Runtime，因此必须固定为 Web 环境。
 		process: "undefined",
-		__VAULT_COACH_ORT_WASM_BASE64__: JSON.stringify(localAiWasm.toString("base64")),
 	},
 });
 const localAiWorkerSource = localAiWorkerBuild.outputFiles[0]?.text;

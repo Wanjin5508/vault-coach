@@ -5,6 +5,7 @@ import type {
     LocalAiStatus,
     LocalAIRuntimePort,
 } from "../../domain/local-ai/local-ai-types";
+import type { RuntimeAssetStore } from "../../domain/local-ai/local-ai-runtime-assets";
 
 declare const __VAULT_COACH_LOCAL_AI_WORKER_SOURCE__: string;
 
@@ -28,11 +29,15 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     private requestSequence = 0;
     private readonly pending = new Map<string, PendingRequest>();
     private readonly listeners = new Set<(status: LocalAiStatus) => void>();
+    private prepareTask: Promise<void> | null = null;
     private status: LocalAiStatus = {
         role: "embedding", phase: "not-installed", progress: null, message: null, cached: false, backend: "wasm",
     };
 
-    constructor(private readonly createWorker: LocalAiWorkerFactory = createEmbeddedWorker) {}
+    constructor(
+        private readonly runtimeAssets: RuntimeAssetStore,
+        private readonly createWorker: LocalAiWorkerFactory = createEmbeddedWorker,
+    ) {}
 
     getStatus(): LocalAiStatus { return { ...this.status }; }
 
@@ -44,9 +49,38 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
 
     async prepare(allowDownload: boolean): Promise<void> {
         if (this.status.phase === "ready") return;
+        if (this.prepareTask) return await this.prepareTask;
+        const task = this.prepareOnce(allowDownload);
+        this.prepareTask = task;
+        try {
+            await task;
+        } finally {
+            if (this.prepareTask === task) this.prepareTask = null;
+        }
+    }
+
+    private async prepareOnce(allowDownload: boolean): Promise<void> {
         this.update({ phase: allowDownload ? "downloading" : "loading", progress: 0, message: null });
         try {
-            await this.request("prepare", { allowDownload });
+            const assets = await this.runtimeAssets.prepare({
+                allowDownload,
+                onProgress: ({ loadedBytes, totalBytes }) => {
+                    const runtimeProgress = totalBytes > 0 ? loadedBytes / totalBytes : 0;
+                    this.update({ progress: runtimeProgress * 0.1 });
+                },
+            });
+            await this.request(
+                "prepare",
+                {
+                    allowDownload,
+                    runtime: {
+                        policyId: assets.policyId,
+                        wasmBinary: assets.wasmBinary,
+                    },
+                },
+                undefined,
+                [assets.wasmBinary],
+            );
             this.update({ phase: "ready", progress: 1, cached: true, message: null });
         } catch (error) {
             this.update({ phase: "error", progress: null, message: getErrorMessage(error) });
@@ -72,6 +106,7 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         this.update({ phase: "clearing", progress: null, message: null });
         try {
             await this.request("clear", {});
+            await this.runtimeAssets.clear();
             this.update({ phase: "not-installed", progress: null, cached: false, message: null });
         } catch (error) {
             this.update({ phase: "error", progress: null, message: getErrorMessage(error) });
@@ -103,7 +138,12 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         return this.worker;
     }
 
-    private request(type: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    private request(
+        type: string,
+        payload: Record<string, unknown>,
+        signal?: AbortSignal,
+        transfer: Transferable[] = [],
+    ): Promise<unknown> {
         if (signal?.aborted) return Promise.reject(new DOMException("Embedding request aborted.", "AbortError"));
         const id = `local-ai-${++this.requestSequence}`;
         const worker = this.ensureWorker();
@@ -118,7 +158,7 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
             const cleanup = () => signal?.removeEventListener("abort", abort);
             this.pending.set(id, { resolve, reject, cleanup });
             signal?.addEventListener("abort", abort, { once: true });
-            worker.postMessage({ id, type, payload });
+            worker.postMessage({ id, type, payload }, transfer);
         });
     }
 
@@ -126,7 +166,8 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         if (!isWorkerMessage(value)) return;
         const message = value;
         if (message.type === "progress") {
-            this.update({ progress: typeof message.progress === "number" ? message.progress : null });
+            const modelProgress = typeof message.progress === "number" ? message.progress : null;
+            this.update({ progress: modelProgress === null ? null : 0.1 + modelProgress * 0.9 });
             return;
         }
         if (message.type === "fatal") {
