@@ -172,6 +172,22 @@ export class LegacyPluginApiAdapter implements VaultCoachPluginApi {
         return this.application.index.getState().vectorStats;
     }
 
+    getLocalAiStatus() {
+        return this.host.getLocalAiStatus();
+    }
+
+    subscribeLocalAiStatus(listener: Parameters<VaultCoachPluginApi["subscribeLocalAiStatus"]>[0]): () => void {
+        return this.host.subscribeLocalAiStatus(listener);
+    }
+
+    prepareBuiltinEmbedding(): Promise<void> {
+        return this.host.prepareBuiltinEmbedding();
+    }
+
+    clearBuiltinEmbedding(): Promise<void> {
+        return this.host.clearBuiltinEmbedding();
+    }
+
     getLocalizedKnowledgeScopeDescription(): string {
         return this.host.getLocalizedKnowledgeScopeDescription();
     }

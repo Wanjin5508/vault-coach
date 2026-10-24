@@ -7,6 +7,7 @@ export type EmbeddingErrorCode =
     | "timeout"
     | "cancelled"
     | "unsupported-model"
+    | "not-ready"
     | "malformed-response"
     | "dimension-mismatch"
     | "fingerprint-mismatch"

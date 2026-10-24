@@ -12,6 +12,24 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === "production");
 
+const localAiWasm = await readFile("node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm");
+const localAiWorkerBuild = await esbuild.build({
+	entryPoints: ["src/infrastructure/local-ai/local-ai.worker.ts"],
+	bundle: true,
+	write: false,
+	platform: "browser",
+	format: "iife",
+	target: "es2020",
+	conditions: ["browser"],
+	minify: prod,
+	sourcemap: false,
+	define: {
+		__VAULT_COACH_ORT_WASM_BASE64__: JSON.stringify(localAiWasm.toString("base64")),
+	},
+});
+const localAiWorkerSource = localAiWorkerBuild.outputFiles[0]?.text;
+if (!localAiWorkerSource) throw new Error("Unable to bundle the local AI worker.");
+
 const pdfjsGlobalName = "global" + "This";
 const pdfjsTopLevelAwaitSnippet = `__webpack_exports__ = ${pdfjsGlobalName}.pdfjsLib = await (${pdfjsGlobalName}.pdfjsLibPromise = __webpack_exports__);`;
 const pdfjsTopLevelAwaitReplacement = "var __vaultCoachPdfJsLibPromise = Promise.resolve(__webpack_exports__);";
@@ -82,6 +100,9 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
+	define: {
+		__VAULT_COACH_LOCAL_AI_WORKER_SOURCE__: JSON.stringify(localAiWorkerSource),
+	},
 	plugins: [
 		patchPdfjsForObsidianPluginPlugin,
 	],

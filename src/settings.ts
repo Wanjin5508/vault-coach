@@ -72,6 +72,7 @@ export const DEFAULT_SETTINGS: VaultCoachSettings = createDefaultSettings();
  */
 export class VaultCoachSettingTab extends PluginSettingTab {
     plugin: VaultCoachPluginApi;
+    private unsubscribeLocalAiStatus: (() => void) | null = null;
 
     constructor(app: App, hostPlugin: Plugin, plugin: VaultCoachPluginApi) {
         super(app, hostPlugin);
@@ -90,6 +91,19 @@ export class VaultCoachSettingTab extends PluginSettingTab {
      */
     display(): void {
         this.renderSettings();
+        if (!this.unsubscribeLocalAiStatus) {
+            let initializing = true;
+            const unsubscribe = this.plugin.subscribeLocalAiStatus(() => {
+                if (!initializing) this.refreshDeclarativeSettings();
+            });
+            initializing = false;
+            this.unsubscribeLocalAiStatus = unsubscribe;
+        }
+    }
+
+    hide(): void {
+        this.unsubscribeLocalAiStatus?.();
+        this.unsubscribeLocalAiStatus = null;
     }
 
     /**
@@ -132,6 +146,10 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                 return this.asGroupItem(this.createKnowledgeScopeDefinition());
             case "semanticStatus":
                 return this.asGroupItem(this.createSemanticSearchStatusDefinition());
+            case "builtinEmbeddingRuntime":
+                return this.plugin.settings.embeddingProvider === "builtin"
+                    ? this.asGroupItem(this.createBuiltinEmbeddingRuntimeDefinition())
+                    : null;
             case "cloudApiKey":
                 return this.plugin.settings.modelProvider === "openai-compatible"
                     ? this.asGroupItem(this.createCloudApiKeyDefinition())
@@ -182,7 +200,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
                     ? this.asGroupItem(this.createTextDefinition(itemId, "settings.cloudChatModel.name", "settings.cloudChatModel.desc", DEFAULT_CLOUD_CHAT_MODEL))
                     : null;
             case "embeddingProvider":
-                return this.asGroupItem(this.createDropdownDefinition(itemId, "settings.model.embeddingProvider.name", "settings.model.embeddingProvider.desc", this.createModelProviderOptions()));
+                return this.asGroupItem(this.createDropdownDefinition(itemId, "settings.model.embeddingProvider.name", "settings.model.embeddingProvider.desc", this.createEmbeddingProviderOptions()));
             case "embeddingModel":
                 return this.plugin.settings.embeddingProvider === "ollama"
                     ? this.asGroupItem(this.createTextDefinition(itemId, "settings.localEmbeddingModel.name", "settings.localEmbeddingModel.desc", DEFAULT_EMBEDDING_MODEL))
@@ -588,10 +606,66 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         const status = stats.ready
             ? this.t("settings.semanticStatus.ready", { count: stats.vectorCount })
             : this.t("settings.semanticStatus.notReady");
-        const privacy = this.plugin.settings.embeddingProvider === "ollama"
+        const privacy = this.plugin.settings.embeddingProvider !== "openai-compatible"
             ? this.t("settings.semanticStatus.local")
             : this.t("settings.semanticStatus.remote");
         return { name: this.t("settings.semanticStatus.name"), desc: `${status} ${privacy}` };
+    }
+
+    /** 内置模型只在用户明确点击后下载；状态和缓存操作不写入普通插件设置。 */
+    private createBuiltinEmbeddingRuntimeDefinition(): SettingDefinitionItem {
+        const status = this.plugin.getLocalAiStatus();
+        const phaseKey = `settings.builtinEmbedding.phase.${status.phase}` as TranslationKey;
+        const progress = status.progress !== null && status.phase === "downloading"
+            ? ` ${Math.round(status.progress * 100)}%`
+            : "";
+        const detail = status.message ? ` ${status.message}` : "";
+        return {
+            name: this.t("settings.builtinEmbedding.runtime.name"),
+            desc: `${this.t(phaseKey)}${progress}. ${this.t("settings.builtinEmbedding.runtime.desc")}${detail}`,
+            render: (setting) => {
+                setting.addButton((button) => button
+                    .setButtonText(status.phase === "ready"
+                        ? this.t("settings.builtinEmbedding.reload")
+                        : this.t("settings.builtinEmbedding.prepare"))
+                    .setCta()
+                    .setDisabled(status.phase === "downloading" || status.phase === "loading" || status.phase === "clearing")
+                    .onClick(() => this.prepareBuiltinEmbedding()));
+                if (status.cached || status.phase === "ready") {
+                    setting.addButton((button) => button
+                        .setButtonText(this.t("settings.builtinEmbedding.clear"))
+                        .setDestructive()
+                        .setDisabled(status.phase === "clearing")
+                        .onClick(() => this.clearBuiltinEmbedding()));
+                }
+            },
+        };
+    }
+
+    private async prepareBuiltinEmbedding(): Promise<void> {
+        const operation = this.plugin.prepareBuiltinEmbedding();
+        this.refreshDeclarativeSettings();
+        try {
+            await operation;
+            new Notice(this.t("notice.localAiReady"));
+        } catch (error) {
+            new Notice(this.t("notice.localAiPrepareFailed", { message: getErrorMessage(error) }), 10_000);
+        } finally {
+            this.refreshDeclarativeSettings();
+        }
+    }
+
+    private async clearBuiltinEmbedding(): Promise<void> {
+        const operation = this.plugin.clearBuiltinEmbedding();
+        this.refreshDeclarativeSettings();
+        try {
+            await operation;
+            new Notice(this.t("notice.localAiCleared"));
+        } catch (error) {
+            new Notice(this.t("notice.localAiClearFailed", { message: getErrorMessage(error) }), 10_000);
+        } finally {
+            this.refreshDeclarativeSettings();
+        }
     }
 
     private createCloudApiKeyDefinition(): SettingDefinitionItem {
@@ -615,6 +689,13 @@ export class VaultCoachSettingTab extends PluginSettingTab {
         return {
             ollama: this.t("settings.model.localOllama"),
             "openai-compatible": this.t("settings.model.openAICompatible"),
+        };
+    }
+
+    private createEmbeddingProviderOptions(): Record<string, string> {
+        return {
+            builtin: this.t("settings.model.builtinEmbedding"),
+            ...this.createModelProviderOptions(),
         };
     }
 
@@ -787,7 +868,7 @@ export class VaultCoachSettingTab extends PluginSettingTab {
     }
 
     private async updateEmbeddingProvider(value: unknown): Promise<void> {
-        if (value !== "ollama" && value !== "openai-compatible") return;
+        if (value !== "ollama" && value !== "openai-compatible" && value !== "builtin") return;
         this.plugin.settings.embeddingProvider = value;
         await this.plugin.saveSettings();
         this.plugin.markVectorIndexDirty();

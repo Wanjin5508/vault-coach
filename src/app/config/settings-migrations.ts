@@ -100,7 +100,8 @@ function normalizeSettings(
         normalized.modelProvider = defaults.modelProvider;
         addInvalidValue(warnings, "modelProvider");
     }
-    if (record.embeddingProvider !== undefined && record.embeddingProvider !== "ollama" && record.embeddingProvider !== "openai-compatible") {
+    if (record.embeddingProvider !== undefined && record.embeddingProvider !== "ollama"
+        && record.embeddingProvider !== "openai-compatible" && record.embeddingProvider !== "builtin") {
         normalized.embeddingProvider = defaults.embeddingProvider;
         addInvalidValue(warnings, "embeddingProvider");
     }

@@ -6,15 +6,27 @@
 
 Ask a question, inspect the source, turn the topic into a practice exam, find the concepts that need work, and follow them back through your Learning Map.
 
-**Cited Q&A · Practice exams · Concept review · Learning Map · Mastery tracking · Local or cloud models**
+**Cited Q&A · Practice exams · Built-in local embeddings · Learning Map · Mastery tracking · Local or cloud chat models**
+
+**Configure one chat LLM and start learning.** Vault Coach now includes its own multilingual embedding runtime, so vector retrieval no longer requires a separate embedding service, endpoint, API key, or model name.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.5.0-1E90FF)
+![Version](https://img.shields.io/badge/version-1.5.3-1E90FF)
 ![Knowledge training](https://img.shields.io/badge/Knowledge-training-10b981)
 ![Privacy controls](https://img.shields.io/badge/Privacy-user--controlled-334155)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 
 ![Vault Coach cited Q&A](assets/screenshots/vault-coach-qa.png.png)
+
+## New in 1.5.3: built-in multilingual embeddings
+
+The quickest setup now needs only the chat LLM you want to use for answers and model-assisted exams. For semantic retrieval, choose **Built-in multilingual embedding** once and let Vault Coach prepare the pinned local model. There is no embedding server to install and no embedding API to configure.
+
+- **One less service to configure.** You do not need an Ollama embedding model, an embedding endpoint, or a second API key.
+- **Local by design.** After one explicit download of about 129 MiB, embedding generation runs in an isolated WASM worker on your device.
+- **Offline after preparation.** The verified model cache can be reused without a network connection.
+- **Ready for knowledge retrieval.** The built-in model powers vector and hybrid retrieval used to find source material for cited answers and practice exams.
+- **Advanced choices remain available.** You can still replace it with Ollama or an OpenAI-compatible embedding service when your workflow requires another model.
 
 ## Why Vault Coach exists
 
@@ -32,7 +44,7 @@ Vault Coach turns those separate activities into one evidence-backed learning lo
 - **Evidence before confidence.** Answers link back to headings, excerpts, and PDF pages so you can inspect the source yourself.
 - **Practice, not passive collection.** Exams, saved assessment records, mastery states, and review suggestions help turn stored notes into active learning.
 - **Review before a relationship becomes fact.** Concept and relation candidates retain their evidence; you decide what to confirm, reject, merge, or undo.
-- **Your model, your deployment choice.** Run chat and embeddings through local Ollama, a self-hosted OpenAI-compatible endpoint, or a cloud provider you configure.
+- **A simpler default model setup.** Configure your preferred local or cloud chat LLM; Vault Coach can handle multilingual embeddings locally without another model service.
 - **Explicit data boundaries.** Vault Coach has no hidden telemetry. Local data stays in your vault, and model calls occur only through the providers and features you enable.
 
 ## One learning loop
@@ -47,11 +59,12 @@ The main workflows are designed to lead into one another:
 
 ## Choose where AI runs
 
-Chat and embedding providers are configured separately, so you can choose the deployment that fits each workflow.
+For the shortest path, configure a chat LLM and use Vault Coach's built-in local embedding runtime. Chat and embedding providers remain independent, so advanced users can still mix local, self-hosted, and cloud services.
 
 | Setup | What it means |
 | --- | --- |
 | **Fully local with Ollama** | Run suitable chat and embedding models on your own computer. Model requests go only to the local endpoint you configure. |
+| **Built-in local embedding — recommended for easy setup** | No embedding endpoint, API key, or model name to configure. Download the pinned multilingual model once, then build and query vectors locally in an isolated WASM worker. |
 | **Self-hosted endpoint** | Use an OpenAI-compatible service on your own machine or private infrastructure. |
 | **Cloud LLM or embedding service** | Point Vault Coach at an OpenAI-compatible provider. The provider may receive only the text required for the feature you explicitly run. |
 | **Keyword-only retrieval** | Search locally without building embeddings. Answer generation, when used, still follows your configured chat provider. |
@@ -173,19 +186,20 @@ Under **Knowledge base**:
 
 When the build finishes, ask a question to verify that the sources match the intended notes.
 
-### 3. Configure a model provider
+### 3. Configure your chat LLM
 
-Vault Coach does not require a particular provider. Select the chat and embedding providers that fit your environment:
+Choose the local, self-hosted, or cloud chat LLM that should generate answers and model-assisted exams. For the recommended setup, use the built-in multilingual embedding runtime for retrieval; it requires no separate embedding service configuration.
 
-| Option | When to choose it |
+| Chat LLM option | When to choose it |
 | --- | --- |
-| Local Ollama | You want a fully local model workflow and can run suitable chat and embedding models on your device. |
-| OpenAI-compatible endpoint | You use a cloud provider, a self-hosted gateway, or another compatible service. Configure its URL, models, and API key explicitly. |
-| Keyword-only retrieval | You want basic local search without building embeddings. |
+| Local Ollama | You want answer generation and model-assisted exams to stay on your own computer. |
+| OpenAI-compatible endpoint | You use a cloud provider, a self-hosted gateway, or another compatible chat service. Configure its URL, chat model, and API key explicitly. |
 
 ![Chat and embedding provider settings](assets/screenshots/setting-model.png)
 
 Ollama is an optional privacy-oriented deployment path, not a requirement. If you use it, the typical base URL is `http://127.0.0.1:11434`; do not append `/api/chat`, `/api/embed`, or `/api/embeddings`.
+
+Once the chat LLM is configured, expand **Advanced settings → Embedding and semantic retrieval**, choose the recommended **Built-in multilingual embedding**, then select **Download and load**. This is a one-time model preparation action: there is no endpoint, model ID, or embedding API key to enter. Vault Coach pins the model revision, verifies every required asset with SHA-256, and stores it in the local browser cache. Rebuild the knowledge index, and that single chat LLM configuration is enough for cited retrieval and exam workflows. The model is the ONNX conversion of [multilingual-e5-small](https://huggingface.co/Xenova/multilingual-e5-small); the upstream model is published under the MIT license.
 
 ### 4. Start a study cycle
 
@@ -211,7 +225,7 @@ Tips:
 
 - Start with a narrow question when a vault covers several domains.
 - Use a folder-specific knowledge scope when a project needs isolation.
-- Enable vector retrieval only after configuring an embedding provider and rebuilding the index.
+- Enable vector retrieval after preparing the built-in embedding model, or after configuring an external embedding provider, then rebuild the index.
 
 ### Create, take, and review an exam
 
@@ -274,6 +288,8 @@ Rebuilding never deletes original notes, saved assessment sessions, or exported 
 | **Rebuild concept mastery** | Recalculate the local mastery read model from assessment evidence. |
 | **Reset semantic graph decisions** | Clear manual semantic decisions after a deliberate review. |
 | **Show VaultCoach derived storage usage** | Read-only breakdown of VaultCoach-managed local data. |
+| **Download and load the built-in embedding model** | Explicitly download or warm-load the pinned local embedding model. |
+| **Clear the built-in embedding model cache** | Release the runtime and remove its local model cache without deleting notes or indexes. |
 
 ## Privacy, storage, and network use
 
@@ -289,6 +305,7 @@ Vault Coach has no hidden telemetry. It writes its working data inside the curre
 Network behavior is controlled by your model settings:
 
 - A local Ollama configuration keeps model requests on the local endpoint you configure.
+- The built-in embedding option contacts Hugging Face only after you explicitly prepare it. It downloads fixed model assets; note text is not uploaded. Embedding inference then runs locally in a WASM worker and can use the verified cache offline.
 - An OpenAI-compatible provider may receive the text required for the feature you explicitly run: for example, retrieved context for Q&A, Challenge-mode exam generation or free-response scoring, or Section excerpts for semantic extraction. Simple-mode objective scoring is local.
 - The deterministic structural graph and source-inventory comparison do not call a model or network service.
 

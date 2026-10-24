@@ -26,6 +26,7 @@ import { ConfirmActionModal } from "./presentation/modals/confirm-action-modal";
 import { StorageFootprintModal } from "./presentation/modals/storage-footprint-modal";
 import { requestSemanticGraphCapacityDecision } from "./presentation/modals/semantic-graph-capacity-modal";
 import type { KnowledgeScopeOption, KnowledgeScopeSelection } from "./app/knowledge/knowledge-scope-types";
+import type { LocalAiStatus } from "./domain/local-ai/local-ai-types";
 
 /** Obsidian 组合根：只负责生命周期、UI 注册和轻量宿主适配。 */
 export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
@@ -71,6 +72,7 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         ));
         registerVaultCoachCommands(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
         this.registerSemanticGraphCommands();
+        this.registerLocalAiCommands();
         this.registerLearningDashboardEntry();
         registerVaultCoachRibbon(this, this.legacyApi, (key, replacements) => this.t(key, replacements));
         this.addSettingTab(new VaultCoachSettingTab(this.app, this, this.legacyApi));
@@ -218,6 +220,22 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
         return this.runtime.getVectorIndexStats();
     }
 
+    getLocalAiStatus(): LocalAiStatus {
+        return this.runtime.getLocalAiStatus();
+    }
+
+    subscribeLocalAiStatus(listener: (status: LocalAiStatus) => void): () => void {
+        return this.runtime.subscribeLocalAiStatus(listener);
+    }
+
+    prepareBuiltinEmbedding(): Promise<void> {
+        return this.runtime.prepareBuiltinEmbedding();
+    }
+
+    clearBuiltinEmbedding(): Promise<void> {
+        return this.runtime.clearBuiltinEmbedding();
+    }
+
     getLocalizedKnowledgeScopeDescription(): string {
         return this.runtime.getLocalizedKnowledgeScopeDescription();
     }
@@ -363,6 +381,57 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
                 } catch {
                     new Notice(this.t("notice.conceptMasteryBuildFailed"));
                 }
+            },
+        });
+    }
+
+    /** 注册内置 Embedding 模型的显式下载和缓存维护入口。 */
+    private registerLocalAiCommands(): void {
+        this.addCommand({
+            id: "prepare-builtin-embedding",
+            name: this.t("command.prepareBuiltinEmbedding"),
+            callback: () => {
+                new ConfirmActionModal(this.app, {
+                    title: this.t("localAi.prepareTitle"),
+                    description: this.t("localAi.prepareDescription"),
+                    confirmLabel: this.t("localAi.prepareConfirm"),
+                    cancelLabel: this.t("semanticGovernance.cancel"),
+                    danger: false,
+                    onConfirm: async () => {
+                        try {
+                            await this.prepareBuiltinEmbedding();
+                            new Notice(this.t("notice.localAiReady"));
+                            this.refreshAllViews();
+                        } catch (error) {
+                            const message = error instanceof Error ? error.message : String(error);
+                            new Notice(this.t("notice.localAiPrepareFailed", { message }), 10_000);
+                            throw error;
+                        }
+                    },
+                }).open();
+            },
+        });
+        this.addCommand({
+            id: "clear-builtin-embedding-cache",
+            name: this.t("command.clearBuiltinEmbedding"),
+            callback: () => {
+                new ConfirmActionModal(this.app, {
+                    title: this.t("localAi.clearTitle"),
+                    description: this.t("localAi.clearDescription"),
+                    confirmLabel: this.t("localAi.clearConfirm"),
+                    cancelLabel: this.t("semanticGovernance.cancel"),
+                    onConfirm: async () => {
+                        try {
+                            await this.clearBuiltinEmbedding();
+                            new Notice(this.t("notice.localAiCleared"));
+                            this.refreshAllViews();
+                        } catch (error) {
+                            const message = error instanceof Error ? error.message : String(error);
+                            new Notice(this.t("notice.localAiClearFailed", { message }), 10_000);
+                            throw error;
+                        }
+                    },
+                }).open();
             },
         });
     }

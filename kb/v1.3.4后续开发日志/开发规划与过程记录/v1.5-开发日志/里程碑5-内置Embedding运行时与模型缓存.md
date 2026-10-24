@@ -1,7 +1,7 @@
 ---
 tags: [VaultCoach, v1.5, 里程碑5, LocalAIRuntime, Cache]
-status: planned
-updated: 2026-10-23
+status: implemented-manual-smoke-pending
+updated: 2026-10-24
 depends-on: [里程碑4-内置Embedding技术验证与多语言基准.md]
 ---
 
@@ -11,7 +11,9 @@ depends-on: [里程碑4-内置Embedding技术验证与多语言基准.md]
 
 使用 M4 通过 Gate 的策略建立统一模型资源生命周期，首个接入能力是 Embedding。缓存、下载、状态和释放归 LocalAIRuntime 管理；具体 embedding 输出归 BuiltinEmbeddingProvider。后续 reranker/utility 复用基础设施，不再复制三套下载器。
 
-M5 不翻转新用户默认值。M4 已证明 Worker 可以交付；M5 先完成状态/资源逻辑与 adapter，M6 完成 Worker 生产化和索引接通。M5 任何真实重推理 smoke 也运行在已验证的 Worker 路径，不能先发布主线程推理后再优化。
+M5 不翻转新用户默认值。根据 2026-10-24 的发布目标，本里程碑把原计划在 M6 完成的生产 Worker、WASM 交付和 RAG 索引接通提前实现：用户现在可以选择 `builtin` provider，显式下载模型并直接重建向量索引。推理始终运行在独立 Worker，不经过 UI 主线程。
+
+> 范围变更：用户决定暂不继续 M4 的真实设备复测，优先交付支持内置 Embedding 的版本。因此“代码完成”和“真实 Obsidian 冷/暖缓存验证”必须分开记录；后者仍是发布前人工检查项，不能用 TypeScript 构建或单元测试替代。
 
 ## 2. 依赖和文件
 
@@ -21,16 +23,17 @@ M5 不翻转新用户默认值。M4 已证明 Worker 可以交付；M5 先完成
 
 | 文件 | 状态 | 修改 |
 | --- | --- | --- |
-| `src/domain/local-ai/local-ai-types.ts` | M3 拟建 | 细化 per-role status、prepare request、错误 |
-| `src/app/local-ai/local-ai-runtime.ts` | 拟新增 | 门面、任务状态、prepare/cancel/clear/subscribe |
-| `src/app/local-ai/model-registry.ts` | 拟新增 | 不可变模型策略与能力注册 |
-| `src/infrastructure/local-ai/model-loader.ts` | 拟新增 | 封装第三方加载、事件、dispose |
-| `src/infrastructure/local-ai/model-cache.ts` | 拟新增 | 资产 manifest、hash、partial、namespace |
-| `src/infrastructure/embedding/builtin-embedding-provider.ts` | 拟新增 | 实现 M3 窄端口，返回指纹与诊断 |
-| `src/app/application-container.ts`、`src/app/application-api.ts` | 已有 | 注入唯一 runtime，暴露只读状态与动作 |
-| `src/app/config/{settings-types,settings-schema,settings-migrations,settings-defaults}.ts` | 已有 | 增加 builtin 可选配置，旧值保持 |
-| `src/settings.ts`、`src/presentation/settings/settings-section-model.ts`、`src/i18n.ts` | 已有 | 进阶设置内的模型状态和准备动作 |
-| `tests/app/local-ai/*`、`tests/infrastructure/local-ai/*` | 拟新增 | fake loader/cache、状态与完整性测试 |
+| `src/domain/local-ai/local-ai-types.ts` | 已新增 | runtime 窄接口、状态、请求与结果契约 |
+| `src/app/local-ai/local-ai-runtime.ts` | 已新增 | 单 Worker 门面、状态订阅、prepare/embed/clear/dispose 与请求取消 |
+| `src/app/local-ai/model-registry.ts` | 已新增 | 固定 repository/revision/dtype/prefix/维数、四个资产 SHA-256 |
+| `src/infrastructure/local-ai/local-ai.worker.ts` | 已新增 | Cache API、下载、全资产校验、tokenizer/model 恢复、WASM 推理 |
+| `src/infrastructure/embedding/builtin-embedding-provider.ts` | 已新增 | 实现统一 EmbeddingProvider，输出 fingerprint 与 diagnostics |
+| `esbuild.config.mjs` | 已修改 | 把 Worker 和 ORT WASM 编入 `main.js`，保持社区插件三文件发布格式 |
+| `src/app/application-container.ts`、`src/app/vault-coach-runtime.ts` | 已修改 | 注入唯一 runtime，接入 provider router，暴露准备/清理动作 |
+| `src/app/config/settings-migrations.ts` | 已修改 | 接受 `builtin`，保留已有用户 provider，新安装仍默认 Ollama |
+| `src/settings.ts`、`src/presentation/settings/settings-section-model.ts`、`src/i18n.ts` | 已修改 | 进阶设置内选择 provider、查看状态、显式准备和清缓存 |
+| `src/vault-coach-plugin.ts` | 已修改 | 注册准备和清理模型缓存的稳定命令 ID |
+| `tests/app/local-ai/*`、`tests/infrastructure/embedding/*` | 已新增/修改 | fake Worker 状态、取消、错误、adapter fingerprint 与迁移测试 |
 
 旧计划中的 embedding 专属 builtin-model-cache/loader/runtime-service 不再另外创建。统一 infrastructure/local-ai 是唯一缓存/加载边界，避免 M6.1 又写一份。
 
@@ -94,13 +97,15 @@ Gate：同一 contract suite 对 fake、HTTP、builtin adapter 生效；普通 C
 
 Gate：反复开关设置页不重复下载/加载；UI 偏好保存不改变业务设置；unload 后无存活任务。
 
-### Step 6：交给 M6 做生产 Worker 接入
+### Step 6：生产 Worker 接入（由 M6 提前到 M5）
 
 内部依赖：完整 fake suites 与 Worker smoke。外部依赖：真实设备。
 
-不在 M5 添加另一套正式 worker 协议。冻结 loader/cache/runtime 和未来 M6 client 之间的接口；M6 负责 IPC、调度和真实索引进度。M5 的 product flag 维持关闭，内部实测通过也不能直接称“开箱即用”。
+只保留一套正式 Worker 协议。`LocalAIRuntime` 负责请求 ID、状态和生命周期；Worker 负责 Transformers.js、Cache API、完整性校验和 ONNX Runtime。`BuiltinEmbeddingProvider` 只做领域端口适配，RAG 不依赖 Worker 消息格式。
 
-Gate：M6 能只替换执行桥，继续复用缓存和状态逻辑。
+为了继续沿用 Obsidian 社区插件的 `main.js + manifest.json + styles.css` 三文件发布方式，构建脚本把 Worker 源码与 ORT WASM 二进制嵌入 `main.js`，运行时再创建 Blob Worker。这样不会在插件启动时访问 CDN，也不需要额外 Release 资产；代价是生产 `main.js` 约 21 MiB。模型权重不进入 Release，只有用户明确点击准备后才从固定 Hugging Face revision 下载。
+
+Gate：生产构建只有标准三项 Release 资产；主线程不加载 pipeline；unload 直接终止 Worker；模型结果继续经过 M3 fingerprint 兼容检查。
 
 ## 5. 故障与测试
 
@@ -119,13 +124,13 @@ Gate：M6 能只替换执行桥，继续复用缓存和状态逻辑。
 
 ## 6. 完成与记录
 
-- [ ] 模型 policy 和依赖固定；来源/许可证可追溯。
-- [ ] 下载显式、可取消、可重试，真实字节进度。
-- [ ] 每角色状态与资源身份独立；一个 runtime 管生命周期。
-- [ ] 离线暖加载与缓存损坏验证完成。
-- [ ] query/document/graph fingerprint 一致且受校验。
-- [ ] 旧用户配置保留，默认值未提前翻转。
-- [ ] M6 所需桥接接口、限制和 evidence 已交付。
+- [x] 模型 policy 和依赖固定；来源、revision、许可证与资产 hash 可追溯。
+- [ ] 下载由显式操作触发且可重试；目前显示文件级进度，尚无下载中的 UI 取消按钮与真实字节进度。
+- [x] 当前 Embedding 角色由一个 runtime 管理，插件卸载会立即终止 Worker。
+- [ ] 已实现离线暖加载和全资产损坏校验；仍待真实 Obsidian 冷/暖缓存人工验证。
+- [x] query/document/graph 前缀进入 fingerprint，输出数量、维数和有限值受校验。
+- [x] 旧用户配置保留，新安装仍默认 Ollama，只有用户主动选择才启用 builtin。
+- [x] 生产 Worker、RAG router、设置、命令、构建和发布文档已经接通。
 
 ```text
 实现 commit / PR：
@@ -138,3 +143,81 @@ Cache namespace / manifest schema：
 ```
 
 2026-10-23：规划改为统一 LocalAIRuntime 基础设施，首个能力 Embedding；未执行实现测试。
+
+## 7. 2026-10-24 开发记录：v1.5.3 内置 Embedding 代码快照
+
+### 7.1 本次范围决定
+
+用户要求暂停继续验证 M4，直接实现可发布的 M5。为避免发布一个“设置中能选但索引仍不能用”的半成品，本次同步提前完成原 M6 中与首个 Embedding 必须绑定的部分：生产 Worker、WASM 打包、provider router 和索引路径。没有提前实现内置聊天 LLM、reranker 或 WebGPU；当前后端固定为单线程 WASM。
+
+### 7.2 最终调用链
+
+```text
+设置/命令中的显式准备动作
+  -> VaultCoachRuntime.prepareBuiltinEmbedding()
+  -> LocalAIRuntime.prepare(true)
+  -> Blob Worker
+  -> 固定 revision 下载/Cache API/四项 SHA-256 校验
+  -> XLMRobertaTokenizer + AutoModel + FeatureExtractionPipeline
+
+知识索引或查询
+  -> EmbeddingProviderRouter
+  -> BuiltinEmbeddingProvider
+  -> LocalAIRuntime.embed()
+  -> Worker 中按 query/document/graph 添加 E5 前缀
+  -> mean pooling + L2 normalize
+  -> Float32Array + EmbeddingFingerprint
+```
+
+### 7.3 关键工程决定及原因
+
+1. **旧用户设置不迁移到 builtin。** `builtin` 只是新增合法枚举；默认值继续为 Ollama。升级不会改变已有向量空间或突然下载 129 MiB 模型。
+2. **下载必须由用户明确触发。** 选择 provider 本身不会下载，普通 Ask 也不会静默联网；未准备时返回 `not-ready`，上层可以回退关键词检索。
+3. **执行资源进入 Release，模型权重不进入 Release。** Worker 与 ORT WASM 随 `main.js` 交付，避免运行时获取代码；固定模型权重按用户授权下载并缓存。
+4. **每次加载验证四个资产。** `config.json`、`tokenizer.json`、`tokenizer_config.json` 和 `model_uint8.onnx` 均有固定 SHA-256。损坏资产会被删除并要求重新准备，不能进入 ready。
+5. **向量空间身份进入 fingerprint。** provider、repo、revision、dtype、pooling、normalization 和三类前缀变化都会造成不兼容，防止旧向量被新模型静默复用。
+6. **卸载直接终止 Worker。** 不等待长下载或推理队列先处理 dispose，确保插件卸载不会留下后台任务。
+7. **缓存清理不删除向量索引。** 相同固定模型重新准备后可继续使用同一 fingerprint；清缓存只释放模型资源。模型未准备期间查询会明确失败并回退。
+
+### 7.4 发布版本与产物
+
+- 版本：`1.5.3`
+- Node：`20.20.2`，npm：`10.8.2`
+- `main.js`：21,932,065 bytes；包含 Worker、Transformers.js 执行代码与 ORT WASM，不包含模型权重
+- Release 资产仍为：`main.js`、`manifest.json`、`styles.css`
+- `versions.json` 已增加 `1.5.3 -> 1.11.4`，并依据本地 Git tag 中各版本的 `manifest.json` 补齐历史发布映射
+- `version-bump.mjs` 已修复为每个插件版本都写入映射，而不是错误地按最低 Obsidian 版本去重
+- 第三方依赖与模型许可证记录在 `THIRD_PARTY_NOTICES.md`
+
+### 7.5 自动化验证结果
+
+在 Node 20.20.2 下执行：
+
+```bash
+npm test -- --run
+npm run lint
+npm run build
+```
+
+结果：65 个测试文件、267 个测试全部通过；ESLint 通过；TypeScript 与生产 esbuild 通过。新增测试覆盖旧默认值保留、`builtin` 迁移合法性、设置项按 provider 显示、adapter fingerprint、runtime 状态序列、错误和取消边界。
+
+生产产物校验值：
+
+```text
+main.js      55670717d55f8798bb745637a0b1fd1a748d696247fe8667c389c811847a9834
+manifest.json 061029dd3c9b0765322d7a30a911ee55487637366db47cc94342e1b81a8ea84d
+styles.css   ccfe3f855d11579e3b5c1873806841a4efc52346296b44f65b7050afb45c582b
+```
+
+> 以上 SHA 对应本次工作区生产构建；任何后续源码、文档内嵌字符串或构建工具变化都会使 `main.js` SHA 改变，发版时应以 CI 产物为准。
+
+### 7.6 发布前人工检查（因暂停 M4 复测而保留）
+
+1. 在测试 Vault 安装 `1.5.3` 三项产物，确认插件能加载且设置页可展开。
+2. 选择 **内置多语言 Embedding**，点击 **下载并加载**，观察首次下载和 ready 状态。
+3. 重建知识索引，以中/英/德各一个问题确认向量检索能返回来源。
+4. 完全退出 Obsidian，断网后重新打开，再点击 **检查并加载**，确认从暖缓存恢复。
+5. 执行 **清除内置 Embedding 模型缓存**，确认笔记、向量索引和考试数据没有被删除；查询在重新准备前能安全回退。
+6. 检查开发者控制台没有残留 Worker 错误，并观察长索引期间 UI 是否仍可交互。
+
+当前未声明完成的项目：真实 Obsidian 冷/暖缓存 smoke、下载中取消按钮、按真实字节计算的下载进度、移动端兼容性。它们不应在发布说明中写成已验证能力。

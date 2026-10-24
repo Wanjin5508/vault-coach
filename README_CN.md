@@ -6,15 +6,27 @@
 
 提出问题，检查来源，把当前主题变成练习考试，找到仍需巩固的概念，再沿着学习图谱回到原始笔记。
 
-**引用式问答 · 练习考试 · 概念审核 · 学习图谱 · 掌握度追踪 · 本地或云端模型**
+**引用式问答 · 练习考试 · 内置本地 Embedding · 学习图谱 · 掌握度追踪 · 本地或云端对话模型**
+
+**配置一个对话 LLM，即可开始学习。** Vault Coach 现已内置多语言 Embedding 运行时，向量检索不再要求用户另外部署词嵌入服务、填写接口地址、准备 API Key 或配置模型名称。
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.5.0-1E90FF)
+![Version](https://img.shields.io/badge/version-1.5.3-1E90FF)
 ![Knowledge training](https://img.shields.io/badge/Knowledge-training-10b981)
 ![Privacy controls](https://img.shields.io/badge/Privacy-user--controlled-334155)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 
 ![Vault Coach 引用式问答](assets/screenshots/vault-coach-qa.png.png)
+
+## 1.5.3 新功能：内置多语言 Embedding
+
+现在，最简单的使用方式只需要配置一个用于回答和模型辅助考试的对话 LLM。语义检索方面，只需选择一次 **内置多语言 Embedding**，Vault Coach 就会准备固定版本的本地模型；无需安装独立 Embedding 服务，也无需配置 Embedding API。
+
+- **少配置一个模型服务。** 无需安装 Ollama 的 Embedding 模型，无需填写 Embedding 接口，也无需准备第二套 API Key。
+- **默认在本机推理。** 用户明确执行一次约 129 MiB 的模型下载后，Embedding 会在设备上的独立 WASM Worker 中运行。
+- **准备完成后可离线使用。** 已校验的模型缓存可以在无网络时继续加载。
+- **直接服务于知识检索。** 内置模型支持向量和混合检索，为引用式问答与练习考试找到相关原始材料。
+- **高级方案依然保留。** 有特定模型需求时，仍可改用 Ollama 或 OpenAI 兼容的 Embedding 服务。
 
 ## 为什么需要 Vault Coach？
 
@@ -32,7 +44,7 @@ Vault Coach 把这些分散的活动组织成 Obsidian 内的一条证据学习�
 - **先看证据，再相信回答。** 回答会链接到标题、摘录和 PDF 页码，让你能够亲自核对来源。
 - **让笔记进入练习，而不只是继续积累。** 考试、结构化 Assessment、掌握度和复习建议共同把阅读材料转化为主动学习。
 - **关系成为事实前先由你审核。** 概念与关系候选保留来源证据；确认、拒绝、合并和撤销都由你决定。
-- **模型和部署方式由你选择。** 聊天与 Embedding 可以使用本地 Ollama、自托管 OpenAI 兼容服务，也可以使用你主动配置的云端提供方。
+- **默认模型配置更加简单。** 你只需配置偏好的本地或云端对话 LLM；多语言 Embedding 可以直接由 Vault Coach 在本机完成。
 - **数据边界必须明确。** Vault Coach 没有隐藏遥测；本地数据保存在 Vault 中，模型调用只通过你启用的功能和提供方发生。
 
 ## 一条完整的学习闭环
@@ -47,11 +59,12 @@ Vault Coach 把这些分散的活动组织成 Obsidian 内的一条证据学习�
 
 ## 选择 AI 在哪里运行
 
-聊天模型与 Embedding 提供方可以分别配置，因此每个工作流都可以使用适合自己的部署方式。
+最短的使用路径是配置一个对话 LLM，并使用 Vault Coach 内置的本地 Embedding 运行时。聊天与 Embedding 提供方仍然相互独立，因此高级用户依然可以混合使用本地、自托管和云端服务。
 
 | 部署方式 | 含义 |
 | --- | --- |
 | **完全本地的 Ollama** | 在自己的电脑上运行合适的聊天与 Embedding 模型。模型请求只发送到你配置的本地地址。 |
+| **内置本地 Embedding——推荐的低门槛方案** | 无需配置 Embedding 接口、API Key 或模型名。首次下载固定版本的多语言模型，之后在隔离的 WASM Worker 中本地构建和查询向量。 |
 | **自托管服务** | 使用运行在自己设备或私有基础设施上的 OpenAI 兼容接口。 |
 | **云端 LLM 或 Embedding 服务** | 连接 OpenAI 兼容提供方。该服务可能收到你主动运行当前功能所需要的文本。 |
 | **仅关键词检索** | 不构建 Embedding 也能进行本地检索；需要生成回答时，仍使用你配置的聊天模型。 |
@@ -168,19 +181,20 @@ Vault Coach 把这些分散的活动组织成 Obsidian 内的一条证据学习�
 
 构建完成后，先提出一个问题，确认显示的来源确实来自你预期的笔记。
 
-### 3. 配置模型服务
+### 3. 配置对话 LLM
 
-Vault Coach 不要求使用某一种模型服务。请分别选择适合自己环境的聊天与 Embedding 提供方：
+选择用于生成回答和模型辅助考试的本地、自托管或云端对话 LLM。推荐直接使用内置多语言 Embedding 完成检索，无需再配置一个独立的词嵌入服务。
 
-| 选项 | 适用场景 |
+| 对话 LLM 选项 | 适用场景 |
 | --- | --- |
-| 本地 Ollama | 希望模型工作流完全在本机运行，并且设备可运行合适的聊天/Embedding 模型。 |
-| OpenAI 兼容接口 | 使用云服务、自托管网关或其他兼容服务；需要显式填写地址、模型与 API Key。 |
-| 仅关键词检索 | 不构建 Embedding，但仍希望获得基础本地搜索能力。 |
+| 本地 Ollama | 希望回答生成和模型辅助考试都在自己的电脑上运行。 |
+| OpenAI 兼容接口 | 使用云服务、自托管网关或其他兼容对话服务；需要显式填写地址、对话模型与 API Key。 |
 
 ![聊天与 Embedding 提供方设置](assets/screenshots/setting-model.png)
 
 Ollama 是一条可选的隐私部署路径，并不是使用插件的前提。如果使用 Ollama，常见基础地址是 `http://127.0.0.1:11434`；请不要在地址末尾添加 `/api/chat`、`/api/embed` 或 `/api/embeddings`。
+
+配置好对话 LLM 后，展开 **进阶设置 → Embedding 与语义检索**，选择推荐的 **内置多语言 Embedding**，再点击 **下载并加载**。这是一次性的模型准备操作，不需要填写接口地址、模型 ID 或 Embedding API Key。Vault Coach 会固定模型 revision、使用 SHA-256 校验每个必需资产，并保存到本机浏览器缓存。随后重建知识索引，只需这一项对话 LLM 配置，插件就能完成带引用的知识检索和考试流程。该模型是 [multilingual-e5-small](https://huggingface.co/Xenova/multilingual-e5-small) 的 ONNX 转换版本；上游模型采用 MIT 许可证。
 
 ### 4. 开始一次学习闭环
 
@@ -206,7 +220,7 @@ Ollama 是一条可选的隐私部署路径，并不是使用插件的前提。�
 
 - 当 Vault 包含多个领域时，先使用范围更窄的问题。
 - 需要隔离项目时，将知识库范围设为特定目录。
-- 启用向量检索前，请先配置 Embedding 服务并重建索引。
+- 启用向量检索前，请先准备内置 Embedding 模型，或配置外部 Embedding 提供方，然后重建索引。
 
 ### 创建、完成并复盘考试
 
@@ -269,6 +283,8 @@ Lite 会限制语义计算规模：不超过 300 个语义窗口时默认可在�
 | **重建概念掌握度** | 根据考试证据重新计算本地掌握度读模型。 |
 | **重置语义图谱人工决策** | 在明确审核后清除人工语义决策。 |
 | **查看 VaultCoach 派生数据存储用量** | 只读查看 VaultCoach 管理的本地数据分类占用。 |
+| **下载并加载内置 Embedding 模型** | 显式下载固定版本的本地 Embedding 模型，或从暖缓存加载。 |
+| **清除内置 Embedding 模型缓存** | 释放运行时并删除本地模型缓存，不删除笔记或索引。 |
 
 ## 隐私、存储与网络使用
 
@@ -284,6 +300,7 @@ Vault Coach 没有隐藏遥测。它将工作数据保存在当前 Vault 的 `.v
 网络行为完全由模型设置控制：
 
 - 使用本地 Ollama 时，模型请求只会发往你配置的本地地址。
+- 内置 Embedding 只会在用户明确准备后连接 Hugging Face，并仅下载固定模型资产，不上传笔记正文。此后的 Embedding 推理在本机 WASM Worker 中进行，也可以从已校验缓存离线加载。
 - 使用 OpenAI 兼容提供方时，该服务可能收到你主动运行功能所必需的文本，例如问答的检索上下文、挑战模式出题或自由文本评分所需材料、或语义抽取的 Section 摘录。简单模式的客观题评分在本地完成。
 - 确定性结构图和来源清单对比不会调用模型，也不会访问网络。
 

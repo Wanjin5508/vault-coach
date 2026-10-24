@@ -23,6 +23,7 @@ import {
     type SourceInventoryStatus,
 } from "../domain/index-lifecycle/source-inventory";
 import { isVaultCoachHiddenPath, normalizeVaultPath } from "../domain/documents/vault-path";
+import type { LocalAiStatus } from "../domain/local-ai/local-ai-types";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
@@ -167,6 +168,24 @@ export class VaultCoachRuntime {
         return this.services.ragEngine.getVectorIndexStats();
     }
 
+    getLocalAiStatus(): LocalAiStatus {
+        return this.services.localAIRuntime.getStatus();
+    }
+
+    subscribeLocalAiStatus(listener: (status: LocalAiStatus) => void): () => void {
+        return this.services.localAIRuntime.subscribe(listener);
+    }
+
+    async prepareBuiltinEmbedding(): Promise<void> {
+        await this.services.localAIRuntime.prepare(true);
+        this.host.onStateChanged();
+    }
+
+    async clearBuiltinEmbedding(): Promise<void> {
+        await this.services.localAIRuntime.clear();
+        this.host.onStateChanged();
+    }
+
     getSourceInventoryStatus(): SourceInventoryStatus {
         return this.sourceInventoryStatus;
     }
@@ -293,6 +312,7 @@ export class VaultCoachRuntime {
     }
 
     getActiveEmbeddingModelName(): string {
+        if (this.settings.embeddingProvider === "builtin") return "multilingual-e5-small (built-in, uint8)";
         return this.settings.embeddingProvider === "openai-compatible"
             ? this.settings.cloudEmbeddingModel.trim()
             : this.settings.embeddingModel.trim();

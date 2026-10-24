@@ -32,6 +32,14 @@ function createApi() {
         getSettingsMigrationWarnings: () => [],
         hasCloudApiKeySecret: () => true,
         getVectorIndexStats: () => ({ ready: false, vectorCount: 0, dimension: null, lastBuiltAt: null }),
+        getLocalAiStatus: () => ({
+            role: "embedding" as const,
+            phase: "not-installed" as const,
+            progress: null,
+            message: null,
+            cached: false,
+            backend: "wasm" as const,
+        }),
         getKnowledgeScopeSelection: () => api.settings.knowledgeScopeMode === "wholeVault"
             ? { kind: "whole-vault" as const }
             : { kind: "folder" as const, path: api.settings.knowledgeFolder },
@@ -148,6 +156,18 @@ describe("VaultCoachSettingTab declarative settings", () => {
         expect(markKnowledgeBaseDirty).toHaveBeenCalledOnce();
         expect(markVectorIndexDirty).toHaveBeenCalledOnce();
         expect(saveSettings).toHaveBeenCalledTimes(2);
+    });
+
+    it("shows built-in runtime controls only for the built-in embedding provider", () => {
+        const { api, expandAdvanced } = createApi();
+        const tab = new VaultCoachSettingTab(new App(), {} as never, api);
+        expandAdvanced();
+        expect(getFlatDefinitions(tab).some((definition) => "name" in definition
+            && definition.name === translate("settings.builtinEmbedding.runtime.name"))).toBe(false);
+
+        api.settings.embeddingProvider = "builtin";
+        expect(getFlatDefinitions(tab).some((definition) => "name" in definition
+            && definition.name === translate("settings.builtinEmbedding.runtime.name"))).toBe(true);
     });
 
     it("keeps Learning Map automatic relations display-only and clamps their threshold", async () => {

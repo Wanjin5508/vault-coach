@@ -1,5 +1,5 @@
 /** Vault Coach 当前支持的 embedding 实现标识。磁盘设置值必须保持稳定。 */
-export type EmbeddingProviderId = "ollama" | "openai-compatible";
+export type EmbeddingProviderId = "ollama" | "openai-compatible" | "builtin";
 
 /** 同一模型可以针对文档、查询和图谱使用不同的输入前缀。 */
 export type EmbeddingPurpose = "document" | "query" | "graph";
@@ -42,7 +42,7 @@ export interface EmbeddingRequest {
 
 export interface EmbeddingDiagnostics {
     providerId: EmbeddingProviderId;
-    transport: "ollama-modern" | "ollama-legacy" | "openai-compatible";
+    transport: "ollama-modern" | "ollama-legacy" | "openai-compatible" | "builtin-worker-wasm";
     latencyMs: number;
     attempts: number;
     cpuFallbackUsed: boolean;

@@ -5,6 +5,8 @@ import { OllamaEmbeddingProvider } from "../../../src/infrastructure/embedding/o
 import { OpenAiCompatibleEmbeddingProvider } from "../../../src/infrastructure/embedding/openai-compatible-embedding-provider";
 import { EmbeddingProviderRouter } from "../../../src/app/embedding/embedding-provider-router";
 import type { VaultCoachSettings } from "../../../src/app/config/settings-types";
+import { BuiltinEmbeddingProvider } from "../../../src/infrastructure/embedding/builtin-embedding-provider";
+import type { LocalAIRuntimePort, LocalAiEmbeddingRequest } from "../../../src/domain/local-ai/local-ai-types";
 
 class FakeTransport implements EmbeddingHttpTransport {
     readonly requests: EmbeddingHttpRequest[] = [];
@@ -19,6 +21,38 @@ class FakeTransport implements EmbeddingHttpTransport {
 }
 
 describe("embedding provider adapters", () => {
+    it("adapts the built-in runtime to the same fingerprinted embedding contract", async () => {
+        const requests: LocalAiEmbeddingRequest[] = [];
+        const runtime: LocalAIRuntimePort = {
+            getStatus: () => ({ role: "embedding", phase: "ready", progress: 1, message: null, cached: true, backend: "wasm" }),
+            subscribe: () => () => undefined,
+            prepare: async () => undefined,
+            embed: async (request) => {
+                requests.push(request);
+                return { vectors: [[1, 0, 0], [0, 1, 0]], latencyMs: 12 };
+            },
+            clear: async () => undefined,
+            dispose: async () => undefined,
+        };
+        const provider = new BuiltinEmbeddingProvider(runtime);
+
+        const batch = await provider.embed({ texts: ["eins", "知识"], purpose: "query" });
+
+        expect(requests).toEqual([{ texts: ["eins", "知识"], purpose: "query" }]);
+        expect(batch.fingerprint).toMatchObject({
+            providerId: "builtin",
+            model: "Xenova/multilingual-e5-small",
+            dimension: 3,
+            modelDtype: "uint8",
+            preprocessing: { query: "query: ", document: "passage: ", graph: "passage: " },
+        });
+        expect(batch.diagnostics).toMatchObject({
+            providerId: "builtin",
+            transport: "builtin-worker-wasm",
+            revisionVerified: true,
+        });
+    });
+
     it("selects the active provider at call time without caching an old settings snapshot", async () => {
         let settings: VaultCoachSettings = createDefaultSettings();
         const ollama = new OllamaEmbeddingProvider(() => settings,

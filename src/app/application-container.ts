@@ -51,6 +51,8 @@ import { OpenAiCompatibleEmbeddingProvider } from "../infrastructure/embedding/o
 import { EmbeddingProviderRouter } from "./embedding/embedding-provider-router";
 import { LegacyRerankAdapter } from "../infrastructure/rerank/legacy-rerank-adapter";
 import { LegacyChatUtilityAdapter } from "../infrastructure/utility/legacy-chat-utility-adapter";
+import { LocalAIRuntime } from "./local-ai/local-ai-runtime";
+import { BuiltinEmbeddingProvider } from "../infrastructure/embedding/builtin-embedding-provider";
 
 /** 将应用服务接入 Obsidian 插件生命周期所需的最小宿主回调。 */
 export interface ApplicationContainerDependencies {
@@ -98,6 +100,7 @@ export interface ApplicationContainerServices {
     recommendationService: RecommendationService;
     knowledgeEngineClient: KnowledgeEngineClient;
     adaptiveExamPlanner: AdaptiveExamPlanner;
+    localAIRuntime: LocalAIRuntime;
 }
 
 /**
@@ -127,6 +130,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         () => dependencies.getCloudApiKey(),
     );
     const embeddingTransport = new ObsidianEmbeddingHttpTransport();
+    const localAIRuntime = new LocalAIRuntime();
     const embeddingProvider = new EmbeddingProviderRouter(
         () => dependencies.getSettings(),
         [
@@ -136,6 +140,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
                 () => dependencies.getCloudApiKey(),
                 embeddingTransport,
             ),
+            new BuiltinEmbeddingProvider(localAIRuntime),
         ],
     );
     let application: VaultCoachApplication | null = null;
@@ -309,10 +314,12 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             recommendationService,
             knowledgeEngineClient,
             adaptiveExamPlanner,
+            localAIRuntime,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();
             indexCoordinator.dispose();
+            await localAIRuntime.dispose();
         },
     };
 }
