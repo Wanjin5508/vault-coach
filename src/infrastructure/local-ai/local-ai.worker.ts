@@ -120,12 +120,17 @@ function configureRuntime(): void {
     env.useFSCache = false;
     env.useBrowserCache = true;
     env.useCustomCache = false;
+    // WASM 已随插件嵌入。关闭 Transformers.js 的 CDN 预加载，避免下载另一份运行时并覆盖固定版本。
+    env.useWasmCache = false;
     env.cacheKey = cacheName;
     env.logLevel = LogLevel.WARNING;
     const wasmBackend = env.backends.onnx.wasm;
     if (!wasmBackend) throw new Error("ONNX Runtime WebAssembly backend is unavailable.");
     wasmBackend.numThreads = 1;
     wasmBackend.proxy = false;
+    // Transformers.js 会预填 CDN wasmPaths；必须清除它，ONNX 才会使用 bundle 内置工厂。
+    // 否则 Electron 环境中的外部工厂会误走 Node 分支并动态导入 worker_threads。
+    wasmBackend.wasmPaths = undefined;
     wasmBackend.wasmBinary = decodeBase64(__VAULT_COACH_ORT_WASM_BASE64__);
 }
 

@@ -21,9 +21,17 @@ const localAiWorkerBuild = await esbuild.build({
 	format: "iife",
 	target: "es2020",
 	conditions: ["browser"],
+	// M5 只启用 WASM CPU 推理。Transformers.js 默认引用 WebGPU 入口，其 Asyncify 工厂与
+	// 当前固定的标准 WASM 二进制不兼容；在 Worker 边界改用官方 WASM 专用入口。
+	alias: {
+		"onnxruntime-web/webgpu": "onnxruntime-web/wasm",
+	},
 	minify: prod,
 	sourcemap: false,
 	define: {
+		// Obsidian 桌面端的 Worker 可能暴露 Electron 的 Node process。Transformers.js 会据此误选
+		// Node 后端，但当前 Worker 构建只包含浏览器版 ONNX Runtime，因此必须固定为 Web 环境。
+		process: "undefined",
 		__VAULT_COACH_ORT_WASM_BASE64__: JSON.stringify(localAiWasm.toString("base64")),
 	},
 });
