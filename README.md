@@ -11,19 +11,20 @@ Ask a question, inspect the source, turn the topic into a practice exam, find th
 **Configure one chat LLM and start learning.** Vault Coach now includes its own multilingual embedding runtime, so vector retrieval no longer requires a separate embedding service, endpoint, API key, or model name.
 
 ![Obsidian](https://img.shields.io/badge/Obsidian-Plugin-7C3AED?logo=obsidian&logoColor=white)
-![Version](https://img.shields.io/badge/version-1.5.3-1E90FF)
+![Version](https://img.shields.io/badge/version-1.5.4-1E90FF)
 ![Knowledge training](https://img.shields.io/badge/Knowledge-training-10b981)
 ![Privacy controls](https://img.shields.io/badge/Privacy-user--controlled-334155)
 [![License](https://img.shields.io/badge/License-MIT-84cc16)](./LICENSE)
 
 ![Vault Coach cited Q&A](assets/screenshots/vault-coach-qa.png.png)
 
-## New in 1.5.3: built-in multilingual embeddings
+## New in 1.5.4: built-in multilingual embeddings with a smaller plugin download
 
 The quickest setup now needs only the chat LLM you want to use for answers and model-assisted exams. For semantic retrieval, choose **Built-in multilingual embedding** once and let Vault Coach prepare the pinned local model. There is no embedding server to install and no embedding API to configure.
 
 - **One less service to configure.** You do not need an Ollama embedding model, an embedding endpoint, or a second API key.
-- **Local by design.** After one explicit download of about 129 MiB, embedding generation runs in an isolated WASM worker on your device.
+- **Local by design.** After one explicit download of about 143 MiB for the pinned runtime and model, embedding generation runs in an isolated WASM worker on your device.
+- **Small release, offline runtime.** The ONNX runtime is no longer embedded in `main.js`; Vault Coach verifies it with SHA-256, caches it locally, and reuses it offline.
 - **Offline after preparation.** The verified model cache can be reused without a network connection.
 - **Ready for knowledge retrieval.** The built-in model powers vector and hybrid retrieval used to find source material for cited answers and practice exams.
 - **Advanced choices remain available.** You can still replace it with Ollama or an OpenAI-compatible embedding service when your workflow requires another model.
@@ -199,7 +200,7 @@ Choose the local, self-hosted, or cloud chat LLM that should generate answers an
 
 Ollama is an optional privacy-oriented deployment path, not a requirement. If you use it, the typical base URL is `http://127.0.0.1:11434`; do not append `/api/chat`, `/api/embed`, or `/api/embeddings`.
 
-Once the chat LLM is configured, expand **Advanced settings → Embedding and semantic retrieval**, choose the recommended **Built-in multilingual embedding**, then select **Download and load**. This is a one-time model preparation action: there is no endpoint, model ID, or embedding API key to enter. Vault Coach pins the model revision, verifies every required asset with SHA-256, and stores it in the local browser cache. Rebuild the knowledge index, and that single chat LLM configuration is enough for cited retrieval and exam workflows. The model is the ONNX conversion of [multilingual-e5-small](https://huggingface.co/Xenova/multilingual-e5-small); the upstream model is published under the MIT license.
+Once the chat LLM is configured, expand **Advanced settings → Embedding and semantic retrieval**, choose the recommended **Built-in multilingual embedding**, then select **Download and load**. This is a one-time runtime and model preparation action: there is no endpoint, model ID, or embedding API key to enter. Vault Coach pins the ONNX runtime version and model revision, verifies every required asset with SHA-256, and stores them in local browser caches. Rebuild the knowledge index, and that single chat LLM configuration is enough for cited retrieval and exam workflows. The model is the ONNX conversion of [multilingual-e5-small](https://huggingface.co/Xenova/multilingual-e5-small); the upstream model is published under the MIT license.
 
 ### 4. Start a study cycle
 
@@ -288,8 +289,8 @@ Rebuilding never deletes original notes, saved assessment sessions, or exported 
 | **Rebuild concept mastery** | Recalculate the local mastery read model from assessment evidence. |
 | **Reset semantic graph decisions** | Clear manual semantic decisions after a deliberate review. |
 | **Show VaultCoach derived storage usage** | Read-only breakdown of VaultCoach-managed local data. |
-| **Download and load the built-in embedding model** | Explicitly download or warm-load the pinned local embedding model. |
-| **Clear the built-in embedding model cache** | Release the runtime and remove its local model cache without deleting notes or indexes. |
+| **Download and load the built-in embedding model** | Explicitly download or warm-load the pinned runtime and local embedding model. |
+| **Clear the built-in embedding model cache** | Release the runtime and remove its runtime/model caches without deleting notes or indexes. |
 
 ## Privacy, storage, and network use
 
@@ -305,7 +306,7 @@ Vault Coach has no hidden telemetry. It writes its working data inside the curre
 Network behavior is controlled by your model settings:
 
 - A local Ollama configuration keeps model requests on the local endpoint you configure.
-- The built-in embedding option contacts Hugging Face only after you explicitly prepare it. It downloads fixed model assets; note text is not uploaded. Embedding inference then runs locally in a WASM worker and can use the verified cache offline.
+- The built-in embedding option contacts the version-pinned npm CDN for ONNX Runtime and Hugging Face for fixed model assets only after you explicitly prepare it. Every asset is SHA-256 verified; note text is not uploaded. Embedding inference then runs locally in a WASM worker and can use the verified caches offline.
 - An OpenAI-compatible provider may receive the text required for the feature you explicitly run: for example, retrieved context for Q&A, Challenge-mode exam generation or free-response scoring, or Section excerpts for semantic extraction. Simple-mode objective scoring is local.
 - The deterministic structural graph and source-inventory comparison do not call a model or network service.
 

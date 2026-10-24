@@ -53,6 +53,12 @@ import { LegacyRerankAdapter } from "../infrastructure/rerank/legacy-rerank-adap
 import { LegacyChatUtilityAdapter } from "../infrastructure/utility/legacy-chat-utility-adapter";
 import { LocalAIRuntime } from "./local-ai/local-ai-runtime";
 import { BuiltinEmbeddingProvider } from "../infrastructure/embedding/builtin-embedding-provider";
+import {
+    CacheStorageRuntimeBinaryCache,
+    VerifiedRuntimeAssetStore,
+} from "../infrastructure/local-ai/cache-storage-runtime-asset-store";
+import { ObsidianRuntimeAssetDownloader } from "../infrastructure/local-ai/obsidian-runtime-asset-downloader";
+import { BUILTIN_ORT_RUNTIME_POLICY } from "./local-ai/runtime-registry";
 
 /** 将应用服务接入 Obsidian 插件生命周期所需的最小宿主回调。 */
 export interface ApplicationContainerDependencies {
@@ -130,7 +136,12 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         () => dependencies.getCloudApiKey(),
     );
     const embeddingTransport = new ObsidianEmbeddingHttpTransport();
-    const localAIRuntime = new LocalAIRuntime();
+    const runtimeAssetStore = new VerifiedRuntimeAssetStore(
+        BUILTIN_ORT_RUNTIME_POLICY,
+        new CacheStorageRuntimeBinaryCache(BUILTIN_ORT_RUNTIME_POLICY.cacheName),
+        new ObsidianRuntimeAssetDownloader(),
+    );
+    const localAIRuntime = new LocalAIRuntime(runtimeAssetStore);
     const embeddingProvider = new EmbeddingProviderRouter(
         () => dependencies.getSettings(),
         [

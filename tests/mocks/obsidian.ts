@@ -49,6 +49,15 @@ export class TFile {
     };
 }
 
+export async function requestUrl(_request: unknown): Promise<{
+    status: number;
+    text: string;
+    arrayBuffer: ArrayBuffer;
+    headers: Record<string, string>;
+}> {
+    throw new Error("requestUrl mock was called without a test override");
+}
+
 export function normalizePath(path: string): string {
     return path
         .trim()

@@ -1,7 +1,7 @@
 ---
 tags: [VaultCoach, 教程, 内置LLM, ChatProvider, TransformersJS, 原型]
 status: tutorial
-updated: 2026-10-18
+updated: 2026-10-25
 previous: 03-模型路径-下载与缓存设计.md
 next: 05-Worker调试测试与CICD门禁.md
 ---
@@ -20,6 +20,9 @@ next: 05-Worker调试测试与CICD门禁.md
 
 ## 2. 当前接入点
 
+> [!info] 1.5.4 实现边界
+> Built-in Embedding 已经通过 `EmbeddingProvider -> BuiltinEmbeddingProvider -> LocalAIRuntimePort` 进入生产代码。本章的 Built-in Chat、WebGPU 回退、流式 token 和 KV cache 仍是后续原型，不应从 Embedding 已发布推导为聊天模型已实现。
+
 当前项目已经有：
 
 ```ts
@@ -32,7 +35,7 @@ export interface ChatProvider {
 }
 ```
 
-`LocalModelClient implements ChatProvider`，但它同时包含聊天、embedding 和 rerank 的 HTTP 实现。部分 `rag-engine.ts` 与考试模块仍直接依赖 `LocalModelClient`。这意味着端口已经出现，具体类型的解耦还没有完全结束。
+`LocalModelClient implements ChatProvider`，但它仍承担用户配置的 Ollama/OpenAI-compatible 聊天调用。Embedding 已有独立 provider router，并可选 Built-in、Ollama 或 OpenAI-compatible；考试模块中仍存在对 `LocalModelClient` 的具体依赖。这意味着 Embedding 解耦已完成，Chat/考试的端口收窄仍需继续。
 
 在 Built-in Chat 进入正式 router 前，应先完成：
 
@@ -43,6 +46,12 @@ RAG / Exam / Memory
 ```
 
 不要让 `BuiltinTransformersChatProvider` 去继承 `LocalModelClient`。两者的资源、错误、取消和生命周期完全不同。
+
+Built-in Chat 应复用已验证的基础设施思路，但不应直接把 Embedding runtime 当作 Chat runtime：
+
+| 可复用 | 需新设计 |
+| --- | --- |
+| policy 生成、固定 revision/hash、Cache Storage、Worker client、prepare 去重、release size Gate | text generation pipeline、chat template、WebGPU/WASM 设备策略、流式协议、软/硬取消、KV cache、上下文预算 |
 
 ## 3. 原型的分阶段目标
 

@@ -6,8 +6,7 @@ import {
     XLMRobertaTokenizer,
 } from "@huggingface/transformers";
 import { BUILTIN_EMBEDDING_POLICY } from "../../app/local-ai/model-registry";
-
-declare const __VAULT_COACH_ORT_WASM_BASE64__: string;
+import { BUILTIN_ORT_RUNTIME_POLICY } from "../../app/local-ai/runtime-registry";
 
 const policy = BUILTIN_EMBEDDING_POLICY;
 const requiredFiles = Object.values(policy.files);
@@ -25,7 +24,7 @@ self.onmessage = (event: MessageEvent<unknown>) => {
 async function handleMessage(message: { id: string; type: string; payload?: Record<string, unknown> }): Promise<void> {
     try {
         if (message.type === "prepare") {
-            await prepare(Boolean(message.payload?.allowDownload));
+            await prepare(Boolean(message.payload?.allowDownload), parseRuntimeAssets(message.payload?.runtime));
             respond(message.id, { ready: true });
             return;
         }
@@ -66,9 +65,9 @@ async function handleMessage(message: { id: string; type: string; payload?: Reco
     }
 }
 
-async function prepare(allowDownload: boolean): Promise<void> {
+async function prepare(allowDownload: boolean, runtime: WorkerRuntimeAssets): Promise<void> {
     if (extractor) return;
-    configureRuntime();
+    configureRuntime(runtime);
     const cache = await caches.open(cacheName);
     for (let index = 0; index < requiredFiles.length; index += 1) {
         const file = requiredFiles[index]!;
@@ -112,7 +111,7 @@ async function prepare(allowDownload: boolean): Promise<void> {
     extractor = new FeatureExtractionPipeline({ task: "feature-extraction", model, tokenizer });
 }
 
-function configureRuntime(): void {
+function configureRuntime(runtime: WorkerRuntimeAssets): void {
     // Transformers.js 把 Cache API 命中也归入 local_files_only 路径；关闭此项会在读缓存前直接报配置冲突。
     env.allowLocalModels = true;
     env.allowRemoteModels = false;
@@ -120,7 +119,8 @@ function configureRuntime(): void {
     env.useFSCache = false;
     env.useBrowserCache = true;
     env.useCustomCache = false;
-    // WASM 已随插件嵌入。关闭 Transformers.js 的 CDN 预加载，避免下载另一份运行时并覆盖固定版本。
+    // Runtime 由主线程按当前插件固定的版本和 SHA-256 下载、验证并从本机缓存恢复。
+    // 关闭 Transformers.js 自带下载，确保只有受控的 wasmBinary 能进入执行路径。
     env.useWasmCache = false;
     env.cacheKey = cacheName;
     env.logLevel = LogLevel.WARNING;
@@ -128,10 +128,10 @@ function configureRuntime(): void {
     if (!wasmBackend) throw new Error("ONNX Runtime WebAssembly backend is unavailable.");
     wasmBackend.numThreads = 1;
     wasmBackend.proxy = false;
-    // Transformers.js 会预填 CDN wasmPaths；必须清除它，ONNX 才会使用 bundle 内置工厂。
-    // 否则 Electron 环境中的外部工厂会误走 Node 分支并动态导入 worker_threads。
+    // 单线程 + wasmBinary 会复用 Worker bundle 内的固定 JS factory，不加载远程 .mjs。
+    // 清除默认 CDN 路径还能避免 Electron 环境再次误走 worker_threads 分支。
     wasmBackend.wasmPaths = undefined;
-    wasmBackend.wasmBinary = decodeBase64(__VAULT_COACH_ORT_WASM_BASE64__);
+    wasmBackend.wasmBinary = runtime.wasmBinary;
 }
 
 function assetUrl(file: string): string {
@@ -147,13 +147,6 @@ async function readCachedJson(cache: Cache, file: string): Promise<Record<string
 async function sha256(bytes: Uint8Array): Promise<string> {
     const digest = await crypto.subtle.digest("SHA-256", bytes);
     return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("");
-}
-
-function decodeBase64(value: string): Uint8Array {
-    const binary = atob(value);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    return bytes;
 }
 
 function validateVectors(vectors: number[][], expectedCount: number): void {
@@ -187,4 +180,22 @@ function parseRequest(value: unknown): { id: string; type: string; payload?: Rec
         type: candidate.type,
         payload: candidate.payload as Record<string, unknown> | undefined,
     };
+}
+
+interface WorkerRuntimeAssets {
+    policyId: string;
+    wasmBinary: ArrayBuffer;
+}
+
+function parseRuntimeAssets(value: unknown): WorkerRuntimeAssets {
+    if (typeof value !== "object" || value === null) throw new Error("Built-in embedding runtime payload is missing.");
+    const candidate = value as { policyId?: unknown; wasmBinary?: unknown };
+    if (candidate.policyId !== BUILTIN_ORT_RUNTIME_POLICY.id) {
+        throw new Error("Built-in embedding runtime policy does not match this plugin build.");
+    }
+    if (!(candidate.wasmBinary instanceof ArrayBuffer)
+        || candidate.wasmBinary.byteLength !== BUILTIN_ORT_RUNTIME_POLICY.artifact.bytes) {
+        throw new Error("Built-in embedding runtime binary is invalid.");
+    }
+    return { policyId: candidate.policyId, wasmBinary: candidate.wasmBinary };
 }

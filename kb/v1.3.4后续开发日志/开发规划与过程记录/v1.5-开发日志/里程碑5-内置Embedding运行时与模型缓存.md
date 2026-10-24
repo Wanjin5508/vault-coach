@@ -7,6 +7,9 @@ depends-on: [里程碑4-内置Embedding技术验证与多语言基准.md]
 
 # 里程碑 5：LocalAIRuntime 基础设施与首个内置 Embedding
 
+> [!warning] 1.5.3 发布架构需要 Hotfix
+> 本文记录的 Provider、fingerprint、Worker 隔离和模型缓存继续有效；Step 6 把 ORT WASM 以 Base64 编入 `main.js` 的交付方式已被 [[里程碑4.1-hotfix-Embedding运行时按需交付与发布瘦身]]替代。阅读和修改运行时交付代码时，应先执行 4.1-hotfix 的 Gate。
+
 ## 1. 目标
 
 使用 M4 通过 Gate 的策略建立统一模型资源生命周期，首个接入能力是 Embedding。缓存、下载、状态和释放归 LocalAIRuntime 管理；具体 embedding 输出归 BuiltinEmbeddingProvider。后续 reranker/utility 复用基础设施，不再复制三套下载器。

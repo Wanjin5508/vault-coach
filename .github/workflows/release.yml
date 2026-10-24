@@ -9,6 +9,8 @@ jobs:
   build:
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     runs-on: ubuntu-latest
 
@@ -23,8 +25,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
 
       - name: Create Release
         env:
@@ -32,5 +48,5 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" \
             --title "${{ github.ref_name }}" \
-            --notes "" \
+            --generate-notes \
             main.js manifest.json styles.css
