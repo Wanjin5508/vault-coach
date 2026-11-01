@@ -1,13 +1,13 @@
 ---
 tags: [VaultCoach, v1.5, SetupWizard, 开发规划]
 status: planned
-updated: 2026-10-23
+updated: 2026-11-01
 ---
 # 里程碑 7：首次引导与首个成功动作
 
 ## 1. 为什么在每个增量都执行
 
-M7 接受 M6、M6.1、M6.2 的不同交付状态。增量 A 只展示已验证的本地 Embedding；后续逐步增加重排与辅助任务。不能为了界面整齐显示尚未通过 Gate 的模型能力，也不要求用户先下载所有模型。
+M7 接受 M6、M6.1、M6.2、M6.3 的不同交付状态。增量 A 只展示已验证的本地 Embedding；后续逐步增加重排、辅助任务与 GraphRAG。不能为了界面整齐显示尚未通过 Gate 的模型能力，也不要求用户先下载所有模型或等待图谱构建完成。
 
 首个成功动作是：选范围 → 授权准备本地搜索 → 索引完成 → 找到可核对的来源；用户配置主 LLM 后再完成带引用的回答。本地搜索成功不依赖主聊天服务已配置。
 
@@ -17,7 +17,7 @@ M7 接受 M6、M6.1、M6.2 的不同交付状态。增量 A 只展示已验证�
 
 | 类型/模块 | 内容 |
 | --- | --- |
-| 内部能力 | M3 配置与索引身份；M5/M6 prepare/status/cancel 及索引进度；M6.1/M6.2 按已交付情况可选 |
+| 内部能力 | M3 配置与索引身份；M5/M6 prepare/status/cancel、CoreIndex/GraphBuildJob 及索引进度；M6.1/M6.2/M6.3 按已交付情况可选 |
 | 内部 UI | src/settings.ts；src/presentation/settings/settings-section-model.ts；components/advanced-disclosure.ts |
 | 内部范围 | src/app/knowledge/knowledge-scope-catalog.ts、knowledge-scope-types.ts 与 knowledge-scope-picker-modal.ts |
 | 内部配置 | src/app/config/settings-types/defaults/schema/migrations/repository.ts（实际文件前缀均为 settings-） |
@@ -52,7 +52,7 @@ M7 接受 M6、M6.1、M6.2 的不同交付状态。增量 A 只展示已验证�
 
 ### Step 3：用能力状态生成准备卡片
 
-Embedding 是本地向量检索的基础；重排为质量增强；Utility 按任务可选。仅展示已通过对应平台 Gate 的可准备能力；不可用项解释原因，避免无效按钮。
+Embedding 是本地向量检索的基础；重排为质量增强；Utility 按任务可选；GraphRAG 是独立增强能力。仅展示已通过对应平台 Gate 的可准备能力；不可用项解释原因，避免无效按钮。图谱构建状态与 CoreIndex 状态分开显示，不能把 GraphJob running 误写成“搜索不可用”。
 
 进度分为下载、校验、加载、就绪，只有实际总量已知才显示百分比。共享文件按资源去重统计。切换离开页面可保持明确授权的准备任务，但取消/卸载要遵循 M6 契约。
 
@@ -62,7 +62,7 @@ Embedding 是本地向量检索的基础；重排为质量增强；Utility 按�
 
 准备完成后显示预计扫描范围和文件数，再由用户启动索引。使用 KnowledgeIndexCoordinator 的入口，读取 M6 的分阶段进度；不在 UI 遍历文件或直接写索引。
 
-索引成功必须来自已提交 generation；取消或部分失败不能显示完成。显示可检索来源；若当前没有独立搜索入口，可在向导中新增只调用检索应用服务的轻量结果面板，不用虚构聊天回答证明检索成功。
+CoreIndex 成功必须来自已提交 generation；取消或部分失败不能显示完成。CoreIndex ready 后即可显示可检索来源；后台图谱另列 queued/running/ready/stale/failed/cancelled，允许跳过或稍后继续。若当前没有独立搜索入口，可在向导中新增只调用检索应用服务的轻量结果面板，不用虚构聊天回答证明检索成功。
 
 首次问题可以由用户输入，也可使用明确标记的示例。没有文档、无匹配或 PDF 无可提取文本时给出对应下一步，不自动扩大扫描范围。
 
@@ -89,6 +89,8 @@ Embedding 是本地向量检索的基础；重排为质量增强；Utility 按�
 | 新安装无模型/无主 LLM | 可跳过；授权后准备并完成搜索 |
 | 旧用户已有云端/Ollama | 配置和 UI 偏好保持，无自动下载 |
 | 只完成增量 A | 不要求重排和 Utility 才能继续 |
+| CoreIndex ready、图谱仍构建或失败 | keyword/vector/hybrid 搜索可用；GraphRAG 标明未就绪并安全降级 |
+| 图谱 generation ready | 用带 source locator 的多跳样例验证问答；考试题目仍需可从原文证据独立作答 |
 | 离线且缓存完整 | 已验证平台可加载模型并搜索 |
 | 离线且缓存缺失 | 明确缺失原因，可取消/选择已配置路径 |
 | 下载/索引中关闭重开 | 状态一致、无重复任务和 listener |

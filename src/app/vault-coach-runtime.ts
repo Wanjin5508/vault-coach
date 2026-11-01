@@ -43,6 +43,13 @@ interface IndexOperation {
     ownsController: boolean;
 }
 
+interface CoreReadinessTask {
+    promise: Promise<void>;
+    resolve(): void;
+    reject(reason: unknown): void;
+    settled: boolean;
+}
+
 /**
  * 管理应用服务及全部非 UI 运行时状态。
  *
@@ -61,6 +68,9 @@ export class VaultCoachRuntime {
     private hasShownOllamaEmbeddingCpuFallbackNotice = false;
     private sourceInventoryStatus: SourceInventoryStatus = "not-indexed";
     private sourceInventoryDiff: SourceInventoryDiff | null = null;
+    private activeCoreReadiness: CoreReadinessTask | null = null;
+    /** 文件事件可安全继续服务旧 Core；范围、解析策略等改变必须等待新 Core。 */
+    private coreRefreshRequiresFresh = true;
 
     constructor(private readonly host: VaultCoachRuntimeHost) {}
 
@@ -131,7 +141,8 @@ export class VaultCoachRuntime {
             : this.settings.defaultGreeting;
     }
 
-    markKnowledgeBaseDirty(): void {
+    markKnowledgeBaseDirty(requireFreshCore: boolean = true): void {
+        this.coreRefreshRequiresFresh ||= requireFreshCore;
         this.knowledgeBaseDirty = true;
         this.vectorIndexDirty = true;
         this.services.knowledgeGraphService.markDirty();
@@ -325,14 +336,33 @@ export class VaultCoachRuntime {
     async rebuildKnowledgeBase(showNotice: boolean, signal?: AbortSignal): Promise<void> {
         const operation = this.startKnowledgeIndexOperation("rebuilding", signal);
         if (!operation) {
+            if (this.activeCoreReadiness) {
+                await this.activeCoreReadiness.promise;
+            }
             if (showNotice) this.notice("notice.index.alreadyBuilding");
             return;
         }
         const abortSignal = operation.signal;
+        const coreReadiness = createCoreReadinessTask();
+        this.activeCoreReadiness = coreReadiness;
+        let textActivated = false;
+        const sourceWasOutOfSync = this.sourceInventoryStatus !== "ready";
         try {
             abortSignal.throwIfAborted();
             const textSyncResult: KnowledgeBaseSyncResult = await this.services.knowledgeBase.rebuildIndexDetailed(abortSignal);
             const textStats = textSyncResult.stats;
+            // 文本代际已经由 KnowledgeBase 原子激活；先使 keyword 可用，再继续派生索引。
+            this.markActiveVectorIndexStale();
+            this.vectorIndexDirty = this.settings.enableVectorRetrieval;
+            this.services.knowledgeGraphService.markDirty();
+            this.services.masteryService.markDirty("文本索引已更新，需要重新计算掌握度。");
+            this.knowledgeBaseDirty = false;
+            this.coreRefreshRequiresFresh = false;
+            this.setSourceInventoryStatus("ready", null);
+            await this.persistKnowledgeBaseSnapshot();
+            textActivated = true;
+            coreReadiness.resolve();
+
             let vectorStats = this.services.ragEngine.getVectorIndexStats();
             let vectorBuildWarning = "";
             try {
@@ -363,13 +393,11 @@ export class VaultCoachRuntime {
                 this.services.masteryService.markDirty("知识图谱重建失败，需要重新计算掌握度。");
                 console.error("[VaultCoachRuntime] 图谱构建失败，文本索引将保持可用。", error);
             }
-            if (graphRebuilt && this.sourceInventoryStatus !== "ready") {
+            if (graphRebuilt && sourceWasOutOfSync) {
                 await this.services.semanticGraphService.reconcileWithCurrentSources();
                 await this.services.masteryService.clear();
                 this.services.learningGraphQueryService.invalidate();
             }
-            if (graphRebuilt) this.setSourceInventoryStatus("ready", null);
-            this.knowledgeBaseDirty = false;
             await this.persistKnowledgeBaseSnapshot(graphRebuilt);
             if (showNotice) {
                 const vectorInfo = this.settings.enableVectorRetrieval
@@ -383,9 +411,13 @@ export class VaultCoachRuntime {
                 this.host.showNotice(vectorBuildWarning.length > 0 ? `${message} ${vectorBuildWarning}` : message);
             }
         } catch (error: unknown) {
+            if (!textActivated) {
+                coreReadiness.reject(error);
+                this.knowledgeBaseDirty = true;
+                this.coreRefreshRequiresFresh = true;
+            }
             if (isAbortError(error)) {
                 console.warn("[VaultCoachRuntime] 索引构建已停止。", error);
-                this.services.knowledgeBase.clearIndexData();
                 const retained = await this.services.vectorStore.getStats();
                 this.services.ragEngine.hydrateVectorStats({
                     ready: false,
@@ -394,7 +426,6 @@ export class VaultCoachRuntime {
                     lastBuiltAt: retained.lastUpdatedAt,
                     compatibility: retained.vectorCount > 0 ? "stale" : "absent",
                 });
-                this.knowledgeBaseDirty = true;
                 this.vectorIndexDirty = this.settings.enableVectorRetrieval;
                 if (showNotice) this.notice("notice.index.stopped");
                 return;
@@ -402,6 +433,12 @@ export class VaultCoachRuntime {
             console.error("[VaultCoachRuntime] 重建索引失败", error);
             if (showNotice) this.notice("notice.index.rebuildFailed");
         } finally {
+            if (!coreReadiness.settled) {
+                coreReadiness.reject(new Error("Knowledge-base rebuild ended before the text index became ready."));
+            }
+            if (this.activeCoreReadiness === coreReadiness) {
+                this.activeCoreReadiness = null;
+            }
             this.finishKnowledgeIndexOperation(operation);
         }
     }
@@ -459,22 +496,32 @@ export class VaultCoachRuntime {
     }
 
     async ensureKnowledgeBaseReady(): Promise<void> {
-        if (!this.services.knowledgeBase.isReady() || this.knowledgeBaseDirty) {
-            await this.rebuildKnowledgeBase(false);
+        const hasActiveCore = this.services.knowledgeBase.isReady();
+        if (hasActiveCore && !this.knowledgeBaseDirty) {
             return;
         }
-        if (this.vectorIndexDirty && this.settings.enableVectorRetrieval) {
-            await this.rebuildVectorIndexOnly(false);
+
+        if (hasActiveCore && !this.coreRefreshRequiresFresh) {
+            // 普通 Vault 文件变更期间保留旧完整 Core 服务；自动同步或下一次显式重建会替换它。
+            if (!this.activeCoreReadiness) {
+                void this.rebuildKnowledgeBase(false);
+            }
+            return;
         }
+
+        const rebuilding = this.rebuildKnowledgeBase(false);
+        const coreReadiness = this.activeCoreReadiness;
+        if (coreReadiness) {
+            await coreReadiness.promise;
+            return;
+        }
+        await rebuilding;
     }
 
     handleVaultPathChanged(path: string): void {
         if (!this.isKnowledgePath(path) || this.isVaultCoachHiddenPath(path)) return;
         this.pendingChangedKnowledgePaths.add(path);
-        this.knowledgeBaseDirty = true;
-        this.vectorIndexDirty = true;
-        this.services.knowledgeGraphService.markDirty();
-        this.services.masteryService.markDirty("知识库范围已变更，需要重新计算掌握度。");
+        this.markKnowledgeBaseDirty(false);
         this.scheduleAutoIndexSync();
     }
 
@@ -586,6 +633,15 @@ export class VaultCoachRuntime {
                 return;
             }
             const syncResult: KnowledgeBaseSyncResult = await this.services.knowledgeBase.syncChangedFiles(filePaths, abortSignal);
+            // 增量文本同步同样先原子激活并持久化 Core；后续派生索引失败不能撤回 keyword 检索。
+            this.markActiveVectorIndexStale();
+            this.vectorIndexDirty = this.settings.enableVectorRetrieval;
+            this.services.knowledgeGraphService.markDirty();
+            this.services.masteryService.markDirty("文本索引已更新，需要重新计算掌握度。");
+            this.knowledgeBaseDirty = false;
+            this.coreRefreshRequiresFresh = false;
+            this.setSourceInventoryStatus("ready", null);
+            await this.persistKnowledgeBaseSnapshot();
             try {
                 await this.services.ragEngine.syncVectorIndex(syncResult, abortSignal);
                 this.vectorIndexDirty = false;
@@ -622,7 +678,6 @@ export class VaultCoachRuntime {
                 console.error("[VaultCoachRuntime] 自动语义图谱增量同步失败，文本索引将保持可用。", error);
             }
             this.lastAutoIndexAt = Date.now();
-            this.knowledgeBaseDirty = false;
             await this.persistKnowledgeBaseSnapshot();
             await this.persistRuntimeState();
             if (showNotice) this.notice("notice.index.incrementalComplete", { count: syncResult.affectedFiles.length });
@@ -869,6 +924,33 @@ export class VaultCoachRuntime {
     private isVaultCoachHiddenPath(path: string): boolean {
         return isVaultCoachHiddenPath(path);
     }
+}
+
+function createCoreReadinessTask(): CoreReadinessTask {
+    let resolvePromise: () => void = () => undefined;
+    let rejectPromise: (reason: unknown) => void = () => undefined;
+    const task: CoreReadinessTask = {
+        promise: new Promise<void>((resolve, reject) => {
+            resolvePromise = resolve;
+            rejectPromise = reject;
+        }),
+        resolve: () => undefined,
+        reject: () => undefined,
+        settled: false,
+    };
+    task.resolve = () => {
+        if (task.settled) return;
+        task.settled = true;
+        resolvePromise();
+    };
+    task.reject = (reason: unknown) => {
+        if (task.settled) return;
+        task.settled = true;
+        rejectPromise(reason);
+    };
+    // 手动重建调用者可能只等待完整流程；在这种情况下避免 readiness rejection 成为未处理 rejection。
+    void task.promise.catch(() => undefined);
+    return task;
 }
 
 function normalizeKnowledgeScopeSelection(selection: KnowledgeScopeSelection): KnowledgeScopeSelection {

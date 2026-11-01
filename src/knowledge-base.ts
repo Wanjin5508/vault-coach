@@ -272,6 +272,17 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
      * changedChunks 供向量层批量重建 embedding，affectedFiles 供 UI 和日志解释本次操作范围。
      */
     async rebuildIndexDetailed(signal?: AbortSignal): Promise<KnowledgeBaseSyncResult> {
+        const staging = new VaultKnowledgeBase(this.app, this.getSettings);
+        const result = await staging.rebuildIndexDetailedInPlace(signal);
+        this.activateStagingIndex(staging);
+        return { ...result, stats: this.getStats() };
+    }
+
+    /**
+     * 在独立实例中构建完整文本索引。调用方只能在成功后通过 activateStagingIndex 发布它，
+     * 因此解析失败、取消或慢文件读取不会清空仍在服务的 active 索引。
+     */
+    private async rebuildIndexDetailedInPlace(signal?: AbortSignal): Promise<KnowledgeBaseSyncResult> {
         signal?.throwIfAborted();
         this.clearIndex();
 
@@ -310,15 +321,7 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
      * 删除或移出范围的文件会返回 removedChunkIds；内容变化的文件会重新解析并返回 changedChunks。
      */
     async syncChangedFiles(filePaths: string[], signal?: AbortSignal): Promise<KnowledgeBaseSyncResult> {
-        signal?.throwIfAborted();
-        const dedupedPaths: string[] = Array.from(
-            new Set(
-                filePaths
-                    .map((path: string) => path.trim())
-                    .filter((path: string) => path.length > 0 && this.isSupportedKnowledgePath(path)),
-            ),
-        );
-
+        const dedupedPaths: string[] = this.normalizeSyncPaths(filePaths);
         if (dedupedPaths.length === 0) {
             return {
                 stats: this.getStats(),
@@ -327,6 +330,22 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
                 affectedFiles: [],
             };
         }
+
+        const staging = new VaultKnowledgeBase(this.app, this.getSettings);
+        staging.loadFromSnapshot({
+            stats: this.getStats(),
+            chunks: this.getAllChunks(),
+            files: this.getFileRecords(),
+        });
+        const result = await staging.syncChangedFilesInPlace(dedupedPaths, signal);
+        this.activateStagingIndex(staging);
+        return { ...result, stats: this.getStats() };
+    }
+
+    /** 在 staging 副本中应用增量变更，成功后由外层原子发布。 */
+    private async syncChangedFilesInPlace(filePaths: string[], signal?: AbortSignal): Promise<KnowledgeBaseSyncResult> {
+        signal?.throwIfAborted();
+        const dedupedPaths: string[] = this.normalizeSyncPaths(filePaths);
 
         const currentFiles: Map<string, TFile> = new Map<string, TFile>();
         const targetFiles: TFile[] = this.resolveTargetKnowledgeFiles();
@@ -377,6 +396,28 @@ export class VaultKnowledgeBase implements DocumentIndexReader {
             removedChunkIds,
             affectedFiles: dedupedPaths,
         };
+    }
+
+    private normalizeSyncPaths(filePaths: string[]): string[] {
+        return Array.from(
+            new Set(
+                filePaths
+                    .map((path: string) => path.trim())
+                    .filter((path: string) => path.length > 0 && this.isSupportedKnowledgePath(path)),
+            ),
+        );
+    }
+
+    /**
+     * 同步复制在当前 JS turn 内完成；读取者只能看到旧完整索引或新完整索引，
+     * 不会观察到 staging 的逐文件写入过程。
+     */
+    private activateStagingIndex(staging: VaultKnowledgeBase): void {
+        this.loadFromSnapshot({
+            stats: staging.getStats(),
+            chunks: staging.getAllChunks(),
+            files: staging.getFileRecords(),
+        });
     }
 
     /**

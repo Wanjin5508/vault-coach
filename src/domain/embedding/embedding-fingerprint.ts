@@ -20,6 +20,7 @@ export function createEmbeddingFingerprint(
     descriptor: EmbeddingProviderDescriptor,
     dimension: number,
 ): EmbeddingFingerprint {
+    // ? 这里为什么解包 preprocessing？
     const fingerprint: EmbeddingFingerprint = { ...descriptor, preprocessing: { ...descriptor.preprocessing }, dimension };
     validateEmbeddingFingerprint(fingerprint);
     return fingerprint;
