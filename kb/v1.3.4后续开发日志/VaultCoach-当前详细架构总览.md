@@ -6,8 +6,8 @@ tags:
   - KnowledgeGraph
   - KnowledgeEngine
 status: current-implementation
-updated: 2026-10-04
-code-version: 1.4.1
+updated: 2026-11-01
+code-version: 1.5.5
 source-of-truth:
   - src/vault-coach-plugin.ts
   - src/app/application-api.ts
@@ -24,7 +24,7 @@ related:
 
 # Vault Coach 当前详细架构总览
 
-> 本文描述的是 2026-10-04 工作区中已经存在的 Vault Coach 1.4.1 Lite 架构。内容以源码和测试为准，不把路线图当作已实现功能。Knowledge Engine 目前只有本地 Lite 回退实现与协议接缝；尚未连接 Docker、PostgreSQL 或 Elasticsearch 服务。
+> 本文描述的是 2026-11-01 工作区中已经存在的 Vault Coach 1.5.5 Lite 架构。内容以源码和测试为准，不把路线图当作已实现功能。Knowledge Engine 目前只有本地 Lite 回退实现与协议接缝；尚未连接 Docker、PostgreSQL 或 Elasticsearch 服务。
 
 ![[Pasted image 20261009131520.png]]
 
@@ -51,7 +51,7 @@ related:
 
 | 标记       | 含义                            |
 | -------- | ----------------------------- |
-| **已实现**  | 当前 1.4.1 源码存在且由容器装配或 UI 调用    |
+| **已实现**  | 当前 1.5.5 源码存在且由容器装配或 UI 调用    |
 | **兼容层**  | 为渐进重构保留，新增代码不应继续扩大依赖面         |
 | **协议接缝** | 类型和默认实现已经存在，但外部服务实现尚未接入       |
 | **保留类型** | DTO 已允许某种值，但当前没有对应读取器、命令或完整用例 |
@@ -61,7 +61,7 @@ related:
 
 | 项目             | 当前值                                                                               |
 | -------------- | --------------------------------------------------------------------------------- |
-| 插件版本           | `1.4.1`                                                                           |
+| 插件版本           | `1.5.5`                                                                           |
 | 最低 Obsidian 版本 | `1.11.4`                                                                          |
 | 桌面限定           | `false`，代码仍需关注移动端内存、PDF 和本地模型可达性                                                  |
 | 语言             | TypeScript；开启 `noImplicitAny`、`strictNullChecks`、`noUncheckedIndexedAccess` 等严格检查 |
@@ -69,7 +69,7 @@ related:
 | 测试             | Vitest                                                                            |
 | 包管理器           | npm                                                                               |
 | 运行依赖           | `pdfjs-dist`；Obsidian API 由宿主提供并在打包时 external                                     |
-| 默认模型           | Ollama：聊天 `gemma3:4b`，embedding `embeddinggemma`                                  |
+| 默认模型           | 聊天默认使用 Ollama `gemma3:4b`；embedding 默认使用 Ollama `embeddinggemma`，也可选 OpenAI-compatible 或内置 `multilingual-e5-small` |
 | 默认检索           | hybrid；向量启用；query rewrite 启用；本地启发式 rerank 可用                                      |
 | 默认文档           | Markdown 启用；PDF 关闭，需用户显式开启                                                        |
 | 默认语义图谱         | 关闭，需用户显式开启并手工触发首次构建                                                               |
@@ -127,6 +127,7 @@ flowchart TB
 
     subgraph L4["L4 领域模型与规则"]
         docs["文档与检索契约\nChunk / DocumentIndexReader / VectorStore"]
+        embeddingDomain["Embedding 契约与空间身份\nProvider / Fingerprint / Error"]
         graphDomain["M2 结构图谱\nID、Builder、Integrity、Query"]
         semanticDomain["M3 语义图谱\nProjector、治理、Integrity"]
         learningDomain["M4A 学习图\n投影、ID、关系过滤"]
@@ -140,7 +141,9 @@ flowchart TB
         kb["VaultKnowledgeBase\nMarkdown/PDF 读取、分段、文本索引"]
         rag["AdvancedRagEngine\n关键词 / 向量 / 混合检索"]
         vector["EmbeddedExactVectorStore"]
-        model["LocalModelClient\n生成、结构化输出、Embedding"]
+        model["LocalModelClient\n聊天生成与结构化输出"]
+        embeddingAdapters["Embedding adapters\nOllama / OpenAI-compatible / Builtin"]
+        localAi["LocalAIRuntime + Worker\n内置 WASM 推理"]
         obsAdapters["Obsidian Reader Adapters\n文档元数据、图谱来源"]
         jsonStores["JSON Stores\n图谱、语义、Assessment、Mastery、Action"]
         persistent["VaultCoachPersistentStore\n索引与运行时快照"]
@@ -184,6 +187,7 @@ flowchart TB
     index --> kb
     graphApp --> obsAdapters
     semanticApp --> model
+    semanticApp --> embeddingDomain
     assessment --> kb
     masteryApp --> learning
     adaptive --> learning
@@ -192,6 +196,10 @@ flowchart TB
     kb --> vault
     rag --> kb
     rag --> vector
+    rag --> embeddingDomain
+    embeddingAdapters -. "implements" .-> embeddingDomain
+    embeddingAdapters --> modelProvider
+    embeddingAdapters --> localAi
     vector --> persistent
     model --> modelProvider
     obsAdapters --> vault
@@ -222,6 +230,7 @@ flowchart LR
 - `Presentation` 只通过 `VaultCoachApplicationApi` 读取状态和执行用例；不能因按钮点击而直接改写图谱、掌握度或 Store。
 - `Domain` 不依赖 Obsidian、DOM、网络实现；它只定义类型、规则、完整性校验和端口。
 - `Infrastructure` 可以依赖 Obsidian 的 `App`、`VaultAdapter`，也可以实现 Domain port。
+- 同一个 feature 同时出现在 `domain/`、`app/` 和 `infrastructure/` 不代表重复实现：它们分别回答“这个能力是什么”、“用例如何选择/编排”和“如何调用具体技术”。见 3.2.1 的 embedding 示例。
 - `VaultCoach` 插件类是宿主适配与装配根；它保留了一部分历史 UI API，正由 `LegacyPluginApiAdapter` 逐步迁移到 Application Facade。
 
 ## 3. 各层模块、职责与接口
@@ -257,6 +266,8 @@ src/
 │   └── <feature>/                  # 应用服务：chat/index/graph/semantic/... 
 ├── domain/<feature>/               # 纯类型、端口、算法、策略、完整性校验
 ├── infrastructure/
+│   ├── embedding/                  # Ollama/OpenAI-compatible/内置 embedding adapters 与 HTTP transport
+│   ├── local-ai/                   # 内置模型资产下载、cache 与 Worker 边界
 │   ├── obsidian/                   # Obsidian-backed reader adapters
 │   └── storage/                    # JSON/二进制 Store 与磁盘统计
 ├── presentation/
@@ -286,6 +297,33 @@ src/
 
 这里的 Application Facade 是插件内部 TypeScript 契约，不是向其他 Obsidian 插件承诺的公共 npm API。稳定命令 ID、View Type 和磁盘 schema 的兼容成本更高，不能随意改名。
 
+#### 3.2.1 如何理解“三层都有 embedding 目录”
+
+embedding 是一个穿越多层的完整 feature slice，不是三份同功能代码。新人看到同名目录时，应先按“语义—编排—技术”判断所有权：
+
+| 目录 | 回答的问题 | 当前内容 | 不应包含 |
+| --- | --- | --- | --- |
+| `src/domain/embedding/` | embedding 在系统中是什么，哪些变化会使向量不兼容？ | `EmbeddingProvider` 窄端口、request/batch/diagnostics、稳定错误码、descriptor/fingerprint 校验与比较 | URL 请求、API key、Obsidian API、provider 选择 UI |
+| `src/app/embedding/` | 当前用例应选哪个已注册实现？ | `EmbeddingProviderRouter`，把动态 settings 解析为唯一活跃 provider，让 RAG 和 Semantic Graph 共用同一选择规则 | Ollama/OpenAI 协议解析、WASM 推理、DOM |
+| `src/infrastructure/embedding/` | 怎样与具体模型或传输机制交互？ | Ollama 新旧 API、OpenAI-compatible API、内置 Local AI adapter、Obsidian HTTP transport、响应/错误映射 | UI 用例流程、检索策略、业务事实 |
+
+```mermaid
+flowchart LR
+    consumers["RAG / SemanticGraph"] --> port["Domain: EmbeddingProvider"]
+    router["App: EmbeddingProviderRouter"] -. "也实现该 port并委托" .-> port
+    router --> active{"settings.embeddingProvider"}
+    active --> ollama["Infrastructure: Ollama adapter"]
+    active --> cloud["Infrastructure: OpenAI-compatible adapter"]
+    active --> builtin["Infrastructure: Builtin adapter"]
+    ollama -. "implements" .-> port
+    cloud -. "implements" .-> port
+    builtin -. "implements" .-> port
+```
+
+`ApplicationContainer` 是唯一装配点：它创建三个 adapter，注册到 router，再把同一个 router 注入 RAG 和 Semantic Graph。因此 consumer 只调用 `describe()` / `embed()`，不写 `if (provider === ...)`，也不直接构造 adapter。
+
+这个例子可以推广到其他 feature：Domain 保护稳定语义和不变量，Application 拥有用例选择与时序，Infrastructure 吸收外部 API、文件格式和宿主差异。评审代码时，不应问“这个功能只能放哪一层”，而应问“这段代码属于该功能的哪一种责任”。
+
 ### 3.3 当前依赖装配清单
 
 `createApplicationContainer()` 是回答“某个 port 当前由谁实现”的唯一首选位置：
@@ -297,10 +335,14 @@ src/
 | RAG | `AdvancedRagEngine` | Document index、VectorStore、settings、runtime retrieval mode、secret getter |
 | Chat | `ChatService` | RAG、Memory、ensure-ready、persist callback |
 | Memory | `LongTermMemoryService` | settings、conversation reader、RAG |
-| 模型 | `LocalModelClient` | settings、SecretStorage getter |
+| 聊天/结构化生成 | `LocalModelClient` | settings、SecretStorage getter |
+| Embedding 路由 | `EmbeddingProviderRouter` | 动态 settings；Ollama、OpenAI-compatible、Builtin providers |
+| Ollama embedding | `OllamaEmbeddingProvider` | settings getter、`ObsidianEmbeddingHttpTransport`；兼容新旧 API 和 CPU fallback |
+| OpenAI-compatible embedding | `OpenAiCompatibleEmbeddingProvider` | settings/API-key getter、HTTP transport |
+| 内置 embedding | `BuiltinEmbeddingProvider` | `LocalAIRuntime`、已校验的 runtime/model assets、WASM Worker |
 | 评分路由 | `ExamEvaluationRouter` | 模型自由回答 evaluator + 确定性客观题 evaluator |
 | M2 | `KnowledgeGraphService` | Obsidian source reader、deterministic builder、JSON graph store |
-| M3 | `SemanticGraphService` | M2、DocumentIndexReader、semantic store、extraction/model/embedding gateway |
+| M3 | `SemanticGraphService` | M2、DocumentIndexReader、semantic store、extraction/model gateway、`EmbeddingProvider` |
 | M4A | `LearningGraphQueryService` | `ServiceLearningGraphSource(M2, M3)` |
 | Exam | `ExamEngine` | App、DocumentIndex、file metadata reader、settings/model、chunk→concept mapping |
 | Assessment | `JsonAssessmentSessionStore` | Vault adapter |
@@ -491,7 +533,8 @@ dispose(): Promise<void>;
 | `VectorStore` | 向量索引 port | `initialize`、`upsert`、`search`、`clear`、`getStats` | `EmbeddedExactVectorStore`，Lite 中为嵌入式精确检索 |
 | `AdvancedRagEngine` | 检索编排 | keyword/vector/hybrid 检索、重排序、来源封装 | 依赖知识库、VectorStore、设置和模型配置 |
 | `AssistantAnswer` / `AnswerSource` | 回答契约 | 文本、来源位置、摘要、实际检索模式、查询改写 | Presentation 用 `AnswerSource` 跳回 Markdown 标题或 PDF 页码 |
-| `LocalModelClient` | 模型适配 | Chat、JSON 结构化生成、embedding | 读取用户设置；可使用本地或用户配置的兼容端点 |
+| `LocalModelClient` | 生成模型适配 | Chat、JSON 结构化生成 | 读取用户设置；可使用本地或用户配置的兼容端点；不再承担 embedding |
+| `EmbeddingProvider` | embedding Domain port | `describe()`、`embed({ texts, purpose, signal })` | `EmbeddingProviderRouter` 委托给 Ollama、OpenAI-compatible 或内置 adapter |
 
 #### 5.1.1 `DocumentIndexReader` 与 `VectorStore` 端口
 
@@ -511,9 +554,12 @@ interface DocumentIndexReader {
 
 interface VectorStore {
   initialize(): Promise<void>;
-  upsert(records: VectorRecord[]): Promise<void>;
-  remove(chunkIds: string[]): Promise<void>;
-  search(queryVector: Float32Array, options: VectorSearchOptions): Promise<VectorStoreHit[]>;
+  replaceAll(records: readonly VectorRecord[], fingerprint: EmbeddingFingerprint): Promise<VectorStoreStats>;
+  upsert(records: readonly VectorRecord[], fingerprint: EmbeddingFingerprint): Promise<void>;
+  remove(chunkIds: readonly string[]): Promise<void>;
+  search(queryVector: Float32Array, queryFingerprint: EmbeddingFingerprint,
+         options: VectorSearchOptions): Promise<VectorStoreHit[]>;
+  inspect(): Promise<VectorStoreInspection>;
   clear(): Promise<void>;
   getStats(): Promise<VectorStoreStats>;
   close(): Promise<void>;
@@ -524,7 +570,37 @@ interface VectorStore {
 
 `KnowledgeDocumentType` 包含 `markdown | pdf | zotero`。当前实际索引入口只装配 Markdown 和可选 PDF；`zotero` 是数据契约中的保留类型，不能据此声称已经支持 Zotero 导入。
 
-#### 5.1.2 当前 RAG 管线
+#### 5.1.2 Embedding 端口、路由与向量空间身份
+
+`EmbeddingProvider` 是 RAG 和 Semantic Graph 唯一可见的 embedding 边界。consumer 传入三种 `purpose`：
+
+| purpose | 语义 | 典型输入预处理 |
+| --- | --- | --- |
+| `document` | 为 chunk/文档构建可检索向量 | 内置 E5 使用 `passage: ` |
+| `query` | 为检索请求生成查询向量 | 内置 E5 使用 `query: ` |
+| `graph` | 为 Concept/语义图谱项生成向量 | 当前内置 E5 使用 `passage: ` |
+
+purpose 不是日志标签。某些模型（如 E5）要求 query 和 passage 使用不同前缀；前缀改变会改变向量语义，因此 `document/query/graph` 的 preprocessing descriptor 必须纳入兼容性判断。
+
+每次成功推理返回 `EmbeddingBatch`，包含：
+
+- `vectors`：统一为 `Float32Array[]`；
+- `fingerprint`：完整向量空间身份；
+- `diagnostics`：实际 transport、延迟、尝试次数、CPU fallback 和 revision 校验状态。
+
+fingerprint 由 provider/endpoint/model/revision/model dtype/output dtype/pooling/normalization/preprocessing/implementation version/dimension 组成。它不包含 API key、用户文本或单次请求诊断。`VectorStore` 保存完整 fingerprint，查询时与 query fingerprint 比较；任一影响语义空间的字段变化，都必须拒绝混用并将索引标为 stale/dirty。短 display ID 只用于 UI 和诊断，不能代替完整 JSON 比较。
+
+`createEmbeddingFingerprint()` 会展开复制 `preprocessing`，而不是沿用 descriptor 的嵌套对象引用。这是 defensive copy：防止 provider 或调用方日后修改原对象时，已持久化/已比较的 fingerprint 被静默改写。新增嵌套 descriptor 字段时，也应做相同的防御性复制和 canonical 字段排序。
+
+当前 provider 行为：
+
+- Ollama：优先调用 `/api/embed`，404 时兼容旧 `/api/embeddings`，部分 GPU/backend 错误可重试 CPU；
+- OpenAI-compatible：调用 `/v1/embeddings`（也兼容 base URL 已含 `/v1` 或 `/embeddings`），按 response index 恢复批次顺序；
+- Builtin：通过 `LocalAIRuntimePort` 调用 Worker/WASM 中的 `Xenova/multilingual-e5-small` uint8 模型，其 revision、asset hash、pooling 和前缀是受控 policy。
+
+新增 provider 时，实现 Domain port、补 adapter contract test，再在 `ApplicationContainer` 注册即可。不得让 RAG、Semantic Graph 或 View 识别具体 provider ID 并自己分支。
+
+#### 5.1.3 当前 RAG 管线
 
 ```mermaid
 flowchart LR
@@ -563,7 +639,7 @@ flowchart LR
 
 这不是 LightRAG 的实体—关系双层检索实现。当前 Ask 主链是 chunk 级 keyword/vector/hybrid RAG；M2/M3 图谱主要服务 Concept Review、Learning Map、Mastery、Adaptive Exam 和 Recommendation。若未来把图谱加入问答检索，应在 Application/Domain 层定义新的有界 retrieval port，并明确证据回链和回退路径，不应让 `rag-engine.ts` 直接读取语义 JSON shard。
 
-#### 5.1.3 嵌入式向量库的复杂度和替换点
+#### 5.1.4 嵌入式向量库的复杂度和替换点
 
 `EmbeddedExactVectorStore` 将向量 L2 归一化为 `Float32Array`，持久化为一个 manifest 和一个二进制 shard。查询向量也归一化，逐条点积得到余弦相似度，并用容量为 K 的小顶堆保留 top K。
 
@@ -1087,7 +1163,9 @@ Ollama 也是通过 HTTP 调用，但默认是 loopback `127.0.0.1:11434`。Open
 
 ### 12.3 新增模型能力
 
-- 先定义 `JsonGenerationGateway`、embedding gateway 或新的窄 port；
+- 先在 Domain 定义 `JsonGenerationGateway`、`EmbeddingProvider` 或新的窄 port；不要让业务 consumer 直接依赖 `LocalModelClient`、HTTP transport 或 Worker；
+- 如果同一能力有多个 provider，由 Application 层的 router/strategy 统一选择，由 composition root 注册具体 Infrastructure adapter；
+- 模型、revision、dtype、pooling、normalization、预处理或算法版本会影响持久化派生结果时，必须记录完整兼容性身份，不能只记模型名；
 - Prompt 和 parser 要有版本，持久化结果记录 provider/model/prompt version；
 - 对 JSON 输出做 schema/字段校验，不能只 `JSON.parse()` 后断言类型；
 - 明确发送的最小文本范围、默认开关、失败回退和是否影响源事实；
@@ -1112,6 +1190,7 @@ Ollama 也是通过 HTTP 调用，但默认是 loopback `127.0.0.1:11434`。Open
 | 规范 | 具体要求 | 为什么 |
 | --- | --- | --- |
 | Composition root 唯一 | 具体 Service/Store 只在 `ApplicationContainer` 创建 | 避免多个 cache、listener 和并发状态互相冲突 |
+| 依赖指向抽象 | Application consumer 依赖 Domain port；Infrastructure 实现 port；具体类只在 composition root 相遇 | 替换 provider/store 时不修改用例，测试可注入 fake |
 | Main/Plugin 保持薄 | `src/main.ts` 只导出；Plugin 只做 lifecycle、View/command/settings/event 注册 | 宿主代码难单测，业务规则应脱离 Obsidian 生命周期 |
 | Domain 纯净 | `src/domain/**` 不 import Obsidian、DOM、具体 Store 或 model client | 纯算法可快速测试，也能复用到未来 Engine |
 | UI 只依赖 Facade | 不从 presentation import KB/RAG/model/graph service/JSON store | 保持单一事务和失效入口，architecture test 会守护部分边界 |
@@ -1228,6 +1307,7 @@ npm run build     # tsc --noEmit --skipLibCheck + production esbuild
 9. **Knowledge Engine 仅为 Lite seam**：任何 Local client、Docker、PostgreSQL、Elasticsearch、revision sync 和 durable job 都仍是未来工作，不能从接口存在推断服务可用。
 10. **移动端需要持续实测**：manifest 为非 desktop-only，源码避免直接 Node/Electron；PDF、较大内存 index、本地 Ollama 地址和流式网络在 iOS/Android 上仍需按版本验证。
 11. **语义设置仍有硬编码英文 UI**：部分 Semantic Graph setting 使用 raw English string；新增相关 UI 应迁入 i18n，并逐步清理存量。
+12. **Embedding adapter 仍有反向依赖**：`OllamaEmbeddingProvider` 和 `OpenAiCompatibleEmbeddingProvider` 直接 import Application 层的 `VaultCoachSettings`，`BuiltinEmbeddingProvider` 直接 import `app/local-ai/model-registry` 的 policy。当前行为可用且有 adapter tests，但更干净的边界是由 `ApplicationContainer` 传入窄配置 getter/policy DTO，使 `infrastructure/embedding/**` 只依赖 Domain 契约与自身 transport。独立重构时应先补“Infrastructure 不 import App”的 architecture test，不应在普通 provider 功能 PR 中顺手大规模迁移。
 
 技术债条目用于约束新增代码和安排独立重构，不表示可以绕过当前边界。修复时应先锁定现有行为测试，再做小步迁移。
 
@@ -1245,7 +1325,10 @@ npm run build     # tsc --noEmit --skipLibCheck + production esbuild
 | Facade 如何触发失效和事件 | `src/app/vault-coach-application.ts` |
 | 依赖装配和具体实现选择 | `src/app/application-container.ts` |
 | 文档、PDF、chunk 和索引 | `src/knowledge-base.ts` |
-| RAG、模型传输和嵌入式向量库 | `src/rag-engine.ts`、`src/model-client.ts`、`src/vector-store.ts` |
+| RAG、生成模型传输和嵌入式向量库 | `src/rag-engine.ts`、`src/model-client.ts`、`src/vector-store.ts` |
+| Embedding 契约、空间指纹与错误 | `src/domain/embedding/` |
+| Embedding provider 选择 | `src/app/embedding/embedding-provider-router.ts` |
+| Ollama、OpenAI-compatible、内置 embedding 实现 | `src/infrastructure/embedding/`、`src/app/local-ai/`、`src/infrastructure/local-ai/` |
 | 文档/检索 port 与 DTO | `src/domain/documents/`、`src/domain/retrieval/`、`src/domain/model/` |
 | M2 / M3 / M4 的具体链路 | `src/app/graph/`、`src/app/semantic-graph/`、`src/app/learning-graph/`、`src/domain/graph/`、`src/domain/semantic-graph/` |
 | 容量门槛与确认 UI | `src/domain/graph-capacity/`、`src/presentation/modals/semantic-graph-capacity-modal.ts` |
