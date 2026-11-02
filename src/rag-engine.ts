@@ -136,6 +136,25 @@ export class AdvancedRagEngine {
         return used;
     }
 
+    /** 返回不含密钥和用户文本的稳定 embedding policy 身份，供后台作业防止跨空间激活。 */
+    getEmbeddingPolicyId(): string {
+        const descriptor = this.embeddingProvider.describe();
+        return [
+            descriptor.providerId,
+            descriptor.endpointIdentity,
+            descriptor.model,
+            descriptor.revision,
+            descriptor.modelDtype,
+            descriptor.outputDtype,
+            descriptor.pooling,
+            descriptor.normalization,
+            descriptor.implementationVersion,
+            descriptor.preprocessing.document,
+            descriptor.preprocessing.query,
+            descriptor.preprocessing.graph,
+        ].join("\u0000");
+    }
+
     /**
      * 从磁盘快照恢复向量索引状态。
      */
@@ -166,7 +185,14 @@ export class AdvancedRagEngine {
     /**
      * 全量重建向量索引。
      */
-    async rebuildVectorIndex(signal?: AbortSignal): Promise<VectorIndexStats> {
+    async rebuildVectorIndex(
+        signal?: AbortSignal,
+        hooks?: {
+            beforeActivate(): void;
+            onPhase?(phase: "embedding" | "persisting-vector" | "validating"): void | Promise<void>;
+            sourceCoreGenerationId?: string;
+        },
+    ): Promise<VectorIndexStats> {
         const settings: VaultCoachSettings = this.getSettings();
         signal?.throwIfAborted();
         if (!settings.enableVectorRetrieval || this.embeddingProvider.describe().model.length === 0) {
@@ -182,9 +208,15 @@ export class AdvancedRagEngine {
             return this.getVectorIndexStats();
         }
 
+        await hooks?.onPhase?.("embedding");
         const build = await this.buildChunkEmbeddings(chunks, signal);
         signal?.throwIfAborted();
-        await this.vectorStore.replaceAll(build.records, build.fingerprint);
+        await hooks?.onPhase?.("persisting-vector");
+        await this.vectorStore.replaceAll(build.records, build.fingerprint, async () => {
+            signal?.throwIfAborted();
+            await hooks?.onPhase?.("validating");
+            hooks?.beforeActivate();
+        }, hooks?.sourceCoreGenerationId);
         await this.refreshVectorStatsFromStore();
 
         return this.getVectorIndexStats();

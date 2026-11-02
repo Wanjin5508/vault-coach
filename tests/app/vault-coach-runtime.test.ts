@@ -8,10 +8,10 @@ import type { KnowledgeGraphService } from "../../src/app/graph/knowledge-graph-
 
 const TEST_CONFIG_DIR = "test-config";
 
-// M6-B 核心可用性测试：验证文本 CoreIndex 能先于向量/图谱对外提供服务。
-describe("M6-B CoreIndex readiness", () => {
-    // 验证向量构建被 deferred 时，文本 snapshot 完成即可释放首次 readiness。
-    it("releases the first readiness request after text indexing while vector indexing is pending", async () => {
+// M6-B/C 分阶段可用性测试：Core 先服务，VectorBuildJob 在后台独立进入终态。
+describe("M6-B/C staged index readiness", () => {
+    // 验证向量构建被 deferred 时，文本 snapshot 和完整 Core rebuild Promise 都不等待向量。
+    it("queues vector work after text readiness and activates it independently", async () => {
         const harness = createRuntimeHarness();
         harness.settings.enableVectorRetrieval = true;
         await harness.runtime.initialize();
@@ -25,7 +25,10 @@ describe("M6-B CoreIndex readiness", () => {
         const services = getIndexServices(harness.runtime);
         const vectorBuild = createDeferred<unknown>();
         const rebuildVectorIndex = vi.spyOn(services.ragEngine, "rebuildVectorIndex")
-            .mockImplementation(async () => vectorBuild.promise);
+            .mockImplementation(async (_signal, hooks) => {
+                await hooks?.onPhase?.("embedding");
+                return await vectorBuild.promise;
+            });
         let readySettled = false;
         const ready = harness.runtime.ensureKnowledgeBaseReady().then(() => { readySettled = true; });
 
@@ -39,11 +42,15 @@ describe("M6-B CoreIndex readiness", () => {
             stats: { fileCount: 2, chunkCount: 2 },
             vectorStats: { ready: false },
         });
+        await requireCapturedPromise(fullRebuild, "Expected the Core rebuild to be captured.");
+        await waitFor(() => (getVectorBuildJob(harness.runtime) as { phase?: string } | null)?.phase === "embedding");
+        expect(getVectorBuildJob(harness.runtime)).toMatchObject({ phase: "embedding", vectorCount: 0 });
 
         vectorBuild.resolve({ ready: true, vectorCount: 2, dimension: 384, lastBuiltAt: 1, compatibility: "compatible" });
         await ready;
-        expect(readySettled).toBe(true);
-        await fullRebuild;
+        await flushBackgroundDerivedIndexes(harness.runtime);
+        expect(getVectorBuildJob(harness.runtime)).toMatchObject({ phase: "rag-ready", vectorCount: 2 });
+        expect(await harness.runtime.application.graph.getSnapshot()).not.toBeNull();
         await harness.runtime.dispose();
     });
 
@@ -80,7 +87,7 @@ describe("M6-B CoreIndex readiness", () => {
         textBuild.resolve();
         await Promise.all([first, second]);
         expect(secondSettled).toBe(true);
-        await fullRebuild;
+        await requireCapturedPromise(fullRebuild, "Expected the shared full rebuild to be captured.");
         await harness.runtime.dispose();
     });
 
@@ -114,6 +121,7 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         await harness.runtime.initialize();
 
         await harness.runtime.rebuildKnowledgeBase(false);
+        await flushBackgroundDerivedIndexes(harness.runtime);
 
         const snapshot = await harness.runtime.application.graph.getSnapshot();
         expect(harness.runtime.isTextIndexDirty()).toBe(false);
@@ -136,6 +144,7 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         await harness.runtime.initialize();
 
         await harness.runtime.rebuildKnowledgeBase(false);
+        await flushBackgroundDerivedIndexes(harness.runtime);
 
         expect(harness.runtime.isTextIndexDirty()).toBe(false);
         expect(harness.runtime.getKnowledgeBaseStats()).toMatchObject({ fileCount: 2, chunkCount: 2 });
@@ -160,13 +169,14 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         vi.spyOn(services.ragEngine, "rebuildVectorIndex").mockRejectedValueOnce(new Error("embedding unavailable"));
 
         await harness.runtime.rebuildKnowledgeBase(false);
+        await flushBackgroundDerivedIndexes(harness.runtime);
 
         expect(await harness.runtime.application.graph.getSnapshot()).toMatchObject({
             stats: { documentCount: 2, edgeCount: 3 },
         });
         expect(vectorError).toHaveBeenCalledWith(
-            "[VaultCoachRuntime] 向量索引建立失败，将回退到关键词检索。",
-            expect.any(Error),
+            "[VaultCoachRuntime] 后台向量索引建立失败，将继续使用关键词检索。",
+            "vector-build-failed",
         );
 
         await harness.runtime.dispose();
@@ -177,10 +187,12 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         const harness = createRuntimeHarness();
         await harness.runtime.initialize();
         await harness.runtime.rebuildKnowledgeBase(false);
+        await flushBackgroundDerivedIndexes(harness.runtime);
         harness.renameKnowledgeFile("details.md", "renamed-details.md");
 
         harness.runtime.handleVaultPathRenamed("details.md", "renamed-details.md");
         await flushPendingKnowledgeBaseSync(harness.runtime);
+        await flushBackgroundDerivedIndexes(harness.runtime);
 
         const snapshot = await harness.runtime.application.graph.getSnapshot();
         const link = snapshot?.edges.find((edge) => edge.type === "links_to");
@@ -200,12 +212,14 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         const harness = createRuntimeHarness();
         await harness.runtime.initialize();
         await harness.runtime.rebuildKnowledgeBase(false);
+        await flushBackgroundDerivedIndexes(harness.runtime);
         const initialOverview = await harness.runtime.application.graph.getNode("markdown:overview.md");
         if (!initialOverview || initialOverview.type !== "document") throw new Error("Expected initial overview document.");
 
         harness.writeKnowledgeFile("overview.md", "# Overview\n\nUpdated retrieval notes.\n\n[[details]]");
         harness.runtime.handleVaultPathChanged("overview.md");
         await flushPendingKnowledgeBaseSync(harness.runtime);
+        await flushBackgroundDerivedIndexes(harness.runtime);
 
         const updatedOverview = await harness.runtime.application.graph.getNode("markdown:overview.md");
         expect(updatedOverview).toMatchObject({ type: "document", filePath: "overview.md" });
@@ -218,6 +232,7 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         harness.renameKnowledgeFile("details.md", "renamed-details.md");
         harness.runtime.handleVaultPathRenamed("details.md", "renamed-details.md");
         await flushPendingKnowledgeBaseSync(harness.runtime);
+        await flushBackgroundDerivedIndexes(harness.runtime);
 
         expect(await harness.runtime.application.graph.findEdgesForNode("markdown:renamed-details.md"))
             .toEqual(expect.arrayContaining([expect.objectContaining({ type: "links_to" })]));
@@ -225,6 +240,7 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         harness.deleteKnowledgeFile("renamed-details.md");
         harness.runtime.handleVaultPathChanged("renamed-details.md");
         await flushPendingKnowledgeBaseSync(harness.runtime);
+        await flushBackgroundDerivedIndexes(harness.runtime);
 
         expect(await harness.runtime.application.graph.findNodesByDocumentPath("renamed-details.md")).toEqual([]);
         expect(await harness.runtime.application.graph.findEdgesBySourceFile("overview.md"))
@@ -238,6 +254,7 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         const harness = createRuntimeHarness();
         await harness.runtime.initialize();
         await harness.runtime.rebuildKnowledgeBase(false);
+        await flushBackgroundDerivedIndexes(harness.runtime);
         const graphService = getGraphService(harness.runtime);
         const graphSync = vi.spyOn(graphService, "syncChangedFiles");
         const graphRebuild = vi.spyOn(graphService, "rebuildAll");
@@ -245,6 +262,7 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         harness.runtime.handleVaultPathChanged("overview.md");
         harness.runtime.handleVaultPathChanged("overview.md");
         await flushPendingKnowledgeBaseSync(harness.runtime);
+        await flushBackgroundDerivedIndexes(harness.runtime);
 
         expect(graphSync).toHaveBeenCalledOnce();
         expect(graphSync.mock.calls[0]?.[0].affectedFiles).toEqual(["overview.md"]);
@@ -257,6 +275,7 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         const harness = createRuntimeHarness();
         await harness.runtime.initialize();
         await harness.runtime.rebuildKnowledgeBase(false);
+        await flushBackgroundDerivedIndexes(harness.runtime);
         const graphService = getGraphService(harness.runtime);
         const graphSync = vi.spyOn(graphService, "syncChangedFiles");
 
@@ -273,6 +292,7 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         const harness = createRuntimeHarness();
         await harness.runtime.initialize();
         await harness.runtime.rebuildKnowledgeBase(false);
+        await flushBackgroundDerivedIndexes(harness.runtime);
         const assessmentPath = ".vault-coach/assessments/sessions/exam-1.json";
         harness.adapter.files.set(assessmentPath, "{\"preserve\":true}");
 
@@ -341,6 +361,7 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         expect(restarted.getSourceInventoryStatus()).toBe("possible-domain-switch");
 
         await restarted.rebuildKnowledgeBase(false);
+        await flushBackgroundDerivedIndexes(restarted);
 
         expect(restarted.getSourceInventoryStatus()).toBe("ready");
         expect(restarted.getKnowledgeBaseStats()).toMatchObject({ fileCount: 1, chunkCount: 1 });
@@ -571,6 +592,12 @@ function flushPendingKnowledgeBaseSync(runtime: VaultCoachRuntime): Promise<void
     }).flushPendingKnowledgeBaseSync(false);
 }
 
+/** 等待当前 Core 对应的后台 Vector/Graph 派生任务进入终态。 */
+async function flushBackgroundDerivedIndexes(runtime: VaultCoachRuntime): Promise<void> {
+    const tasks = Array.from((runtime as unknown as { backgroundDerivedTasks: Set<Promise<void>> }).backgroundDerivedTasks);
+    await Promise.all(tasks);
+}
+
 /** 从 Runtime 的内部容器取出图谱服务，便于断言增量同步和完整性结果。 */
 function getGraphService(runtime: VaultCoachRuntime): KnowledgeGraphService {
     return (runtime as unknown as {
@@ -581,16 +608,32 @@ function getGraphService(runtime: VaultCoachRuntime): KnowledgeGraphService {
 /** 从 Runtime 的内部容器取出文本索引和向量索引服务，便于注入 deferred 或失败行为。 */
 function getIndexServices(runtime: VaultCoachRuntime): {
     knowledgeBase: { rebuildIndexDetailed(signal?: AbortSignal): Promise<unknown> };
-    ragEngine: { rebuildVectorIndex(signal?: AbortSignal): Promise<unknown> };
+    ragEngine: {
+        rebuildVectorIndex(
+            signal?: AbortSignal,
+            hooks?: { onPhase?(phase: "embedding" | "persisting-vector" | "validating"): void | Promise<void> },
+        ): Promise<unknown>;
+    };
 } {
     return (runtime as unknown as {
         applicationContainer: {
             services: {
                 knowledgeBase: { rebuildIndexDetailed(signal?: AbortSignal): Promise<unknown> };
-                ragEngine: { rebuildVectorIndex(signal?: AbortSignal): Promise<unknown> };
+                ragEngine: {
+                    rebuildVectorIndex(
+                        signal?: AbortSignal,
+                        hooks?: { onPhase?(phase: "embedding" | "persisting-vector" | "validating"): void | Promise<void> },
+                    ): Promise<unknown>;
+                };
             };
         };
     }).applicationContainer.services;
+}
+
+function getVectorBuildJob(runtime: VaultCoachRuntime) {
+    return (runtime as unknown as {
+        applicationContainer: { services: { vectorBuildCoordinator: { getState(): unknown } } };
+    }).applicationContainer.services.vectorBuildCoordinator.getState();
 }
 
 /** 创建一个由测试手动 resolve 的 Promise，用来模拟向量/文本任务尚未完成的状态。 */
@@ -600,8 +643,14 @@ function createDeferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
     return { promise, resolve };
 }
 
+/** 返回 mock 回调捕获的异步任务；若调用链未触发，则让测试以明确错误失败。 */
+function requireCapturedPromise<T>(promise: Promise<T> | null, message: string): Promise<T> {
+    if (!promise) throw new Error(message);
+    return promise;
+}
+
 /** 在若干个 microtask 中等待异步 fixture 到达目标状态，超时则让测试明确失败。 */
-async function waitFor(predicate: () => boolean, attempts: number = 30): Promise<void> {
+async function waitFor(predicate: () => boolean, attempts: number = 100): Promise<void> {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
         if (predicate()) return;
         await Promise.resolve();

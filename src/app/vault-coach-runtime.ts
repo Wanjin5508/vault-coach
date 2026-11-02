@@ -1,7 +1,7 @@
 import { normalizePath, type App } from "obsidian";
 import { createApplicationContainer, type ApplicationContainer } from "./application-container";
 import { getDefaultGreeting, isBuiltInDefaultGreeting, type TranslationKey } from "../i18n";
-import { getErrorMessage, isAbortError } from "../utils/errors";
+import { isAbortError } from "../utils/errors";
 import type { KnowledgeBaseStats, KnowledgeBaseSyncResult } from "../domain/documents/document-types";
 import type { PersistedPluginState, KnowledgeBaseSnapshot } from "../infrastructure/storage/storage-types";
 import type { KnowledgeIndexBusyPhase, KnowledgeIndexBusyState } from "./index/index-types";
@@ -24,6 +24,8 @@ import {
 } from "../domain/index-lifecycle/source-inventory";
 import { isVaultCoachHiddenPath, normalizeVaultPath } from "../domain/documents/vault-path";
 import type { LocalAiStatus } from "../domain/local-ai/local-ai-types";
+import { createCoreGenerationId } from "../domain/index-lifecycle/index-generation";
+import type { VectorBuildJob } from "../domain/index-jobs/vector-build-job";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
@@ -71,6 +73,8 @@ export class VaultCoachRuntime {
     private activeCoreReadiness: CoreReadinessTask | null = null;
     /** 文件事件可安全继续服务旧 Core；范围、解析策略等改变必须等待新 Core。 */
     private coreRefreshRequiresFresh = true;
+    private readonly backgroundDerivedTasks = new Set<Promise<void>>();
+    private disposing = false;
 
     constructor(private readonly host: VaultCoachRuntimeHost) {}
 
@@ -98,11 +102,13 @@ export class VaultCoachRuntime {
                 busy: this.getKnowledgeIndexBusyState(),
                 stats: this.getKnowledgeBaseStats(),
                 vectorStats: this.getVectorIndexStats(),
+                vectorJob: this.services.vectorBuildCoordinator.getState(),
             }),
             rebuildIndex: (signal) => this.rebuildKnowledgeBase(false, signal),
             clearIndex: () => this.clearKnowledgeIndex(false),
             abortIndex: () => this.abortKnowledgeIndexBuild(false),
             getStorageFootprint: () => this.getStorageFootprint(),
+            getActiveCoreGenerationId: () => this.getActiveCoreGenerationId(),
         });
         this.unsubscribeApplicationEvents = this.applicationContainer.application.subscribe(() => this.host.onStateChanged());
 
@@ -117,16 +123,25 @@ export class VaultCoachRuntime {
             this.services.knowledgeGraphService.markDirty();
             this.services.masteryService.markDirty("确定性知识图谱尚未建立，需要重新计算掌握度。");
         }
+        const restoredVectorJob = await this.services.vectorBuildCoordinator.restore();
+        if (restoredVectorJob && !isTerminalVectorJob(restoredVectorJob)) {
+            this.trackBackgroundTask(this.finishFullDerivedIndexes(restoredVectorJob, false));
+        } else if (restoredVectorJob) {
+            this.applyVectorJobTerminal(restoredVectorJob);
+        }
         if (this.services.chatService.getMessages().length === 0) {
             this.applicationContainer.application.chat.resetConversation();
         }
     }
 
     async dispose(): Promise<void> {
+        this.disposing = true;
         this.abortKnowledgeIndexBuild(false);
+        this.services.vectorBuildCoordinator.cancel();
         this.clearAutoIndexTimers();
         this.unsubscribeApplicationEvents?.();
         this.unsubscribeApplicationEvents = null;
+        await Promise.allSettled(Array.from(this.backgroundDerivedTasks));
         await this.applicationContainer.dispose();
     }
 
@@ -363,52 +378,16 @@ export class VaultCoachRuntime {
             textActivated = true;
             coreReadiness.resolve();
 
-            let vectorStats = this.services.ragEngine.getVectorIndexStats();
-            let vectorBuildWarning = "";
-            try {
-                this.setKnowledgeIndexBusy("vector");
-                abortSignal.throwIfAborted();
-                vectorStats = await this.services.ragEngine.rebuildVectorIndex(abortSignal);
-                this.vectorIndexDirty = false;
-                this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
-            } catch (error: unknown) {
-                if (isAbortError(error)) throw error;
-                console.error("[VaultCoachRuntime] 向量索引建立失败，将回退到关键词检索。", error);
-                vectorBuildWarning = this.getVectorIndexFailureNotice(error);
-                this.services.ragEngine.hydrateVectorStats({
-                    ...this.services.ragEngine.getVectorIndexStats(),
-                    ready: false,
-                    compatibility: "stale",
-                });
-                this.vectorIndexDirty = true;
-            }
-            let graphRebuilt = false;
-            try {
-                await this.services.knowledgeGraphService.rebuildAll(abortSignal);
-                this.services.learningGraphQueryService.invalidate();
-                this.services.masteryService.markDirty("确定性知识图谱已重建，需要重新计算掌握度。");
-                graphRebuilt = true;
-            } catch (error: unknown) {
-                if (isAbortError(error)) throw error;
-                this.services.masteryService.markDirty("知识图谱重建失败，需要重新计算掌握度。");
-                console.error("[VaultCoachRuntime] 图谱构建失败，文本索引将保持可用。", error);
-            }
-            if (graphRebuilt && sourceWasOutOfSync) {
-                await this.services.semanticGraphService.reconcileWithCurrentSources();
-                await this.services.masteryService.clear();
-                this.services.learningGraphQueryService.invalidate();
-            }
-            await this.persistKnowledgeBaseSnapshot(graphRebuilt);
+            abortSignal.throwIfAborted();
+            const vectorJob = await this.enqueueVectorBuild();
+            this.trackBackgroundTask(this.finishFullDerivedIndexes(vectorJob, sourceWasOutOfSync));
             if (showNotice) {
-                const vectorInfo = this.settings.enableVectorRetrieval
-                    ? this.t("notice.index.vectorInfo", { vectorCount: vectorStats.vectorCount })
-                    : "";
                 const message = this.t("notice.index.complete", {
                     fileCount: textStats.fileCount,
                     chunkCount: textStats.chunkCount,
-                    vectorInfo,
+                    vectorInfo: "",
                 });
-                this.host.showNotice(vectorBuildWarning.length > 0 ? `${message} ${vectorBuildWarning}` : message);
+                this.host.showNotice(message);
             }
         } catch (error: unknown) {
             if (!textActivated) {
@@ -451,6 +430,7 @@ export class VaultCoachRuntime {
         this.clearAutoIndexTimers();
         this.pendingChangedKnowledgePaths.clear();
         this.pendingGraphRenames.clear();
+        await this.services.vectorBuildCoordinator.clear();
         this.services.knowledgeBase.clearIndexData();
         await this.services.vectorStore.clear();
         await this.services.persistentStore.removeKnowledgeBaseSnapshot();
@@ -487,8 +467,11 @@ export class VaultCoachRuntime {
 
     abortKnowledgeIndexBuild(showNotice: boolean): void {
         const controller = this.services.indexCoordinator.getActiveAbortController();
+        const vectorJob = this.services.vectorBuildCoordinator.getState();
+        const hasActiveVectorJob = vectorJob !== null && !isTerminalVectorJob(vectorJob);
+        this.services.vectorBuildCoordinator.cancel();
         if (!controller || controller.signal.aborted) {
-            if (showNotice) this.notice("notice.index.noActiveBuild");
+            if (showNotice) this.notice(hasActiveVectorJob ? "notice.index.stopRequested" : "notice.index.noActiveBuild");
             return;
         }
         controller.abort(new DOMException("VaultCoach index build aborted by user.", "AbortError"));
@@ -642,41 +625,9 @@ export class VaultCoachRuntime {
             this.coreRefreshRequiresFresh = false;
             this.setSourceInventoryStatus("ready", null);
             await this.persistKnowledgeBaseSnapshot();
-            try {
-                await this.services.ragEngine.syncVectorIndex(syncResult, abortSignal);
-                this.vectorIndexDirty = false;
-                this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
-            } catch (error: unknown) {
-                if (isAbortError(error)) throw error;
-                console.error("[VaultCoachRuntime] 自动向量增量同步失败，将回退到关键词检索。", error);
-                this.markActiveVectorIndexStale();
-                this.vectorIndexDirty = this.settings.enableVectorRetrieval;
-            }
-            try {
-                await this.services.knowledgeGraphService.syncChangedFiles(
-                    syncResult,
-                    graphRenames,
-                    abortSignal,
-                );
-                this.services.learningGraphQueryService.invalidate();
-                this.services.masteryService.markDirty("确定性知识图谱已增量同步，需要重新计算掌握度。");
-                this.removeProcessedGraphRenames(graphRenames);
-            } catch (error: unknown) {
-                if (isAbortError(error)) throw error;
-                console.error("[VaultCoachRuntime] 自动图谱增量同步失败，文本索引将保持可用。", error);
-                this.services.knowledgeGraphService.markDirty();
-                this.services.masteryService.markDirty("知识图谱增量同步失败，需要重新计算掌握度。");
-                for (const path of syncResult.affectedFiles) this.pendingChangedKnowledgePaths.add(path);
-            }
-            try {
-                await this.services.semanticGraphService.syncChangedFiles(syncResult, abortSignal);
-                this.services.learningGraphQueryService.invalidate();
-                this.services.masteryService.markDirty("有效概念图谱已增量同步，需要重新计算掌握度。");
-            } catch (error: unknown) {
-                if (isAbortError(error)) throw error;
-                this.services.masteryService.markDirty("语义图谱增量同步失败，需要重新计算掌握度。");
-                console.error("[VaultCoachRuntime] 自动语义图谱增量同步失败，文本索引将保持可用。", error);
-            }
+            abortSignal.throwIfAborted();
+            const vectorJob = await this.enqueueVectorBuild();
+            this.trackBackgroundTask(this.finishIncrementalDerivedIndexes(vectorJob, syncResult, graphRenames));
             this.lastAutoIndexAt = Date.now();
             await this.persistKnowledgeBaseSnapshot();
             await this.persistRuntimeState();
@@ -699,34 +650,95 @@ export class VaultCoachRuntime {
         }
     }
 
-    private async rebuildVectorIndexOnly(showNotice: boolean, signal?: AbortSignal): Promise<void> {
-        const operation = this.startKnowledgeIndexOperation("vector", signal);
-        if (!operation) {
-            if (showNotice) this.notice("notice.index.alreadyBuilding");
-            return;
+    private async enqueueVectorBuild(): Promise<VectorBuildJob> {
+        const sourceCoreGenerationId = this.getActiveCoreGenerationId();
+        if (!sourceCoreGenerationId) throw new Error("Cannot queue vector build without an active Core generation.");
+        return await this.services.vectorBuildCoordinator.enqueue(sourceCoreGenerationId);
+    }
+
+    private trackBackgroundTask(task: Promise<void>): void {
+        const tracked = task.catch((error: unknown) => {
+            console.error("[VaultCoachRuntime] 后台派生索引任务失败，CoreIndex 仍保持可用。", error);
+        }).finally(() => this.backgroundDerivedTasks.delete(tracked));
+        this.backgroundDerivedTasks.add(tracked);
+    }
+
+    private async finishFullDerivedIndexes(job: VectorBuildJob, sourceWasOutOfSync: boolean): Promise<void> {
+        const terminal = await this.services.vectorBuildCoordinator.waitFor(job.jobId);
+        if (this.disposing || this.getActiveCoreGenerationId() !== terminal.sourceCoreGenerationId) return;
+        this.applyVectorJobTerminal(terminal);
+        let graphRebuilt = false;
+        try {
+            await this.services.knowledgeGraphService.rebuildAll();
+            if (this.getActiveCoreGenerationId() !== terminal.sourceCoreGenerationId) return;
+            this.services.learningGraphQueryService.invalidate();
+            this.services.masteryService.markDirty("确定性知识图谱已重建，需要重新计算掌握度。");
+            graphRebuilt = true;
+        } catch (error: unknown) {
+            if (isAbortError(error)) return;
+            this.services.masteryService.markDirty("知识图谱重建失败，需要重新计算掌握度。");
+            console.error("[VaultCoachRuntime] 图谱构建失败，文本索引将保持可用。", error);
+        }
+        if (graphRebuilt && sourceWasOutOfSync) {
+            await this.services.semanticGraphService.reconcileWithCurrentSources();
+            await this.services.masteryService.clear();
+            this.services.learningGraphQueryService.invalidate();
+        }
+        await this.persistKnowledgeBaseSnapshot(graphRebuilt);
+    }
+
+    private async finishIncrementalDerivedIndexes(
+        job: VectorBuildJob,
+        syncResult: KnowledgeBaseSyncResult,
+        graphRenames: readonly GraphRename[],
+    ): Promise<void> {
+        const terminal = await this.services.vectorBuildCoordinator.waitFor(job.jobId);
+        if (this.disposing || this.getActiveCoreGenerationId() !== terminal.sourceCoreGenerationId) return;
+        this.applyVectorJobTerminal(terminal);
+        try {
+            await this.services.knowledgeGraphService.syncChangedFiles(syncResult, graphRenames);
+            if (this.getActiveCoreGenerationId() !== terminal.sourceCoreGenerationId) return;
+            this.services.learningGraphQueryService.invalidate();
+            this.services.masteryService.markDirty("确定性知识图谱已增量同步，需要重新计算掌握度。");
+            this.removeProcessedGraphRenames(graphRenames);
+        } catch (error: unknown) {
+            if (isAbortError(error)) return;
+            console.error("[VaultCoachRuntime] 自动图谱增量同步失败，文本索引将保持可用。", error);
+            this.services.knowledgeGraphService.markDirty();
+            this.services.masteryService.markDirty("知识图谱增量同步失败，需要重新计算掌握度。");
+            for (const path of syncResult.affectedFiles) this.pendingChangedKnowledgePaths.add(path);
         }
         try {
-            const vectorStats = await this.services.ragEngine.rebuildVectorIndex(operation.signal);
-            this.vectorIndexDirty = false;
-            this.knowledgeBaseDirty = false;
-            this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
-            await this.persistKnowledgeBaseSnapshot();
-            if (showNotice) this.notice("notice.index.vectorComplete", { count: vectorStats.vectorCount });
+            await this.services.semanticGraphService.syncChangedFiles(syncResult);
+            this.services.learningGraphQueryService.invalidate();
+            this.services.masteryService.markDirty("有效概念图谱已增量同步，需要重新计算掌握度。");
         } catch (error: unknown) {
-            if (isAbortError(error)) {
-                console.warn("[VaultCoachRuntime] 向量索引构建已停止。", error);
-                this.markActiveVectorIndexStale();
-                this.vectorIndexDirty = this.settings.enableVectorRetrieval;
-                if (showNotice) this.notice("notice.index.stopped");
-                return;
-            }
-            console.error("[VaultCoachRuntime] 向量索引重建失败", error);
-            this.markActiveVectorIndexStale();
-            this.vectorIndexDirty = true;
-            if (showNotice) this.host.showNotice(this.getVectorIndexFailureNotice(error));
-        } finally {
-            this.finishKnowledgeIndexOperation(operation);
+            if (isAbortError(error)) return;
+            this.services.masteryService.markDirty("语义图谱增量同步失败，需要重新计算掌握度。");
+            console.error("[VaultCoachRuntime] 自动语义图谱增量同步失败，文本索引将保持可用。", error);
         }
+        await this.persistKnowledgeBaseSnapshot();
+    }
+
+    private applyVectorJobTerminal(job: VectorBuildJob): void {
+        const ready = job.phase === "rag-ready";
+        this.vectorIndexDirty = this.settings.enableVectorRetrieval && !ready;
+        if (ready) {
+            this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
+            return;
+        }
+        this.markActiveVectorIndexStale();
+        if (job.phase === "failed") {
+            console.error("[VaultCoachRuntime] 后台向量索引建立失败，将继续使用关键词检索。", job.errorCode);
+        }
+    }
+
+    private getActiveCoreGenerationId(): string | null {
+        if (!this.services.knowledgeBase.isReady()) return null;
+        return createCoreGenerationId(
+            this.services.knowledgeBase.getSettingsSignature(),
+            this.services.knowledgeBase.getSourceInventory(),
+        );
     }
 
     private async restorePersistentState(): Promise<void> {
@@ -787,18 +799,6 @@ export class VaultCoachRuntime {
         if (this.hasShownOllamaEmbeddingCpuFallbackNotice || !this.services.ragEngine.consumeOllamaEmbeddingCpuFallbackUsed()) return;
         this.hasShownOllamaEmbeddingCpuFallbackNotice = true;
         this.host.showNotice(this.t("notice.index.ollamaEmbeddingCpuFallback"), 14000);
-    }
-
-    private getVectorIndexFailureNotice(error: unknown): string {
-        return this.isLikelyLocalOllamaConnectionFailure(error)
-            ? this.t("notice.index.ollamaConnectionFailed")
-            : this.t("notice.index.vectorFailedWarning");
-    }
-
-    private isLikelyLocalOllamaConnectionFailure(error: unknown): boolean {
-        const message = getErrorMessage(error);
-        return /\/api\/(?:embed|embeddings|chat)\b/i.test(message)
-            && /ERR_CONNECTION_REFUSED|ECONNREFUSED|connection refused|failed to fetch|fetch failed/i.test(message);
     }
 
     private async persistRuntimeState(): Promise<void> {
@@ -951,6 +951,11 @@ function createCoreReadinessTask(): CoreReadinessTask {
     // 手动重建调用者可能只等待完整流程；在这种情况下避免 readiness rejection 成为未处理 rejection。
     void task.promise.catch(() => undefined);
     return task;
+}
+
+function isTerminalVectorJob(job: VectorBuildJob): boolean {
+    return job.phase === "rag-ready" || job.phase === "stale" || job.phase === "failed"
+        || job.phase === "cancelled" || job.phase === "superseded";
 }
 
 function normalizeKnowledgeScopeSelection(selection: KnowledgeScopeSelection): KnowledgeScopeSelection {

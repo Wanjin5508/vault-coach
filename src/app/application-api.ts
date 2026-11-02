@@ -30,6 +30,7 @@ import type { StorageFootprint } from "../domain/index-lifecycle/storage-footpri
 import type { AdaptiveExamPlanRequest, AdaptiveExamPlanResult } from "../domain/adaptive-exam/adaptive-exam-types";
 import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendation/recommendation-types";
 import type { KnowledgeEngineAvailability, KnowledgeEngineDiagnostics } from "./engine/knowledge-engine-types";
+import type { VectorBuildJob } from "../domain/index-jobs/vector-build-job";
 
 /** 展示层使用的聊天门面；会话持久化和 RAG 编排由应用层完成。 */
 export interface ChatApplicationApi {
@@ -65,6 +66,7 @@ export interface KnowledgeIndexViewState {
     busy: KnowledgeIndexBusyState;
     stats: KnowledgeBaseStats;
     vectorStats: VectorIndexStats;
+    vectorJob: VectorBuildJob | null;
 }
 
 /** 索引生命周期门面；重建和清理的并发控制由应用层负责。 */

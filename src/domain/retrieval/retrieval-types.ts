@@ -81,6 +81,7 @@ export interface VectorStoreInspection {
     status: "absent" | "ready" | "legacy" | "corrupt";
     fingerprint: EmbeddingFingerprint | null;
     stats: VectorStoreStats;
+    sourceCoreGenerationId?: string;
     reasonCode?: "unsupported-schema" | "missing-file" | "invalid-manifest" | "invalid-shard";
 }
 
@@ -140,7 +141,12 @@ export interface RerankResultItem {
  */
 export interface VectorStore {
     initialize(): Promise<void>;
-    replaceAll(records: readonly VectorRecord[], fingerprint: EmbeddingFingerprint): Promise<VectorStoreStats>;
+    replaceAll(
+        records: readonly VectorRecord[],
+        fingerprint: EmbeddingFingerprint,
+        beforeActivate?: () => void | Promise<void>,
+        sourceCoreGenerationId?: string,
+    ): Promise<VectorStoreStats>;
     upsert(records: readonly VectorRecord[], fingerprint: EmbeddingFingerprint): Promise<void>;
     remove(chunkIds: readonly string[]): Promise<void>;
     search(queryVector: Float32Array, queryFingerprint: EmbeddingFingerprint, options: VectorSearchOptions): Promise<VectorStoreHit[]>;
