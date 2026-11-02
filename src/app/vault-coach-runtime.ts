@@ -27,6 +27,8 @@ import type { LocalAiStatus } from "../domain/local-ai/local-ai-types";
 import { createCoreGenerationId } from "../domain/index-lifecycle/index-generation";
 import type { VectorBuildJob } from "../domain/index-jobs/vector-build-job";
 import { isGraphBuildJobTerminal, type GraphBuildJob } from "../domain/graph-jobs/graph-build-job";
+import { createIndexTraceRef } from "./observability/index-lifecycle-trace";
+import { IndexPerformanceMonitor } from "./observability/index-performance-monitor";
 
 type TranslateFn = (key: TranslationKey, replacements?: Record<string, string | number>) => string;
 
@@ -76,6 +78,7 @@ export class VaultCoachRuntime {
     private coreRefreshRequiresFresh = true;
     private readonly backgroundDerivedTasks = new Set<Promise<void>>();
     private disposing = false;
+    private performanceMonitor: IndexPerformanceMonitor | null = null;
 
     constructor(private readonly host: VaultCoachRuntimeHost) {}
 
@@ -112,6 +115,9 @@ export class VaultCoachRuntime {
             getStorageFootprint: () => this.getStorageFootprint(),
             getActiveCoreGenerationId: () => this.getActiveCoreGenerationId(),
         });
+        this.performanceMonitor = new IndexPerformanceMonitor(this.services.indexLifecycleTrace);
+        this.performanceMonitor.start();
+        this.performanceMonitor.sampleMemory();
         this.unsubscribeApplicationEvents = this.applicationContainer.application.subscribe(() => this.host.onStateChanged());
 
         await this.restorePersistentState();
@@ -161,6 +167,9 @@ export class VaultCoachRuntime {
         this.unsubscribeApplicationEvents?.();
         this.unsubscribeApplicationEvents = null;
         await Promise.allSettled(Array.from(this.backgroundDerivedTasks));
+        this.performanceMonitor?.sampleMemory();
+        this.performanceMonitor?.dispose();
+        this.performanceMonitor = null;
         await this.applicationContainer.dispose();
     }
 
@@ -383,6 +392,7 @@ export class VaultCoachRuntime {
             if (showNotice) this.notice("notice.index.alreadyBuilding");
             return;
         }
+        const coreTrace = this.services.indexLifecycleTrace.begin("core-index.rebuild", { role: "core" });
         const abortSignal = operation.signal;
         const coreReadiness = createCoreReadinessTask();
         this.activeCoreReadiness = coreReadiness;
@@ -400,9 +410,29 @@ export class VaultCoachRuntime {
             this.knowledgeBaseDirty = false;
             this.coreRefreshRequiresFresh = false;
             this.setSourceInventoryStatus("ready", null);
-            await this.persistKnowledgeBaseSnapshot();
+            const persistTrace = this.services.indexLifecycleTrace.begin("text.persist", {
+                role: "core",
+                counts: { total: textStats.chunkCount, processed: textStats.chunkCount },
+            });
+            try {
+                await this.persistKnowledgeBaseSnapshot();
+                persistTrace.finish("completed");
+            } catch (error: unknown) {
+                persistTrace.finish("failed", "text-persist-failed");
+                throw error;
+            }
+            const coreGenerationId = this.getActiveCoreGenerationId();
+            if (coreGenerationId) {
+                this.services.indexLifecycleTrace.instant("core.activate", {
+                    generationRef: createIndexTraceRef("generation", coreGenerationId),
+                    role: "core",
+                    counts: { total: textStats.chunkCount, processed: textStats.chunkCount },
+                });
+            }
             textActivated = true;
             coreReadiness.resolve();
+            coreTrace.finish("completed", null, { total: textStats.chunkCount, processed: textStats.chunkCount });
+            this.performanceMonitor?.sampleMemory();
 
             abortSignal.throwIfAborted();
             const vectorJob = await this.enqueueVectorBuild();
@@ -416,6 +446,7 @@ export class VaultCoachRuntime {
                 this.host.showNotice(message);
             }
         } catch (error: unknown) {
+            coreTrace.finish(isAbortError(error) ? "cancelled" : "failed", isAbortError(error) ? "aborted" : "core-rebuild-failed");
             if (!textActivated) {
                 coreReadiness.reject(error);
                 this.knowledgeBaseDirty = true;
@@ -636,12 +667,17 @@ export class VaultCoachRuntime {
             this.isSyncingKnowledgeBase = false;
             return;
         }
+        const syncTrace = this.services.indexLifecycleTrace.begin("core-index.sync", {
+            role: "core",
+            counts: { total: filePaths.length, queued: filePaths.length },
+        });
         const abortSignal = operation.signal;
         this.pendingChangedKnowledgePaths.clear();
         this.clearAutoIndexTimers();
         try {
             abortSignal.throwIfAborted();
             if (!this.services.knowledgeBase.isReady()) {
+                syncTrace.finish("superseded", "delegated-full-rebuild");
                 await this.rebuildKnowledgeBase(showNotice, abortSignal);
                 return;
             }
@@ -654,7 +690,30 @@ export class VaultCoachRuntime {
             this.knowledgeBaseDirty = false;
             this.coreRefreshRequiresFresh = false;
             this.setSourceInventoryStatus("ready", null);
-            await this.persistKnowledgeBaseSnapshot();
+            const persistTrace = this.services.indexLifecycleTrace.begin("text.persist", {
+                role: "core",
+                counts: { total: syncResult.stats.chunkCount, processed: syncResult.stats.chunkCount },
+            });
+            try {
+                await this.persistKnowledgeBaseSnapshot();
+                persistTrace.finish("completed");
+            } catch (error: unknown) {
+                persistTrace.finish("failed", "text-persist-failed");
+                throw error;
+            }
+            const coreGenerationId = this.getActiveCoreGenerationId();
+            if (coreGenerationId) {
+                this.services.indexLifecycleTrace.instant("core.activate", {
+                    generationRef: createIndexTraceRef("generation", coreGenerationId),
+                    role: "core",
+                    counts: { total: syncResult.stats.chunkCount, processed: syncResult.stats.chunkCount },
+                });
+            }
+            syncTrace.finish("completed", null, {
+                total: filePaths.length,
+                processed: syncResult.affectedFiles.length,
+                queued: 0,
+            });
             abortSignal.throwIfAborted();
             const vectorJob = await this.enqueueVectorBuild();
             this.trackBackgroundTask(this.finishIncrementalDerivedIndexes(vectorJob, syncResult, graphRenames));
@@ -663,6 +722,7 @@ export class VaultCoachRuntime {
             await this.persistRuntimeState();
             if (showNotice) this.notice("notice.index.incrementalComplete", { count: syncResult.affectedFiles.length });
         } catch (error: unknown) {
+            syncTrace.finish(isAbortError(error) ? "cancelled" : "failed", isAbortError(error) ? "aborted" : "core-sync-failed");
             for (const path of filePaths) this.pendingChangedKnowledgePaths.add(path);
             if (isAbortError(error)) {
                 console.warn("[VaultCoachRuntime] 自动增量同步已停止。", error);
@@ -752,6 +812,7 @@ export class VaultCoachRuntime {
             }
         }
         await this.persistKnowledgeBaseSnapshot(ready);
+        this.performanceMonitor?.sampleMemory();
     }
 
     private applyVectorJobTerminal(job: VectorBuildJob): void {
@@ -759,6 +820,7 @@ export class VaultCoachRuntime {
         this.vectorIndexDirty = this.settings.enableVectorRetrieval && !ready;
         if (ready) {
             this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
+            this.performanceMonitor?.sampleMemory();
             return;
         }
         this.markActiveVectorIndexStale();

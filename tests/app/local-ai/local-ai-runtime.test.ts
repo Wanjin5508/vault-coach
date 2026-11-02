@@ -5,6 +5,7 @@ import type {
     RuntimeAssetStore,
 } from "../../../src/domain/local-ai/local-ai-runtime-assets";
 import { LOCAL_AI_WORKER_PROTOCOL_VERSION } from "../../../src/infrastructure/local-ai/local-ai-worker-protocol";
+import { IndexLifecycleTrace } from "../../../src/app/observability/index-lifecycle-trace";
 
 interface WorkerRequest {
     requestId: string;
@@ -105,6 +106,27 @@ describe("LocalAIRuntime", () => {
         expect(assets.prepareCalls).toHaveLength(1);
         expect(assets.clearCalls).toBe(1);
         expect(worker.terminated).toBe(true);
+    });
+
+    it("records an embedding batch without request text or raw policy identity", async () => {
+        const worker = new FakeLocalAiWorker();
+        const trace = new IndexLifecycleTrace(10, createClock());
+        const runtime = new LocalAIRuntime(
+            new FakeRuntimeAssetStore(),
+            () => ({ worker: worker as unknown as Worker, objectUrl: null }),
+            trace,
+        );
+        await runtime.prepare(true);
+
+        await runtime.embed({ texts: ["private query"], purpose: "query" });
+
+        const events = trace.getEvents();
+        expect(events).toEqual([
+            expect.objectContaining({ operation: "embedding.batch", status: "started", counts: { total: 1, queued: 1 } }),
+            expect.objectContaining({ operation: "embedding.batch", status: "completed", counts: { total: 1, processed: 1, queued: 0 } }),
+        ]);
+        expect(JSON.stringify(events)).not.toContain("private query");
+        await runtime.dispose();
     });
 
     it("rejects an aborted embedding request without posting it to the worker", async () => {
@@ -261,4 +283,9 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         await Promise.resolve();
     }
     throw new Error("Timed out waiting for worker request.");
+}
+
+function createClock(): () => number {
+    let value = 0;
+    return () => ++value;
 }

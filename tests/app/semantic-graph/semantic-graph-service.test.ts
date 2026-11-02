@@ -11,6 +11,7 @@ import { createDefaultSettings } from "../../../src/settings";
 import type { SectionExtractionInput } from "../../../src/app/semantic-graph/section-extraction-input";
 import type { EmbeddingProvider } from "../../../src/domain/embedding/embedding-provider";
 import { createEmbeddingFingerprint } from "../../../src/domain/embedding/embedding-fingerprint";
+import { IndexLifecycleTrace } from "../../../src/app/observability/index-lifecycle-trace";
 
 function embeddingProvider(
     embedTexts: (texts: readonly string[]) => Promise<readonly (readonly number[])[]>,
@@ -53,6 +54,7 @@ function embeddingProvider(
 describe("SemanticGraphService", () => {
     it("exhausts every pending Section in fair document rounds and persists each checkpoint", async () => {
         const store = new MemorySemanticStore();
+        const trace = new IndexLifecycleTrace();
         const extracted: string[] = [];
         const service = new SemanticGraphService({
             graphService: { getSnapshot: () => multiSectionSnapshot() } as never,
@@ -67,6 +69,7 @@ describe("SemanticGraphService", () => {
             embeddingProvider: embeddingProvider(async () => []),
             getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true, semanticGraphMaxSectionsPerRun: 1 }),
             getNow: () => 10,
+            trace,
         });
         await service.load();
 
@@ -86,6 +89,10 @@ describe("SemanticGraphService", () => {
             queuedSections: 0,
             failedSections: 0,
         });
+        expect(trace.getEvents().map((event) => event.operation)).toEqual(expect.arrayContaining([
+            "concept.extract",
+            "concept.embed",
+        ]));
     });
 
     it("drops a late extraction result after cancellation without persisting a checkpoint", async () => {

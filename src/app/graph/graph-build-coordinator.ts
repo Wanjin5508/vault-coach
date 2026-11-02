@@ -10,6 +10,12 @@ import {
 } from "../../domain/graph-jobs/graph-build-job";
 import type { GraphBuildHooks } from "./knowledge-graph-service";
 import type { SemanticGraphBuildHooks } from "../semantic-graph/semantic-graph-service";
+import {
+    createIndexTraceRef,
+    type IndexLifecycleTrace,
+    type IndexTraceSpan,
+    type IndexTraceStatus,
+} from "../observability/index-lifecycle-trace";
 
 interface StructuralGraphRunner {
     rebuildAll(signal?: AbortSignal, hooks?: GraphBuildHooks): Promise<GraphSnapshotV1>;
@@ -42,6 +48,7 @@ export interface GraphBuildCoordinatorDependencies {
     getGraphPolicyId(): string;
     onStateChanged(): void;
     now?: () => number;
+    trace?: IndexLifecycleTrace;
 }
 
 /** 串行拥有结构图与可选语义派生作业；所有可恢复事实落盘，控制器仅存在于当前进程。 */
@@ -51,6 +58,8 @@ export class GraphBuildCoordinator {
     private activeController: AbortController | null = null;
     private readonly completions = new Map<string, Promise<GraphBuildJob>>();
     private readonly suspendedJobIds = new Set<string>();
+    private readonly traceSuspendedJobIds = new Set<string>();
+    private readonly traceSpans = new Map<string, IndexTraceSpan>();
     private readonly now: () => number;
 
     constructor(private readonly dependencies: GraphBuildCoordinatorDependencies) {
@@ -125,6 +134,7 @@ export class GraphBuildCoordinator {
         const job = this.activeJob;
         if (!job || isGraphBuildJobTerminal(job.phase)) return;
         this.suspendedJobIds.add(job.jobId);
+        this.traceSuspendedJobIds.add(job.jobId);
         this.activeController?.abort(new DOMException("Graph build suspended for shutdown.", "AbortError"));
     }
 
@@ -179,7 +189,26 @@ export class GraphBuildCoordinator {
         this.dependencies.onStateChanged();
         const controller = new AbortController();
         this.activeController = controller;
-        const completion = this.run(job, controller).finally(() => {
+        const traceSpan = this.dependencies.trace?.begin("graph-job.run", {
+            jobRef: createIndexTraceRef("job", job.jobId),
+            generationRef: createIndexTraceRef("generation", job.sourceCoreGenerationId),
+            policyRef: createIndexTraceRef("policy", job.graphPolicyId),
+            role: "graph",
+        });
+        if (traceSpan) this.traceSpans.set(job.jobId, traceSpan);
+        const completion = this.run(job, controller).then((result) => {
+            const suspended = this.traceSuspendedJobIds.delete(result.jobId);
+            traceSpan?.finish(suspended ? "suspended" : graphTraceStatus(result.phase), result.errorCode, {
+                processed: result.checkpoint.processedSections,
+                failed: result.checkpoint.failedSections,
+                queued: result.checkpoint.queuedSections,
+            });
+            return result;
+        }, (error: unknown) => {
+            traceSpan?.finish("failed", "graph-job-unhandled");
+            throw error;
+        }).finally(() => {
+            this.traceSpans.delete(job.jobId);
             if (this.activeController === controller) this.activeController = null;
         });
         this.completions.set(job.jobId, completion);
@@ -188,11 +217,26 @@ export class GraphBuildCoordinator {
     }
 
     private async run(job: GraphBuildJob, controller: AbortController): Promise<GraphBuildJob> {
+        const snapshotSpan = this.dependencies.trace?.begin("graph.snapshot", {
+            jobRef: createIndexTraceRef("job", job.jobId),
+            generationRef: createIndexTraceRef("generation", job.sourceCoreGenerationId),
+            policyRef: createIndexTraceRef("policy", job.graphPolicyId),
+            role: "graph",
+        });
         try {
             const graphHooks: GraphBuildHooks = {
                 sourceCoreGenerationId: job.sourceCoreGenerationId,
                 graphPolicyId: job.graphPolicyId,
-                beforeActivate: () => this.requireCurrentIdentity(job, controller.signal),
+                beforeActivate: () => {
+                    this.requireCurrentIdentity(job, controller.signal);
+                    snapshotSpan?.finish("completed");
+                    this.dependencies.trace?.instant("graph.activate", {
+                        jobRef: createIndexTraceRef("job", job.jobId),
+                        generationRef: createIndexTraceRef("generation", job.sourceCoreGenerationId),
+                        policyRef: createIndexTraceRef("policy", job.graphPolicyId),
+                        role: "graph",
+                    });
+                },
                 onPhase: async (phase) => { await this.updateActive(job.jobId, phase); },
             };
             if (job.mode === "full") {
@@ -205,6 +249,7 @@ export class GraphBuildCoordinator {
                     graphHooks,
                 );
             }
+            snapshotSpan?.finish("completed");
             this.requireCurrentIdentity(job, controller.signal);
             if (job.mode === "full" && job.reconcileSemanticSources) {
                 await this.dependencies.semantic.reconcileWithCurrentSources();
@@ -221,6 +266,10 @@ export class GraphBuildCoordinator {
             this.requireCurrentIdentity(job, controller.signal);
             return await this.updateActive(job.jobId, "graph-ready");
         } catch (error: unknown) {
+            snapshotSpan?.finish(
+                isAbortError(error) ? "cancelled" : error instanceof StaleGraphBuildError ? "stale" : "failed",
+                isAbortError(error) ? "aborted" : error instanceof StaleGraphBuildError ? "identity-changed" : "graph-snapshot-failed",
+            );
             const latest = this.activeJob;
             if (this.suspendedJobIds.delete(job.jobId)) {
                 return latest?.jobId === job.jobId ? cloneJob(latest) : cloneJob(job);
@@ -258,6 +307,11 @@ export class GraphBuildCoordinator {
         };
         this.activeJob = next;
         await this.dependencies.store.save(next);
+        this.traceSpans.get(jobId)?.checkpoint({
+            processed: progress.processedSections,
+            failed: progress.failedSections,
+            queued: progress.queuedSections,
+        });
         this.dependencies.onStateChanged();
         return cloneJob(next);
     }
@@ -299,4 +353,12 @@ function cloneJob(job: GraphBuildJob): GraphBuildJob {
         renames: job.renames.map((rename) => ({ ...rename })),
         checkpoint: { ...job.checkpoint },
     };
+}
+
+function graphTraceStatus(phase: GraphBuildJobPhase): Exclude<IndexTraceStatus, "started" | "checkpoint"> {
+    if (phase === "graph-ready") return "completed";
+    if (phase === "cancelled") return "cancelled";
+    if (phase === "superseded") return "superseded";
+    if (phase === "stale") return "stale";
+    return "failed";
 }

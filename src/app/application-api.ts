@@ -32,6 +32,7 @@ import type { RecommendationSnapshot, ReviewAction } from "../domain/recommendat
 import type { KnowledgeEngineAvailability, KnowledgeEngineDiagnostics } from "./engine/knowledge-engine-types";
 import type { VectorBuildJob } from "../domain/index-jobs/vector-build-job";
 import type { GraphBuildJob } from "../domain/graph-jobs/graph-build-job";
+import type { IndexLifecycleTraceEvent } from "./observability/index-lifecycle-trace";
 
 /** 展示层使用的聊天门面；会话持久化和 RAG 编排由应用层完成。 */
 export interface ChatApplicationApi {
@@ -77,6 +78,7 @@ export interface IndexApplicationApi {
     clear(): Promise<void>;
     abort(): void;
     getState(): KnowledgeIndexViewState;
+    getTraceEvents(): IndexLifecycleTraceEvent[];
     getStorageFootprint(): Promise<StorageFootprint>;
 }
 

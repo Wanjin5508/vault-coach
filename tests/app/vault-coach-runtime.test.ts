@@ -164,6 +164,19 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
             expect.objectContaining({ type: "links_to", sourceNodeId: "markdown:overview.md", targetNodeId: "markdown:details.md" }),
         ]));
         expect(JSON.parse(harness.adapter.files.get(GRAPH_SNAPSHOT_PATH) ?? "")).toEqual(snapshot);
+        const traceEvents = harness.runtime.application.index.getTraceEvents();
+        expect(traceEvents.map((event) => event.operation)).toEqual(expect.arrayContaining([
+            "core-index.rebuild",
+            "text.persist",
+            "core.activate",
+            "vector-job.run",
+            "graph-job.run",
+            "graph.snapshot",
+            "graph.activate",
+        ]));
+        expect(traceEvents.every((event) => event.durationMs === null || event.durationMs >= 0)).toBe(true);
+        expect(JSON.stringify(traceEvents)).not.toContain("overview.md");
+        expect(JSON.stringify(traceEvents)).not.toContain("details.md");
 
         await harness.runtime.dispose();
     });

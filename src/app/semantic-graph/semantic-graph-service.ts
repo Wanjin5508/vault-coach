@@ -41,6 +41,7 @@ import type { GraphCapacityAssessment, GraphCapacityInput } from "../../domain/g
 import type { VectorIndexStats } from "../../domain/retrieval/retrieval-types";
 import type { EmbeddingProvider } from "../../domain/embedding/embedding-provider";
 import { getEmbeddingFingerprintDisplayId, isFingerprintCompatibleWithDescriptor } from "../../domain/embedding/embedding-fingerprint";
+import type { IndexLifecycleTrace } from "../observability/index-lifecycle-trace";
 
 /** 语义图协调器使用的领域端口、设置读取器和状态通知回调。 */
 export interface SemanticGraphServiceDependencies {
@@ -55,6 +56,7 @@ export interface SemanticGraphServiceDependencies {
     getVectorIndexStats?(): Pick<VectorIndexStats, "vectorCount" | "dimension">;
     /** 发布内存中的执行进度，但不让应用服务依赖 Obsidian UI。 */
     onStateChanged?(): void;
+    trace?: IndexLifecycleTrace;
 }
 
 export interface SemanticGraphBuildHooks {
@@ -544,22 +546,58 @@ export class SemanticGraphService {
             const model = this.getModelMetadata();
             const previousConcepts = this.state.concepts;
             await hooks?.onPhase?.("extracting");
-            const result = await this.refreshExtractions(inputs, targetPaths, model, signal, mode === "manual", async (extractions, progress) => {
-                signal.throwIfAborted();
-                await this.persistExtractionCheckpoint(extractions);
-                signal.throwIfAborted();
-                this.coordinator.setProgress(progress);
-                await hooks?.onCheckpoint?.(progress);
-                this.notifyStateChanged();
-            }, (progress) => {
-                this.coordinator.setProgress(progress);
-                this.notifyStateChanged();
+            const extractionSpan = this.dependencies.trace?.begin("concept.extract", {
+                role: "graph",
+                counts: { total: inputs.length, queued: inputs.length },
             });
+            let result: Awaited<ReturnType<SemanticGraphService["refreshExtractions"]>>;
+            try {
+                result = await this.refreshExtractions(inputs, targetPaths, model, signal, mode === "manual", async (extractions, progress) => {
+                    signal.throwIfAborted();
+                    await this.persistExtractionCheckpoint(extractions);
+                    signal.throwIfAborted();
+                    this.coordinator.setProgress(progress);
+                    extractionSpan?.checkpoint({
+                        total: progress.totalSections,
+                        processed: progress.processedSections,
+                        failed: progress.failedSections,
+                        queued: progress.queuedSections,
+                    });
+                    await hooks?.onCheckpoint?.(progress);
+                    this.notifyStateChanged();
+                }, (progress) => {
+                    this.coordinator.setProgress(progress);
+                    this.notifyStateChanged();
+                });
+                extractionSpan?.finish("completed", null, {
+                    total: result.progress.totalSections,
+                    processed: result.progress.processedSections,
+                    failed: result.progress.failedSections,
+                    queued: result.progress.queuedSections,
+                });
+            } catch (error: unknown) {
+                extractionSpan?.finish(isAbortError(error) ? "cancelled" : "failed", isAbortError(error) ? "aborted" : "concept-extraction-failed");
+                throw error;
+            }
             this.coordinator.setProgress(result.progress);
             this.notifyStateChanged();
             const changedConceptIds = getChangedConceptIds(previousConcepts, this.state.concepts);
             await hooks?.onPhase?.("concept-embedding");
-            await this.refreshEmbeddings(changedConceptIds, signal);
+            const embeddingSpan = this.dependencies.trace?.begin("concept.embed", {
+                role: "graph",
+                counts: { total: changedConceptIds.size, queued: changedConceptIds.size },
+            });
+            try {
+                await this.refreshEmbeddings(changedConceptIds, signal);
+                embeddingSpan?.finish("completed", null, {
+                    total: changedConceptIds.size,
+                    processed: changedConceptIds.size,
+                    queued: 0,
+                });
+            } catch (error: unknown) {
+                embeddingSpan?.finish(isAbortError(error) ? "cancelled" : "failed", isAbortError(error) ? "aborted" : "concept-embedding-failed");
+                throw error;
+            }
             await hooks?.onPhase?.("candidate-building");
             await this.refreshSimilarityCandidates(changedConceptIds, model, signal);
             this.refreshRuleCandidates(changedConceptIds, model);

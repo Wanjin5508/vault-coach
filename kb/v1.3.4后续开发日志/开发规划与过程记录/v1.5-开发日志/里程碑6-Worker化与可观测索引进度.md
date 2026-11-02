@@ -494,6 +494,18 @@ graph-job.run → graph.snapshot → concept.extract → concept.embed → graph
 
 Gate：达到 M4 预登记预算；性能不达标时找真实瓶颈，不以循环动画掩盖。
 
+#### M6-E2 实施记录（2026-11-02）
+
+已加入本地、只读、有界的索引生命周期 trace 基础设施：
+
+1. `application.index.getTraceEvents()` 暴露最近 256 条内存事件；事件不持久化、不联网，不包含笔记/query/题目/答案正文或 Vault 文件路径。
+2. job、Core generation 和 policy 原始身份在进入 trace 前统一转换为不可逆 8 位短摘要。Embedding policy 中可能存在的 endpoint/model 信息不会原样进入诊断。
+3. 已接入 `core-index.rebuild/sync`、`text.persist`、`core.activate`、`vector-job.run`、`embedding.batch`、`vector.activate`、`graph-job.run`、`graph.snapshot`、`concept.extract`、`concept.embed` 和 `graph.activate`。每个 span 记录 started/terminal、持续时间、安全错误码和可选计数；Graph checkpoint 保留 processed/failed/queued 数。
+4. Chromium/桌面运行时支持 `PerformanceObserver(longtask)` 时记录主线程 Long Task；支持非标准 `performance.memory` 时在初始化、Core/Vector/Graph 终态及 unload 采集 JS heap。iOS/Android 或其他不支持的平台明确降级为空采样，不伪造零 Long Task 或零内存。
+5. trace 快照是深拷贝，span 只允许 settle 一次，超过上限淘汰最旧事件；取消、stale、superseded、suspended 与普通 failed 使用不同终态。
+
+自动化测试只证明 envelope、隐私字段、计时、边界容量、平台降级和生命周期接线正确；72 个测试文件、307 项测试、lint、TypeScript、生产构建和 release asset 校验通过。M4 预算是否达标、真实发布 Worker 离线加载、GC/原生内存，以及桌面/iOS/Android 的性能结果仍必须在相应设备上采集后填写，不能由单元测试替代。
+
 ## 5. 必测场景
 
 | 场景 | 预期 |
