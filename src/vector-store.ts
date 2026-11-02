@@ -12,6 +12,7 @@ interface EmbeddedVectorManifestV2 {
     backend: "embedded-exact";
     generationId: string;
     fingerprint: EmbeddingFingerprint;
+    sourceCoreGenerationId?: string;
     dimension: number;
     shardId: string;
     shardByteLength: number;
@@ -52,6 +53,7 @@ export class EmbeddedExactVectorStore implements VectorStore {
     private readonly records = new Map<string, StoredVectorRecord>();
     private initialized = false;
     private fingerprint: EmbeddingFingerprint | null = null;
+    private sourceCoreGenerationId: string | null = null;
     private persistedBytes = 0;
     private loadedBytes = 0;
     private lastUpdatedAt: number | null = null;
@@ -90,7 +92,12 @@ export class EmbeddedExactVectorStore implements VectorStore {
         }
     }
 
-    async replaceAll(records: readonly VectorRecord[], fingerprint: EmbeddingFingerprint): Promise<VectorStoreStats> {
+    async replaceAll(
+        records: readonly VectorRecord[],
+        fingerprint: EmbeddingFingerprint,
+        beforeActivate?: () => void | Promise<void>,
+        sourceCoreGenerationId?: string,
+    ): Promise<VectorStoreStats> {
         await this.initialize();
         validateEmbeddingFingerprint(fingerprint);
         const prepared = this.prepareRecords(records, fingerprint);
@@ -106,6 +113,7 @@ export class EmbeddedExactVectorStore implements VectorStore {
             backend: "embedded-exact",
             generationId,
             fingerprint: cloneFingerprint(fingerprint),
+            ...(sourceCoreGenerationId ? { sourceCoreGenerationId } : {}),
             dimension: fingerprint.dimension,
             shardId,
             shardByteLength: shard.byteLength,
@@ -119,6 +127,7 @@ export class EmbeddedExactVectorStore implements VectorStore {
             await this.storage.saveKnowledgeIndexJson(`${root}/manifest.json`, manifest);
             const verified = await this.tryLoadGeneration(generationId);
             if (!verified) throw new Error("Vector generation verification failed.");
+            await beforeActivate?.();
             await this.activateGeneration(generationId);
             this.applyLoadedGeneration(verified);
             await this.cleanupObsoleteGenerations().catch((error: unknown) => {
@@ -173,6 +182,7 @@ export class EmbeddedExactVectorStore implements VectorStore {
         return {
             status: this.inspectionStatus,
             fingerprint: this.fingerprint ? cloneFingerprint(this.fingerprint) : null,
+            ...(this.sourceCoreGenerationId ? { sourceCoreGenerationId: this.sourceCoreGenerationId } : {}),
             stats: await this.getStats(),
             ...(this.inspectionReason ? { reasonCode: this.inspectionReason } : {}),
         };
@@ -232,6 +242,7 @@ export class EmbeddedExactVectorStore implements VectorStore {
         if (manifest.dimension !== manifest.fingerprint.dimension || manifest.vectorCount !== manifest.records.length
             || manifest.shardByteLength !== manifest.vectorCount * manifest.dimension * Float32Array.BYTES_PER_ELEMENT
             || manifest.persistedBytes !== manifest.shardByteLength
+            || (manifest.sourceCoreGenerationId !== undefined && (typeof manifest.sourceCoreGenerationId !== "string" || !manifest.sourceCoreGenerationId))
             || new Set(manifest.records.map((record) => record.chunkId)).size !== manifest.records.length) {
             return this.invalidGeneration("invalid-manifest");
         }
@@ -291,6 +302,7 @@ export class EmbeddedExactVectorStore implements VectorStore {
         this.records.clear();
         loaded.records.forEach((record, id) => this.records.set(id, record));
         this.fingerprint = cloneFingerprint(loaded.manifest.fingerprint);
+        this.sourceCoreGenerationId = loaded.manifest.sourceCoreGenerationId ?? null;
         this.persistedBytes = loaded.manifest.persistedBytes;
         this.loadedBytes = loaded.manifest.shardByteLength;
         this.lastUpdatedAt = loaded.manifest.updatedAt;
@@ -301,6 +313,7 @@ export class EmbeddedExactVectorStore implements VectorStore {
     private resetInMemoryState(): void {
         this.records.clear();
         this.fingerprint = null;
+        this.sourceCoreGenerationId = null;
         this.persistedBytes = 0;
         this.loadedBytes = 0;
         this.lastUpdatedAt = null;

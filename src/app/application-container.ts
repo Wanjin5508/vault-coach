@@ -59,6 +59,8 @@ import {
 } from "../infrastructure/local-ai/cache-storage-runtime-asset-store";
 import { ObsidianRuntimeAssetDownloader } from "../infrastructure/local-ai/obsidian-runtime-asset-downloader";
 import { BUILTIN_ORT_RUNTIME_POLICY } from "./local-ai/runtime-registry";
+import { VectorBuildCoordinator } from "./index/vector-build-coordinator";
+import { JsonVectorBuildJobStore } from "../infrastructure/storage/json-vector-build-job-store";
 
 /** 将应用服务接入 Obsidian 插件生命周期所需的最小宿主回调。 */
 export interface ApplicationContainerDependencies {
@@ -81,6 +83,7 @@ export interface ApplicationContainerDependencies {
     clearIndex(): Promise<void>;
     abortIndex(): void;
     getStorageFootprint(): Promise<StorageFootprint>;
+    getActiveCoreGenerationId(): string | null;
 }
 
 /** 渐进迁移期间仅供旧插件适配器使用的具体服务集合。 */
@@ -107,6 +110,7 @@ export interface ApplicationContainerServices {
     knowledgeEngineClient: KnowledgeEngineClient;
     adaptiveExamPlanner: AdaptiveExamPlanner;
     localAIRuntime: LocalAIRuntime;
+    vectorBuildCoordinator: VectorBuildCoordinator;
 }
 
 /**
@@ -171,6 +175,13 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             onVectorIncompatible: () => indexCoordinator.setVectorDirty(true),
         },
     );
+    const vectorBuildCoordinator = new VectorBuildCoordinator({
+        runner: ragEngine,
+        store: new JsonVectorBuildJobStore(persistentStore),
+        getActiveCoreGenerationId: () => dependencies.getActiveCoreGenerationId(),
+        getEmbeddingPolicyId: () => ragEngine.getEmbeddingPolicyId(),
+        onStateChanged: () => application?.notifyIndexStateChanged(),
+    });
     const memoryService = new LongTermMemoryService(
         () => dependencies.getSettings(),
         () => chatService.getMessagesForMemory(),
@@ -326,10 +337,12 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             knowledgeEngineClient,
             adaptiveExamPlanner,
             localAIRuntime,
+            vectorBuildCoordinator,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();
             indexCoordinator.dispose();
+            vectorBuildCoordinator.dispose();
             await localAIRuntime.dispose();
         },
     };

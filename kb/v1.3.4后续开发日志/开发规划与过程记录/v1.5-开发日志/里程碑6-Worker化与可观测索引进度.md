@@ -509,9 +509,10 @@ Gate：达到 M4 预登记预算；性能不达标时找真实瓶颈，不以循
 
 - [ ] 发布形态真实 Worker 推理和离线加载通过。
 - [x] 全量文本重建不先清空 active；Core staging/active 原子切换有故障测试。
-- [x] 首次 Ask/普通考试只等待 `text-ready`；当前旧式向量/图谱流程仍在整轮 rebuild 中收尾，尚不是 M6-C 的独立 job。
+- [x] 首次 Ask/普通考试只等待 `text-ready`；Core rebuild 在 VectorBuildJob 持久化为 queued 后返回，向量与后续图谱不再阻塞基础查询。
 - [x] 文本激活后立即持久化；向量过程中重启仍可恢复 keyword 索引。
-- [ ] VectorGeneration 独立引用 Core generation；更换 embedding 不使 keyword 失效。
+- [x] VectorGeneration manifest 与持久化 VectorBuildJob 独立引用 Core generation；更换 embedding 只使向量作业/代际失效，不使 keyword 失效。
+- [x] Worker 使用版本化 envelope、request/job/epoch/policy 身份和受控错误；过期 epoch、crash pending rejection、非法消息与 transferable 向量 buffer 有自动化测试。
 - [ ] scheduler 预算、公平性、role 切换有证据。
 - [ ] `text-ready/rag-ready/graph-ready` 分开；基础 RAG 不等待图谱。
 - [ ] GraphBuildJob 可 checkpoint、恢复、取消、supersede，且不覆盖用户治理事实。
@@ -543,3 +544,7 @@ Trace / 主线程长任务 / 内存：
 2026-11-01：根据“关键词先可用 → 后台向量 → 后台图谱”的产品流程重新排序 M6：先交付 CoreIndex staging/`text-ready` 和 readiness gate，再加 VectorBuildJob，最后接 GraphBuildJob；补充当前实现完成度、阻塞点、PR 顺序与首次查询验收测试，并将 VectorGeneration 从 CoreIndexGeneration 中独立出来。
 
 2026-11-01：完成 M6-B：全量与增量文本索引均通过 staging 后原子激活；`CoreReadiness` 在文本 snapshot 已持久化时释放 Ask/普通考试，文件变更期间复用旧 active Core。向量与图谱仍沿用现有整轮流程，独立可恢复 job 留待 M6-C/M6-D。
+
+2026-11-02：完成 M6-C 首个可交付版本：新增共享 Worker v1 envelope、epoch/pending/timeout/取消清理和单活跃模型优先级 scheduler；Embedding 结果改为经过 count/dimension/有限值校验的 transferable `ArrayBuffer`。新增持久化 `VectorBuildJob`、确定性 Core generation 身份和 VectorGeneration 的 `sourceCoreGenerationId`；全量与增量 Core 激活后只等待 job 排队落盘，向量在后台通过 staging generation 校验后切换为 `rag-ready`，失败、取消、provider/Core 变化继续使用 keyword。Worker crash、过期 epoch、前台 query 越过排队后台 batch、取消排队任务、旧 Core 防激活和 Runtime keyword→hybrid 时序均有自动化回归；69 个测试文件、287 项测试、lint、TypeScript、生产构建和 release asset 校验通过。
+
+本次未宣称完成 M6-D/M6-E：确定性/语义图谱仍由 VectorJob 终态后的兼容后台 continuation 驱动，尚无持久化 GraphBuildJob；向量首版仍按 batch 全量重建，尚未实现 chunk checkpoint/staging writer；真实发布 Worker 的离线 smoke、设备预算、公平性老化策略、hard cancel、完整 trace 与桌面/iOS/Android Gate 仍待后续验证。

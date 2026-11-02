@@ -22,10 +22,11 @@ describe("EmbeddedExactVectorStore generations", () => {
     it("activates a verified generation and rejects mismatched query fingerprints", async () => {
         const { store } = createStore();
         const fingerprint = createEmbeddingFingerprint(baseDescriptor, 2);
-        await store.replaceAll([record("a", [1, 0]), record("b", [0, 1])], fingerprint);
+        await store.replaceAll([record("a", [1, 0]), record("b", [0, 1])], fingerprint, undefined, "core-v1:test");
 
         await expect(store.search(new Float32Array([1, 0]), fingerprint, { topK: 1 }))
             .resolves.toEqual([expect.objectContaining({ chunkId: "a", similarity: 1 })]);
+        await expect(store.inspect()).resolves.toMatchObject({ sourceCoreGenerationId: "core-v1:test" });
         const changed = createEmbeddingFingerprint({ ...baseDescriptor, modelDtype: "q4" }, 2);
         await expect(store.search(new Float32Array([1, 0]), changed, { topK: 1 }))
             .rejects.toMatchObject({ code: "fingerprint-mismatch" });

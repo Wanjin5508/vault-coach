@@ -4,10 +4,14 @@ import type {
     PrepareRuntimeAssetsOptions,
     RuntimeAssetStore,
 } from "../../../src/domain/local-ai/local-ai-runtime-assets";
+import { LOCAL_AI_WORKER_PROTOCOL_VERSION } from "../../../src/infrastructure/local-ai/local-ai-worker-protocol";
 
 interface WorkerRequest {
-    id: string;
-    type: string;
+    requestId: string;
+    jobId: string;
+    workerEpoch: number;
+    policyId: string;
+    operation: string;
     payload: Record<string, unknown>;
 }
 
@@ -23,24 +27,36 @@ class FakeLocalAiWorker {
         this.requests.push(request);
         this.transfers.push(transfer);
         queueMicrotask(() => {
-            if (request.type === "prepare") {
-                this.emit({ type: "progress", progress: 0.5 });
-                this.respond(request.id, { ready: true });
-            } else if (request.type === "embed") {
-                this.respond(request.id, { vectors: [[1, 0]], latencyMs: 8 });
+            if (request.operation === "prepare") {
+                this.emitMessage(request, { type: "progress", progress: 0.5 });
+                this.respond(request, { ready: true });
+            } else if (request.operation === "embed") {
+                this.respond(request, { count: 1, dimension: 2, buffer: new Float32Array([1, 0]).buffer, latencyMs: 8 });
             } else {
-                this.respond(request.id, { ok: true });
+                this.respond(request, { ok: true });
             }
         });
     }
 
     terminate(): void { this.terminated = true; }
 
-    private respond(id: string, result: unknown): void {
-        this.emit({ type: "response", id, ok: true, result });
+    private respond(request: WorkerRequest, result: unknown): void {
+        this.emitMessage(request, { type: "response", ok: true, result });
     }
 
-    private emit(data: unknown): void {
+    private emitMessage(request: WorkerRequest, message: Record<string, unknown>): void {
+        this.emit({
+            v: LOCAL_AI_WORKER_PROTOCOL_VERSION,
+            requestId: request.requestId,
+            jobId: request.jobId,
+            workerEpoch: request.workerEpoch,
+            role: "embedding",
+            policyId: request.policyId,
+            ...message,
+        });
+    }
+
+    emit(data: unknown): void {
         this.onmessage?.({ data } as MessageEvent<unknown>);
     }
 }
@@ -83,7 +99,7 @@ describe("LocalAIRuntime", () => {
 
         expect(result).toEqual({ vectors: [[1, 0]], latencyMs: 8 });
         expect(phases).toEqual(expect.arrayContaining(["not-installed", "downloading", "ready", "clearing"]));
-        expect(worker.requests.map((request) => request.type)).toEqual(["prepare", "embed", "clear"]);
+        expect(worker.requests.map((request) => request.operation)).toEqual(["prepare", "embed", "clear"]);
         const prepareRuntime = worker.requests[0]?.payload.runtime as { wasmBinary?: ArrayBuffer };
         expect(worker.transfers[0]).toEqual([prepareRuntime.wasmBinary]);
         expect(assets.prepareCalls).toHaveLength(1);
@@ -99,7 +115,7 @@ describe("LocalAIRuntime", () => {
 
         await expect(runtime.embed({ texts: ["query"], purpose: "query", signal: controller.signal }))
             .rejects.toMatchObject({ name: "AbortError" });
-        expect(worker.requests.map((request) => request.type)).toEqual(["prepare"]);
+        expect(worker.requests.map((request) => request.operation)).toEqual(["prepare"]);
         await runtime.dispose();
     });
 
@@ -109,7 +125,7 @@ describe("LocalAIRuntime", () => {
         await Promise.all([runtime.prepare(true), runtime.prepare(true)]);
 
         expect(assets.prepareCalls).toHaveLength(1);
-        expect(worker.requests.filter((request) => request.type === "prepare")).toHaveLength(1);
+        expect(worker.requests.filter((request) => request.operation === "prepare")).toHaveLength(1);
         await runtime.dispose();
     });
 
@@ -118,7 +134,17 @@ describe("LocalAIRuntime", () => {
         worker.postMessage = vi.fn((value: unknown) => {
             const request = value as WorkerRequest;
             queueMicrotask(() => worker.onmessage?.({
-                data: { type: "response", id: request.id, ok: false, error: { message: "download failed" } },
+                data: {
+                    v: LOCAL_AI_WORKER_PROTOCOL_VERSION,
+                    type: "response",
+                    requestId: request.requestId,
+                    jobId: request.jobId,
+                    workerEpoch: request.workerEpoch,
+                    role: "embedding",
+                    policyId: request.policyId,
+                    ok: false,
+                    error: { code: "download-failed", recoverable: true, safeMessage: "download failed" },
+                },
             } as MessageEvent<unknown>));
         });
         const runtime = new LocalAIRuntime(
@@ -130,4 +156,66 @@ describe("LocalAIRuntime", () => {
         expect(runtime.getStatus()).toMatchObject({ phase: "error", message: "download failed" });
         await runtime.dispose();
     });
+
+    it("ignores a response from a stale worker epoch", async () => {
+        const worker = new FakeLocalAiWorker();
+        worker.postMessage = vi.fn((value: unknown) => { worker.requests.push(value as WorkerRequest); });
+        const runtime = new LocalAIRuntime(
+            new FakeRuntimeAssetStore(),
+            () => ({ worker: worker as unknown as Worker, objectUrl: null }),
+        );
+        let settled = false;
+        const preparing = runtime.prepare(true).then(() => { settled = true; });
+        await waitFor(() => worker.requests.length === 1);
+        const request = worker.requests[0]!;
+
+        worker.emit(createResponse(request, { ready: true }, request.workerEpoch + 1));
+        await Promise.resolve();
+        expect(settled).toBe(false);
+
+        worker.emit(createResponse(request, { ready: true }));
+        await preparing;
+        expect(settled).toBe(true);
+        await runtime.dispose();
+    });
+
+    it("rejects every pending request when the worker crashes", async () => {
+        const worker = new FakeLocalAiWorker();
+        worker.postMessage = vi.fn((value: unknown) => { worker.requests.push(value as WorkerRequest); });
+        const runtime = new LocalAIRuntime(
+            new FakeRuntimeAssetStore(),
+            () => ({ worker: worker as unknown as Worker, objectUrl: null }),
+        );
+        const preparing = runtime.prepare(true);
+        await waitFor(() => worker.requests.length === 1);
+
+        worker.onerror?.({ message: "worker crashed" } as ErrorEvent);
+
+        await expect(preparing).rejects.toThrow("worker crashed");
+        expect(runtime.getStatus()).toMatchObject({ phase: "error", message: "worker crashed" });
+        expect(worker.terminated).toBe(true);
+        await runtime.dispose();
+    });
 });
+
+function createResponse(request: WorkerRequest, result: unknown, workerEpoch: number = request.workerEpoch): unknown {
+    return {
+        v: LOCAL_AI_WORKER_PROTOCOL_VERSION,
+        type: "response",
+        requestId: request.requestId,
+        jobId: request.jobId,
+        workerEpoch,
+        role: "embedding",
+        policyId: request.policyId,
+        ok: true,
+        result,
+    };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (predicate()) return;
+        await Promise.resolve();
+    }
+    throw new Error("Timed out waiting for worker request.");
+}

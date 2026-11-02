@@ -7,6 +7,11 @@ import {
 } from "@huggingface/transformers";
 import { BUILTIN_EMBEDDING_POLICY } from "../../app/local-ai/model-registry";
 import { BUILTIN_ORT_RUNTIME_POLICY } from "../../app/local-ai/runtime-registry";
+import {
+    LOCAL_AI_WORKER_PROTOCOL_VERSION,
+    parseLocalAiWorkerRequest,
+    type LocalAiWorkerRequest,
+} from "./local-ai-worker-protocol";
 
 const policy = BUILTIN_EMBEDDING_POLICY;
 const requiredFiles = Object.values(policy.files);
@@ -14,24 +19,36 @@ const requiredFiles = Object.values(policy.files);
 const cacheName = "vault-coach-local-ai-v1";
 let extractor: FeatureExtractionPipeline | null = null;
 let queue = Promise.resolve();
+const cancelledRequests = new Set<string>();
 
 self.onmessage = (event: MessageEvent<unknown>) => {
-    queue = queue.then(() => handleMessage(parseRequest(event.data))).catch((error: unknown) => {
-        postMessage({ type: "fatal", error: serializeError(error) });
-    });
+    let request: LocalAiWorkerRequest;
+    try { request = parseLocalAiWorkerRequest(event.data); } catch { return; }
+    queue = queue.then(() => handleMessage(request)).catch(() => undefined);
 };
 
-async function handleMessage(message: { id: string; type: string; payload?: Record<string, unknown> }): Promise<void> {
+async function handleMessage(message: LocalAiWorkerRequest): Promise<void> {
     try {
-        if (message.type === "prepare") {
-            await prepare(Boolean(message.payload?.allowDownload), parseRuntimeAssets(message.payload?.runtime));
-            respond(message.id, { ready: true });
+        if (message.role !== "embedding" || message.operation === "rerank" || message.operation === "utility") {
+            throw new WorkerOperationError("unsupported-operation", true, "This local AI operation is not supported.");
+        }
+        if (message.policyId !== policy.id) throw new WorkerOperationError("policy-mismatch", false, "Local AI policy does not match this worker build.");
+        if (message.operation === "cancel") {
+            const targetRequestId = message.payload.targetRequestId;
+            if (typeof targetRequestId === "string") cancelledRequests.add(targetRequestId);
+            respond(message, { cancelled: typeof targetRequestId === "string" });
             return;
         }
-        if (message.type === "embed") {
+        if (cancelledRequests.delete(message.requestId)) return;
+        if (message.operation === "prepare") {
+            await prepare(Boolean(message.payload.allowDownload), parseRuntimeAssets(message.payload.runtime), message);
+            respond(message, { ready: true });
+            return;
+        }
+        if (message.operation === "embed") {
             if (!extractor) throw new Error("Built-in embedding model is not ready. Run the prepare command first.");
-            const texts = Array.isArray(message.payload?.texts) ? message.payload.texts.map(String) : [];
-            const purpose = String(message.payload?.purpose) as keyof typeof policy.prefixes;
+            const texts = Array.isArray(message.payload.texts) ? message.payload.texts.map(String) : [];
+            const purpose = String(message.payload.purpose) as keyof typeof policy.prefixes;
             const prefix = policy.prefixes[purpose];
             if (!prefix || texts.length === 0) throw new Error("Invalid built-in embedding request.");
             const startedAt = performance.now();
@@ -42,30 +59,39 @@ async function handleMessage(message: { id: string; type: string; payload?: Reco
             const vectors = output.tolist() as number[][];
             output.dispose?.();
             validateVectors(vectors, texts.length);
-            respond(message.id, { vectors, latencyMs: performance.now() - startedAt });
+            if (cancelledRequests.delete(message.requestId)) return;
+            const values = new Float32Array(texts.length * policy.dimension);
+            vectors.forEach((vector, index) => values.set(vector, index * policy.dimension));
+            const buffer = values.buffer;
+            respond(message, {
+                count: texts.length,
+                dimension: policy.dimension,
+                buffer,
+                latencyMs: performance.now() - startedAt,
+            }, [buffer]);
             return;
         }
-        if (message.type === "clear") {
+        if (message.operation === "clear") {
             await extractor?.dispose?.();
             extractor = null;
             await caches.delete(cacheName);
-            respond(message.id, { cleared: true });
+            respond(message, { cleared: true });
             return;
         }
-        if (message.type === "dispose") {
+        if (message.operation === "dispose") {
             await extractor?.dispose?.();
             extractor = null;
-            respond(message.id, { disposed: true });
+            respond(message, { disposed: true });
             close();
             return;
         }
-        throw new Error(`Unknown local AI worker message: ${message.type}`);
+        throw new WorkerOperationError("unsupported-operation", true, "This local AI operation is not supported.");
     } catch (error) {
-        postMessage({ type: "response", id: message.id, ok: false, error: serializeError(error) });
+        respondError(message, error);
     }
 }
 
-async function prepare(allowDownload: boolean, runtime: WorkerRuntimeAssets): Promise<void> {
+async function prepare(allowDownload: boolean, runtime: WorkerRuntimeAssets, request: LocalAiWorkerRequest): Promise<void> {
     if (extractor) return;
     configureRuntime(runtime);
     const cache = await caches.open(cacheName);
@@ -76,7 +102,7 @@ async function prepare(allowDownload: boolean, runtime: WorkerRuntimeAssets): Pr
         let bytes: Uint8Array;
         if (!cachedResponse) {
             if (!allowDownload) throw new Error("Built-in embedding assets are not installed. Run the prepare command while online.");
-            postMessage({ type: "progress", progress: index / requiredFiles.length, file });
+            progress(request, index / requiredFiles.length);
             // Dedicated Worker 无法导入 Obsidian requestUrl；这里只下载用户明确同意的固定版本资产。
             const response = await globalThis.fetch(url, { cache: "no-store" });
             if (!response.ok) throw new Error(`Model asset download failed (${response.status}): ${file}`);
@@ -95,7 +121,7 @@ async function prepare(allowDownload: boolean, runtime: WorkerRuntimeAssets): Pr
             }));
         }
     }
-    postMessage({ type: "progress", progress: 1, file: null });
+    progress(request, 1);
     env.allowRemoteModels = false;
     const [tokenizerJson, tokenizerConfig] = await Promise.all([
         readCachedJson(cache, policy.files.tokenizer),
@@ -158,28 +184,58 @@ function validateVectors(vectors: number[][], expectedCount: number): void {
     }
 }
 
-function respond(id: string, result: unknown): void {
-    postMessage({ type: "response", id, ok: true, result });
+function respond(request: LocalAiWorkerRequest, result: unknown, transfer: Transferable[] = []): void {
+    postWorkerMessage({
+        v: LOCAL_AI_WORKER_PROTOCOL_VERSION,
+        type: "response",
+        requestId: request.requestId,
+        jobId: request.jobId,
+        workerEpoch: request.workerEpoch,
+        role: request.role,
+        policyId: request.policyId,
+        ok: true,
+        result,
+    }, transfer);
 }
 
-function serializeError(error: unknown): { name: string; message: string } {
-    return error instanceof Error ? { name: error.name, message: error.message } : { name: "Error", message: String(error) };
+function respondError(request: LocalAiWorkerRequest, error: unknown): void {
+    const operationError = error instanceof WorkerOperationError ? error : null;
+    postWorkerMessage({
+        v: LOCAL_AI_WORKER_PROTOCOL_VERSION,
+        type: "response",
+        requestId: request.requestId,
+        jobId: request.jobId,
+        workerEpoch: request.workerEpoch,
+        role: request.role,
+        policyId: request.policyId,
+        ok: false,
+        error: {
+            code: operationError?.code ?? "operation-failed",
+            recoverable: operationError?.recoverable ?? true,
+            safeMessage: error instanceof Error ? error.message : "Local AI worker operation failed.",
+        },
+    });
 }
 
-function parseRequest(value: unknown): { id: string; type: string; payload?: Record<string, unknown> } {
-    if (typeof value !== "object" || value === null) throw new Error("Invalid local AI worker request.");
-    const candidate = value as { id?: unknown; type?: unknown; payload?: unknown };
-    if (typeof candidate.id !== "string" || typeof candidate.type !== "string") {
-        throw new Error("Invalid local AI worker request.");
-    }
-    if (candidate.payload !== undefined && (typeof candidate.payload !== "object" || candidate.payload === null)) {
-        throw new Error("Invalid local AI worker payload.");
-    }
-    return {
-        id: candidate.id,
-        type: candidate.type,
-        payload: candidate.payload as Record<string, unknown> | undefined,
-    };
+function progress(request: LocalAiWorkerRequest, value: number): void {
+    postWorkerMessage({
+        v: LOCAL_AI_WORKER_PROTOCOL_VERSION,
+        type: "progress",
+        requestId: request.requestId,
+        jobId: request.jobId,
+        workerEpoch: request.workerEpoch,
+        role: request.role,
+        policyId: request.policyId,
+        progress: Math.max(0, Math.min(1, value)),
+    });
+}
+
+class WorkerOperationError extends Error {
+    constructor(readonly code: string, readonly recoverable: boolean, message: string) { super(message); }
+}
+
+function postWorkerMessage(message: unknown, transfer: Transferable[] = []): void {
+    (self as unknown as { postMessage(value: unknown, transfer?: Transferable[]): void }).postMessage(message, transfer);
 }
 
 interface WorkerRuntimeAssets {
