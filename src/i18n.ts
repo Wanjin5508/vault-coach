@@ -19,6 +19,7 @@ const ZH_TRANSLATIONS = {
     "command.stopKnowledgeIndex": "停止构建知识索引",
     "command.clearKnowledgeIndex": "清除知识索引",
     "command.prepareBuiltinEmbedding": "下载并加载内置 Embedding 模型",
+    "command.forceStopBuiltinAi": "强制停止内置 AI Worker",
     "command.clearBuiltinEmbedding": "清除内置 Embedding 模型缓存",
     "ribbon.openVaultCoach": "打开 VaultCoach",
 
@@ -40,6 +41,7 @@ const ZH_TRANSLATIONS = {
     "notice.index.clearWhileBusy": "索引正在构建中。请先停止构建后再清除索引。",
     "notice.index.cleared": "已清除知识索引。",
     "notice.localAiReady": "内置 Embedding 模型已就绪。选择该服务后请重建向量索引。",
+    "notice.localAiForceStopped": "已强制停止内置 AI Worker；现有文本索引仍可使用，下次任务会重新加载模型。",
     "notice.localAiPrepareFailed": "内置 Embedding 模型准备失败：{{message}}",
     "notice.localAiCleared": "已清除内置 Embedding 模型缓存。",
     "notice.localAiClearFailed": "无法清除内置 Embedding 模型缓存：{{message}}",
@@ -721,6 +723,7 @@ const EN_TRANSLATIONS: Record<TranslationKey, string> = {
     "command.stopKnowledgeIndex": "Stop building knowledge index",
     "command.clearKnowledgeIndex": "Clear knowledge index",
     "command.prepareBuiltinEmbedding": "Download and load the built-in embedding model",
+    "command.forceStopBuiltinAi": "Force-stop the built-in AI worker",
     "command.clearBuiltinEmbedding": "Clear the built-in embedding model cache",
     "ribbon.openVaultCoach": "Open VaultCoach",
 
@@ -742,6 +745,7 @@ const EN_TRANSLATIONS: Record<TranslationKey, string> = {
     "notice.index.clearWhileBusy": "The index is building. Stop the build before clearing the index.",
     "notice.index.cleared": "Knowledge index cleared.",
     "notice.localAiReady": "The built-in embedding model is ready. Rebuild the vector index after selecting it.",
+    "notice.localAiForceStopped": "The built-in AI worker was force-stopped. The text index remains available; the model will reload for the next task.",
     "notice.localAiPrepareFailed": "Could not prepare the built-in embedding model: {{message}}",
     "notice.localAiCleared": "Built-in embedding model cache cleared.",
     "notice.localAiClearFailed": "Could not clear the built-in embedding model cache: {{message}}",

@@ -26,6 +26,7 @@ export interface LocalAIRuntimePort {
     subscribe(listener: (status: LocalAiStatus) => void): () => void;
     prepare(allowDownload: boolean): Promise<void>;
     embed(request: LocalAiEmbeddingRequest): Promise<LocalAiEmbeddingResult>;
+    hardCancel(): void;
     clear(): Promise<void>;
     dispose(): Promise<void>;
 }

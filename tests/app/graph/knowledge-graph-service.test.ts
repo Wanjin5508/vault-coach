@@ -37,6 +37,22 @@ describe("KnowledgeGraphService", () => {
         expect(service.checkIntegrity()).toEqual({ valid: true, issues: [] });
     });
 
+    it("persists GraphGeneration identity and checks it immediately before activation", async () => {
+        const store = new InMemoryGraphStore();
+        const service = new KnowledgeGraphService(createSourceReader(), new DeterministicGraphBuilder(), store);
+        let activationChecked = false;
+
+        const snapshot = await service.rebuildAll(undefined, {
+            sourceCoreGenerationId: "core-v1:test",
+            graphPolicyId: "graph-policy-v1",
+            beforeActivate: () => { activationChecked = true; },
+        });
+
+        expect(activationChecked).toBe(true);
+        expect(snapshot).toMatchObject({ sourceCoreGenerationId: "core-v1:test", graphPolicyId: "graph-policy-v1" });
+        expect(store.saved).toMatchObject({ sourceCoreGenerationId: "core-v1:test", graphPolicyId: "graph-policy-v1" });
+    });
+
     it("keeps the previous snapshot and marks the graph dirty when persistence fails", async () => {
         const sourceReader = createSourceReader();
         const store = new InMemoryGraphStore();
@@ -191,8 +207,9 @@ class InMemoryGraphStore implements GraphStore {
         return this.snapshot;
     }
 
-    async save(snapshot: GraphSnapshotV1): Promise<void> {
+    async save(snapshot: GraphSnapshotV1, beforeActivate?: () => void | Promise<void>): Promise<void> {
         if (this.saveError) throw this.saveError;
+        await beforeActivate?.();
         this.snapshot = snapshot;
         this.saved = snapshot;
     }

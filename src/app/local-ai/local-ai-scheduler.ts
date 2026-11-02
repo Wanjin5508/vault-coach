@@ -54,9 +54,13 @@ export class LocalAiScheduler {
 
     dispose(): void {
         this.disposed = true;
+        this.cancelPending(new Error("Local AI scheduler disposed."));
+    }
+
+    cancelPending(reason: Error = createAbortError()): void {
         for (const task of this.queue.splice(0)) {
             task.detachAbort();
-            task.reject(new Error("Local AI scheduler disposed."));
+            task.reject(reason);
         }
     }
 

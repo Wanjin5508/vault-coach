@@ -88,6 +88,39 @@ describe("SemanticGraphService", () => {
         });
     });
 
+    it("drops a late extraction result after cancellation without persisting a checkpoint", async () => {
+        const store = new MemorySemanticStore();
+        const release = createDeferred<void>();
+        let extractionStarted = false;
+        const service = new SemanticGraphService({
+            graphService: { getSnapshot: () => snapshot("section:doc:one") } as never,
+            documentIndex: reader() as DocumentIndexReader,
+            store,
+            extractionService: {
+                extract: async (input: SectionExtractionInput, model: SemanticModelMetadata) => {
+                    extractionStarted = true;
+                    await release.promise;
+                    return emptyExtraction(input, model);
+                },
+            } as never,
+            embeddingProvider: embeddingProvider(async () => []),
+            getSettings: () => ({ ...createDefaultSettings(), enableSemanticGraph: true }),
+            getNow: () => 10,
+        });
+        await service.load();
+        const controller = new AbortController();
+        const rebuilding = service.rebuildAll(controller.signal);
+        await waitFor(() => extractionStarted);
+
+        controller.abort(new DOMException("Cancelled by test.", "AbortError"));
+        release.resolve();
+
+        await expect(rebuilding).rejects.toMatchObject({ name: "AbortError" });
+        expect(store.saveCount).toBe(0);
+        expect(service.getReviewProjection()).toMatchObject({ concepts: [], candidates: [], relations: [] });
+        expect(service.getState()).toMatchObject({ busy: false, dirty: true });
+    });
+
     it("builds evidence-backed candidates on explicit rebuild and promotes only confirmed relations", async () => {
         const store = new MemorySemanticStore();
         const sectionId = "section:doc:one";
@@ -567,4 +600,18 @@ class MemorySemanticStore implements SemanticGraphStore {
         this.state = JSON.parse(JSON.stringify(state)) as SemanticGraphState;
     }
     async clear(): Promise<void> { this.state = createEmptySemanticGraphState(0); }
+}
+
+function createDeferred<T>(): { promise: Promise<T>; resolve(value?: T): void } {
+    let resolve: (value: T) => void = () => undefined;
+    const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+    return { promise, resolve: (value?: T) => resolve(value as T) };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (predicate()) return;
+        await Promise.resolve();
+    }
+    throw new Error("Timed out waiting for semantic graph work.");
 }

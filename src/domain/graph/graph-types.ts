@@ -86,6 +86,9 @@ export interface GraphSnapshotStats {
 /** 确定性图 MVP 的持久化、可复现事实集合。 */
 export interface GraphSnapshotV1 {
     schemaVersion: typeof GRAPH_SNAPSHOT_SCHEMA_VERSION;
+    /** M6-D：派生图只能服务其明确引用的 active Core generation。 */
+    sourceCoreGenerationId?: string;
+    graphPolicyId?: string;
     nodes: KnowledgeGraphNode[];
     edges: KnowledgeGraphEdge[];
     stats: GraphSnapshotStats;

@@ -52,7 +52,7 @@ describe("LegacyPluginApiAdapter", () => {
                 rebuild,
                 clear,
                 abort,
-                getState: () => ({ textDirty: false, vectorDirty: false, busy: { busy: false, phase: null, startedAt: null }, stats: {}, vectorStats: {}, vectorJob: null }),
+                getState: () => ({ textDirty: false, vectorDirty: false, busy: { busy: false, phase: null, startedAt: null }, stats: {}, vectorStats: {}, vectorJob: null, graphJob: null }),
             },
             progress: { isAvailable: () => false },
         } as unknown as VaultCoachApplicationApi;

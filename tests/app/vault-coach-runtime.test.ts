@@ -54,6 +54,34 @@ describe("M6-B/C staged index readiness", () => {
         await harness.runtime.dispose();
     });
 
+    it("suspends an in-flight derived job on unload and safely requeues it after restart", async () => {
+        const harness = createRuntimeHarness();
+        harness.settings.enableVectorRetrieval = true;
+        await harness.runtime.initialize();
+        const services = getIndexServices(harness.runtime);
+        vi.spyOn(services.ragEngine, "rebuildVectorIndex").mockImplementation(async (signal, hooks) => {
+            await hooks?.onPhase?.("embedding");
+            await waitUntilAborted(signal);
+            throw new Error("Expected shutdown suspension to abort the vector runner.");
+        });
+
+        await harness.runtime.rebuildKnowledgeBase(false);
+        await waitFor(() => (getVectorBuildJob(harness.runtime) as { phase?: string } | null)?.phase === "embedding");
+        const beforeRestart = getVectorBuildJob(harness.runtime) as { jobId?: string } | null;
+        await harness.runtime.dispose();
+
+        expect(getVectorBuildJob(harness.runtime)).toMatchObject({ phase: "embedding", errorCode: null });
+        harness.settings.enableVectorRetrieval = false;
+        const restarted = harness.restart();
+        await restarted.initialize();
+        await flushBackgroundDerivedIndexes(restarted);
+
+        expect(getVectorBuildJob(restarted)).toMatchObject({ phase: "rag-ready" });
+        expect((getVectorBuildJob(restarted) as { jobId?: string } | null)?.jobId).not.toBe(beforeRestart?.jobId);
+        expect(getGraphBuildJob(restarted)).toMatchObject({ phase: "graph-ready" });
+        await restarted.dispose();
+    });
+
     // 验证冷启动期间的多个 readiness 请求会共享同一个文本构建任务，而不会重复扫描。
     it("joins a concurrent readiness request to the first text build", async () => {
         const harness = createRuntimeHarness();
@@ -126,9 +154,12 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         const snapshot = await harness.runtime.application.graph.getSnapshot();
         expect(harness.runtime.isTextIndexDirty()).toBe(false);
         expect(harness.runtime.getKnowledgeBaseStats()).toMatchObject({ fileCount: 2, chunkCount: 2 });
+        expect(snapshot?.sourceCoreGenerationId).toMatch(/^core-v1:/);
+        expect(snapshot?.graphPolicyId).toContain("deterministic-graph/v1");
         expect(snapshot).toMatchObject({
             stats: { documentCount: 2, sectionCount: 2, tagCount: 0, edgeCount: 3 },
         });
+        expect(getGraphBuildJob(harness.runtime)).toMatchObject({ phase: "graph-ready", mode: "full" });
         expect(snapshot?.edges).toEqual(expect.arrayContaining([
             expect.objectContaining({ type: "links_to", sourceNodeId: "markdown:overview.md", targetNodeId: "markdown:details.md" }),
         ]));
@@ -151,8 +182,8 @@ describe("VaultCoachRuntime graph rebuild integration", () => {
         expect(await harness.runtime.application.graph.getSnapshot()).toBeNull();
         expect(harness.adapter.files.has(`${TEST_CONFIG_DIR}/plugins/vault-coach/index-snapshot.json`)).toBe(true);
         expect(graphError).toHaveBeenCalledWith(
-            "[VaultCoachRuntime] 图谱构建失败，文本索引将保持可用。",
-            expect.any(Error),
+            "[VaultCoachRuntime] 后台图谱构建失败，Core/Vector 仍保持可用。",
+            "graph-build-failed",
         );
 
         await harness.runtime.dispose();
@@ -636,6 +667,12 @@ function getVectorBuildJob(runtime: VaultCoachRuntime) {
     }).applicationContainer.services.vectorBuildCoordinator.getState();
 }
 
+function getGraphBuildJob(runtime: VaultCoachRuntime) {
+    return (runtime as unknown as {
+        applicationContainer: { services: { graphBuildCoordinator: { getState(): unknown } } };
+    }).applicationContainer.services.graphBuildCoordinator.getState();
+}
+
 /** 创建一个由测试手动 resolve 的 Promise，用来模拟向量/文本任务尚未完成的状态。 */
 function createDeferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
     let resolve: (value: T) => void = () => undefined;
@@ -656,6 +693,16 @@ async function waitFor(predicate: () => boolean, attempts: number = 100): Promis
         await Promise.resolve();
     }
     throw new Error("Timed out waiting for test fixture state.");
+}
+
+async function waitUntilAborted(signal: AbortSignal | undefined): Promise<void> {
+    if (!signal) throw new Error("Expected an abort signal.");
+    if (signal.aborted) signal.throwIfAborted();
+    await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(
+            signal.reason instanceof Error ? signal.reason : new DOMException("Aborted.", "AbortError"),
+        ), { once: true });
+    });
 }
 
 class InMemoryVaultAdapter {

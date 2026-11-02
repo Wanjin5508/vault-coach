@@ -464,6 +464,18 @@ soft cancel 停止新 batch/Section 并忽略已取消结果；若底层推理�
 
 Gate：取消后没有迟到 ready/持久化/记忆/图谱激活；重开 View 可看到当前真实任务；重启后不会恢复旧 Promise，却能根据 checkpoint 安全恢复。
 
+#### M6-E1 实施记录（2026-11-02）
+
+本次将用户动作和插件生命周期拆成两个明确语义：
+
+1. 用户点击停止仍执行 soft cancel，Core、Vector、Graph 使用各自 AbortSignal；已经激活的 CoreIndex 不回滚。
+2. 插件 unload 对 VectorBuildJob/GraphBuildJob 执行 `suspend`，只中止当前进程调用栈，不把可恢复作业错误写成用户主动 `cancelled`。重启后校验 generation/policy，再以持久化输入创建新 job 重排。
+3. 新增命令面板入口“强制停止内置 AI Worker”。hard cancel 会拒绝活动和排队中的本地 AI 请求、终止 Worker、释放消息处理器与 Object URL；模型缓存和 active CoreIndex 保留，下一次任务按需创建新 epoch/Worker。
+4. 语义抽取在异步模型调用返回后再次检查 AbortSignal；取消结果不再被统计为普通 Section 失败，也不会写入迟到 checkpoint。VectorJob 的 supersede 所有权同步修正，旧 job 的 waiter 不再收到替代 job 状态。
+5. Local AI dispose 改为幂等，并阻止 dispose 后重新创建 Worker；运行时 unload 会等待已拥有的派生任务完成 suspend 收尾后再释放 Worker。
+
+自动化测试覆盖 soft cancel、hard cancel、活动/排队请求拒绝、Worker 懒重建、迟到抽取结果丢弃、Vector/Graph supersede 状态归属、unload 保留非终态 job 以及重启重排；70 个测试文件、301 项测试、lint、TypeScript、生产构建和 release asset 校验通过。这里尚未宣称完成 M6-E2：完整结构化 trace、Long Task/内存采样、真实发布 Worker 离线 smoke 和桌面/iOS/Android 设备 Gate 仍待后续阶段。
+
 ### Step 7：接入日志与性能证据（M6-E2）
 
 内部依赖：轻量事件端口、job/request/epoch。外部依赖：DevTools performance/memory。
@@ -514,8 +526,8 @@ Gate：达到 M4 预登记预算；性能不达标时找真实瓶颈，不以循
 - [x] VectorGeneration manifest 与持久化 VectorBuildJob 独立引用 Core generation；更换 embedding 只使向量作业/代际失效，不使 keyword 失效。
 - [x] Worker 使用版本化 envelope、request/job/epoch/policy 身份和受控错误；过期 epoch、crash pending rejection、非法消息与 transferable 向量 buffer 有自动化测试。
 - [ ] scheduler 预算、公平性、role 切换有证据。
-- [ ] `text-ready/rag-ready/graph-ready` 分开；基础 RAG 不等待图谱。
-- [ ] GraphBuildJob 可 checkpoint、恢复、取消、supersede，且不覆盖用户治理事实。
+- [x] `text-ready/rag-ready/graph-ready` 分开；基础 RAG 不等待图谱。
+- [x] GraphBuildJob 可 checkpoint、恢复、取消、supersede，且不覆盖用户治理事实。
 - [ ] 进度真实；取消/crash/迟到消息不污染 CoreIndex 或 GraphGeneration。
 - [ ] plugin unload 幂等，用户事实保留。
 - [ ] 真机性能记录注明未验证平台。
@@ -548,3 +560,7 @@ Trace / 主线程长任务 / 内存：
 2026-11-02：完成 M6-C 首个可交付版本：新增共享 Worker v1 envelope、epoch/pending/timeout/取消清理和单活跃模型优先级 scheduler；Embedding 结果改为经过 count/dimension/有限值校验的 transferable `ArrayBuffer`。新增持久化 `VectorBuildJob`、确定性 Core generation 身份和 VectorGeneration 的 `sourceCoreGenerationId`；全量与增量 Core 激活后只等待 job 排队落盘，向量在后台通过 staging generation 校验后切换为 `rag-ready`，失败、取消、provider/Core 变化继续使用 keyword。Worker crash、过期 epoch、前台 query 越过排队后台 batch、取消排队任务、旧 Core 防激活和 Runtime keyword→hybrid 时序均有自动化回归；69 个测试文件、287 项测试、lint、TypeScript、生产构建和 release asset 校验通过。
 
 本次未宣称完成 M6-D/M6-E：确定性/语义图谱仍由 VectorJob 终态后的兼容后台 continuation 驱动，尚无持久化 GraphBuildJob；向量首版仍按 batch 全量重建，尚未实现 chunk checkpoint/staging writer；真实发布 Worker 的离线 smoke、设备预算、公平性老化策略、hard cancel、完整 trace 与桌面/iOS/Android Gate 仍待后续验证。
+
+2026-11-02：完成 M6-D 首个可交付版本：新增持久化 `GraphBuildJob` 和独立 `GraphGeneration` 身份，VectorJob 进入任一终态后由 Runtime 排队全量或增量图谱作业；结构图 staging 在激活前校验 `sourceCoreGenerationId + graphPolicyId`，旧 active graph 在构建失败、取消、过期或被新作业替换时保持可读。语义图谱沿用显式开关、自动同步与容量门禁，并将 extraction 的 processed/failed/queued 进度投影到作业 checkpoint；重启不恢复旧 Promise，而是校验持久化身份后用同一 durable 输入安全重排。图谱状态已独立暴露为 queued/running/graph-ready/stale/failed/cancelled/superseded，失败只标记图谱需要重试，不回滚已可用的 Core/Vector。自动化回归覆盖旧 Core 防激活、激活钩子失败保留旧图、checkpoint、重启重排、取消、supersede 状态归属，以及 Runtime 的 Generation 身份和失败降级；70 个测试文件、294 项测试、lint、TypeScript、生产构建和 release asset 校验通过。
+
+M6-D 不改变语义治理模型：确认、拒绝、手工关系与撤销仍保存在既有 append-only 决策事实中，GraphBuildJob 只记录派生进度，不把治理事实复制进 checkpoint。当前“恢复”粒度是依据持久化输入重跑安全阶段，而不是从某个远程抽取调用的中间指令续跑。M6-E 仍需完成真实进度/trace、hard cancel、迟到结果全链路证明、插件 unload 资源计数、发布形态离线 smoke，以及桌面/iOS/Android 的性能与内存 Gate；M6-C 的向量 chunk checkpoint/staging writer 也仍未完成。

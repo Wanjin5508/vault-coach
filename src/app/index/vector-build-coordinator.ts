@@ -36,6 +36,7 @@ export class VectorBuildCoordinator {
     private activeJob: VectorBuildJob | null = null;
     private activeController: AbortController | null = null;
     private readonly completions = new Map<string, Promise<VectorBuildJob>>();
+    private readonly suspendedJobIds = new Set<string>();
     private readonly now: () => number;
 
     constructor(private readonly dependencies: VectorBuildCoordinatorDependencies) {
@@ -66,8 +67,16 @@ export class VectorBuildCoordinator {
 
     async enqueue(sourceCoreGenerationId: string): Promise<VectorBuildJob> {
         if (this.activeJob && !isVectorBuildJobTerminal(this.activeJob.phase)) {
+            const superseded = {
+                ...this.activeJob,
+                phase: "superseded" as const,
+                errorCode: "new-core-generation",
+                updatedAt: this.now(),
+            };
+            this.activeJob = superseded;
             this.activeController?.abort(new DOMException("Vector build superseded.", "AbortError"));
-            this.activeJob = await this.transition(this.activeJob, "superseded", "new-core-generation");
+            await this.dependencies.store.save(superseded);
+            this.dependencies.onStateChanged();
         }
         const timestamp = this.now();
         const job: VectorBuildJob = {
@@ -106,6 +115,13 @@ export class VectorBuildCoordinator {
         this.activeController?.abort(new DOMException("Vector build cancelled.", "AbortError"));
     }
 
+    suspend(): void {
+        const job = this.activeJob;
+        if (!job || isVectorBuildJobTerminal(job.phase)) return;
+        this.suspendedJobIds.add(job.jobId);
+        this.activeController?.abort(new DOMException("Vector build suspended for shutdown.", "AbortError"));
+    }
+
     async clear(): Promise<void> {
         const jobId = this.activeJob?.jobId;
         this.cancel();
@@ -115,7 +131,7 @@ export class VectorBuildCoordinator {
         this.dependencies.onStateChanged();
     }
 
-    dispose(): void { this.cancel(); }
+    dispose(): void { this.suspend(); }
 
     private async run(job: VectorBuildJob, controller: AbortController): Promise<VectorBuildJob> {
         try {
@@ -129,7 +145,13 @@ export class VectorBuildCoordinator {
             return await this.updateActive(job.jobId, "rag-ready", null, stats.vectorCount);
         } catch (error: unknown) {
             const latest = this.activeJob;
-            if (!latest || latest.jobId !== job.jobId || latest.phase === "superseded") return latest ? { ...latest } : { ...job, phase: "superseded" };
+            if (this.suspendedJobIds.delete(job.jobId)) {
+                return latest?.jobId === job.jobId ? { ...latest } : { ...job };
+            }
+            if (!latest || latest.jobId !== job.jobId) {
+                return { ...job, phase: "superseded", errorCode: "new-core-generation", updatedAt: this.now() };
+            }
+            if (latest.phase === "superseded") return { ...latest };
             if (isAbortError(error)) return await this.updateActive(job.jobId, "cancelled", "aborted");
             if (error instanceof StaleVectorBuildError) return await this.updateActive(job.jobId, "stale", "identity-changed");
             return await this.updateActive(job.jobId, "failed", "vector-build-failed");

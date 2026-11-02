@@ -196,6 +196,49 @@ describe("LocalAIRuntime", () => {
         expect(worker.terminated).toBe(true);
         await runtime.dispose();
     });
+
+    it("hard-cancels active and queued work, terminates the worker, and lazily recreates it", async () => {
+        const firstWorker = new FakeLocalAiWorker();
+        firstWorker.postMessage = (value: unknown, transfer: Transferable[] = []) => {
+            const request = value as WorkerRequest;
+            firstWorker.requests.push(request);
+            firstWorker.transfers.push(transfer);
+            if (request.operation === "prepare") {
+                queueMicrotask(() => firstWorker.emit(createResponse(request, { ready: true })));
+            }
+        };
+        const secondWorker = new FakeLocalAiWorker();
+        const workers = [firstWorker, secondWorker];
+        const runtime = new LocalAIRuntime(
+            new FakeRuntimeAssetStore(),
+            () => {
+                const worker = workers.shift();
+                if (!worker) throw new Error("Unexpected worker recreation.");
+                return { worker: worker as unknown as Worker, objectUrl: null };
+            },
+        );
+        await runtime.prepare(true);
+        const active = runtime.embed({ texts: ["active"], purpose: "document" });
+        const queued = runtime.embed({ texts: ["queued"], purpose: "graph" });
+        const outcomes = Promise.allSettled([active, queued]);
+        await waitFor(() => firstWorker.requests.some((request) => request.operation === "embed"));
+
+        runtime.hardCancel();
+
+        const [activeResult, queuedResult] = await outcomes;
+        expect(activeResult).toMatchObject({ status: "rejected", reason: { name: "AbortError" } });
+        expect(queuedResult).toMatchObject({ status: "rejected", reason: { name: "AbortError" } });
+        expect(firstWorker.terminated).toBe(true);
+        expect(runtime.getStatus()).toMatchObject({ phase: "error", cached: true });
+
+        await runtime.prepare(false);
+        expect(runtime.getStatus().phase).toBe("ready");
+        expect(secondWorker.requests.map((request) => request.operation)).toEqual(["prepare"]);
+        await runtime.dispose();
+        await runtime.dispose();
+        expect(secondWorker.terminated).toBe(true);
+        await expect(runtime.prepare(false)).rejects.toThrow("disposed");
+    });
 });
 
 function createResponse(request: WorkerRequest, result: unknown, workerEpoch: number = request.workerEpoch): unknown {

@@ -31,6 +31,7 @@ describe("embedding provider adapters", () => {
                 requests.push(request);
                 return { vectors: [[1, 0, 0], [0, 1, 0]], latencyMs: 12 };
             },
+            hardCancel: () => undefined,
             clear: async () => undefined,
             dispose: async () => undefined,
         };

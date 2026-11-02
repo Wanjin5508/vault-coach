@@ -57,6 +57,11 @@ export interface SemanticGraphServiceDependencies {
     onStateChanged?(): void;
 }
 
+export interface SemanticGraphBuildHooks {
+    onPhase?(phase: "extracting" | "concept-embedding" | "candidate-building" | "validating"): void | Promise<void>;
+    onCheckpoint?(progress: SemanticGraphBuildProgress): void | Promise<void>;
+}
+
 /** Lite 模式默认值。即使用户允许处理大文件，仍必须遵守全局容量门禁。 */
 export const SEMANTIC_GRAPH_LITE_MAX_MARKDOWN_CHARACTERS = 60_000;
 export const SEMANTIC_GRAPH_LITE_MAX_MARKDOWN_LINES = 1_500;
@@ -106,17 +111,21 @@ export class SemanticGraphService {
         }
     }
 
-    async rebuildAll(signal?: AbortSignal): Promise<void> {
-        await this.run(undefined, signal, "manual");
+    async rebuildAll(signal?: AbortSignal, hooks?: SemanticGraphBuildHooks): Promise<void> {
+        await this.run(undefined, signal, "manual", hooks);
     }
 
-    async syncChangedFiles(syncResult: Pick<KnowledgeBaseSyncResult, "affectedFiles">, signal?: AbortSignal): Promise<void> {
+    async syncChangedFiles(
+        syncResult: Pick<KnowledgeBaseSyncResult, "affectedFiles">,
+        signal?: AbortSignal,
+        hooks?: SemanticGraphBuildHooks,
+    ): Promise<void> {
         const settings = this.dependencies.getSettings();
         if (!settings.enableSemanticGraph || !settings.enableSemanticGraphAutoSync) return;
         const affected = new Set(syncResult.affectedFiles);
         if (affected.size === 0) return;
         if (!this.getCapacityAssessment().allowAutomaticSemanticSync) return;
-        await this.run(affected, signal, "automatic");
+        await this.run(affected, signal, "automatic", hooks);
     }
 
     /**
@@ -501,6 +510,7 @@ export class SemanticGraphService {
         affectedDocumentPaths: ReadonlySet<string> | undefined,
         providedSignal: AbortSignal | undefined,
         mode: "manual" | "automatic",
+        hooks?: SemanticGraphBuildHooks,
     ): Promise<void> {
         const settings = this.dependencies.getSettings();
         if (!settings.enableSemanticGraph) {
@@ -533,9 +543,13 @@ export class SemanticGraphService {
             );
             const model = this.getModelMetadata();
             const previousConcepts = this.state.concepts;
+            await hooks?.onPhase?.("extracting");
             const result = await this.refreshExtractions(inputs, targetPaths, model, signal, mode === "manual", async (extractions, progress) => {
+                signal.throwIfAborted();
                 await this.persistExtractionCheckpoint(extractions);
+                signal.throwIfAborted();
                 this.coordinator.setProgress(progress);
+                await hooks?.onCheckpoint?.(progress);
                 this.notifyStateChanged();
             }, (progress) => {
                 this.coordinator.setProgress(progress);
@@ -544,10 +558,13 @@ export class SemanticGraphService {
             this.coordinator.setProgress(result.progress);
             this.notifyStateChanged();
             const changedConceptIds = getChangedConceptIds(previousConcepts, this.state.concepts);
+            await hooks?.onPhase?.("concept-embedding");
             await this.refreshEmbeddings(changedConceptIds, signal);
+            await hooks?.onPhase?.("candidate-building");
             await this.refreshSimilarityCandidates(changedConceptIds, model, signal);
             this.refreshRuleCandidates(changedConceptIds, model);
             this.state.updatedAt = this.now();
+            await hooks?.onPhase?.("validating");
             this.assertIntegrity(this.state);
             await this.dependencies.store.save(this.state);
             signal.throwIfAborted();
@@ -707,11 +724,14 @@ export class SemanticGraphService {
                     for (const input of sectionInputs) {
                         signal.throwIfAborted();
                         const cached = existing.find((record) => record.inputHash === input.inputHash && record.extractorSignature === signature && !record.lastError);
-                        extracted.push(cached ?? await this.dependencies.extractionService.extract(input, model, signal));
+                        const record = cached ?? await this.dependencies.extractionService.extract(input, model, signal);
+                        signal.throwIfAborted();
+                        extracted.push(record);
                     }
                     recordsBySection.set(sectionId, extracted);
                     processedSections += 1;
                 } catch (error: unknown) {
+                    if (isAbortError(error)) throw error;
                     failedSections += 1;
                     console.warn("[VaultCoach] Section 概念抽取失败，保留上一次有效结果。", sectionId, error);
                     recordsBySection.set(sectionId, existing.map((record) => ({ ...record, lastError: describeError(error) })));
@@ -719,6 +739,7 @@ export class SemanticGraphService {
                 attemptedSections += 1;
                 onProgress(buildProgress());
             }
+            signal.throwIfAborted();
             await onCheckpoint(buildExtractions(), buildProgress());
         }
         return {
@@ -1224,6 +1245,10 @@ function isSemanticRelationType(value: string): value is SemanticRelationType {
 
 function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === "AbortError";
 }
 
 function emptySourceScope(): SemanticGraphSourceScope {
