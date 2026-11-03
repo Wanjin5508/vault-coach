@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { migrateSettings } from "../../../src/app/config/settings-migrations";
-import { FutureSettingsSchemaError, SettingsRepository } from "../../../src/app/config/settings-repository";
+import { FutureSettingsSchemaError, FutureSetupStateSchemaError, SettingsRepository } from "../../../src/app/config/settings-repository";
 import { CURRENT_SETTINGS_SCHEMA_VERSION } from "../../../src/app/config/settings-schema";
 
 function fixture(name: string): unknown {
@@ -106,6 +106,31 @@ describe("settings migration", () => {
         if (result.status !== "ready") return;
         expect(result.source).toBe("new-install");
         expect(result.settings.retrievalPreference).toBe("auto");
+        expect(result.setupState).toMatchObject({
+            disposition: "pending",
+            entryReason: "new-install",
+            lastStep: "scope",
+        });
+    });
+
+    it("grandfathers an existing user without setup metadata instead of forcing onboarding", async () => {
+        const writes: unknown[] = [];
+        const repository = new SettingsRepository({
+            loadData: async () => ({ ...createCurrentSettingsRecord(), setupState: undefined }),
+            saveData: async (data) => { writes.push(data); },
+        });
+
+        const result = await repository.load();
+
+        expect(result.source).toBe("current");
+        expect(repository.getSetupState()).toMatchObject({
+            disposition: "grandfathered",
+            entryReason: "upgrade",
+            lastStep: "complete",
+        });
+        expect(writes.at(-1)).toMatchObject({
+            setupState: { disposition: "grandfathered", entryReason: "upgrade" },
+        });
     });
 
     it("does not classify malformed stored data as a new installation", () => {
@@ -124,6 +149,23 @@ describe("settings migration", () => {
         });
         await expect(repository.load()).rejects.toBeInstanceOf(FutureSettingsSchemaError);
         expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it("round-trips a future setup schema while preventing current-version setup writes", async () => {
+        const futureSetupState = { schemaVersion: 9, opaque: { keep: true } };
+        const writes: unknown[] = [];
+        const repository = new SettingsRepository({
+            loadData: async () => ({ ...createCurrentSettingsRecord(), setupState: futureSetupState }),
+            saveData: async (data) => { writes.push(data); },
+        });
+        const result = await repository.load();
+        await repository.save(result.settings);
+
+        expect(writes.at(-1)).toMatchObject({ setupState: futureSetupState });
+        await expect(repository.setSetupState(result.settings, {
+            ...repository.getSetupState(),
+            updatedAt: 10,
+        })).rejects.toBeInstanceOf(FutureSetupStateSchemaError);
     });
 
     it("serializes migrations and preserves unknown fields", async () => {
@@ -171,6 +213,22 @@ describe("settings migration", () => {
         expect(repository.getUiPreferences()).toEqual({ advancedSettingsExpanded: false });
     });
 
+    it("rolls back setup progress when persistence fails", async () => {
+        const saveData = vi.fn(async () => undefined);
+        const repository = new SettingsRepository({ loadData: async () => null, saveData });
+        const result = await repository.load();
+        const previous = repository.getSetupState();
+        saveData.mockRejectedValueOnce(new Error("disk unavailable"));
+
+        await expect(repository.setSetupState(result.settings, {
+            ...previous,
+            lastStep: "preparation",
+            updatedAt: 10,
+        })).rejects.toThrow("disk unavailable");
+
+        expect(repository.getSetupState()).toEqual(previous);
+    });
+
     it("keeps an existing expanded advanced preference after upgrade", async () => {
         const migrated = migrateSettings(fixture("legacy-local.json"));
         expect(migrated.status).toBe("ready");
@@ -189,3 +247,13 @@ describe("settings migration", () => {
         expect(repository.getUiPreferences()).toEqual({ advancedSettingsExpanded: true });
     });
 });
+
+function createCurrentSettingsRecord(): Record<string, unknown> {
+    const migrated = migrateSettings(null);
+    if (migrated.status !== "ready") throw new Error("Expected default settings.");
+    return {
+        ...migrated.settings,
+        settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
+        uiPreferences: { advancedSettingsExpanded: false },
+    };
+}

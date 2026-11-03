@@ -1,6 +1,7 @@
 import { CURRENT_SETTINGS_SCHEMA_VERSION, type ReadySettingsLoadResult, type SettingsMigrationWarning } from "./settings-schema";
 import { migrateSettings } from "./settings-migrations";
 import type { SettingsUiPreferences, VaultCoachSettings } from "./settings-types";
+import { cloneSetupState, createInitialSetupState, type PersistedSetupStateV1 } from "../setup/setup-state";
 
 export interface SettingsStoragePort {
     loadData(): Promise<unknown>;
@@ -11,6 +12,13 @@ export class FutureSettingsSchemaError extends Error {
     constructor(readonly detectedVersion: number) {
         super(`设置文件来自较新的 schema 版本 ${detectedVersion}，当前插件不会覆盖该文件。`);
         this.name = "FutureSettingsSchemaError";
+    }
+}
+
+export class FutureSetupStateSchemaError extends Error {
+    constructor() {
+        super("首次引导状态来自较新的 schema 版本，当前插件不会覆盖它。");
+        this.name = "FutureSetupStateSchemaError";
     }
 }
 
@@ -25,6 +33,8 @@ export class SettingsRepository {
     private passthrough: Record<string, unknown> = {};
     private uiPreferences: SettingsUiPreferences = { advancedSettingsExpanded: false };
     private warnings: SettingsMigrationWarning[] = [];
+    private setupState: PersistedSetupStateV1 = createInitialSetupState("new-install");
+    private preservedFutureSetupState: unknown = null;
 
     constructor(private readonly storage: SettingsStoragePort) {}
     // TypeScript 的参数属性（Parameter Properties）语法糖，
@@ -38,6 +48,8 @@ export class SettingsRepository {
         this.passthrough = { ...result.passthrough };
         this.uiPreferences = { ...result.uiPreferences };
         this.warnings = [...result.warnings];
+        this.setupState = cloneSetupState(result.setupState);
+        this.preservedFutureSetupState = result.preservedFutureSetupState;
         if (result.shouldPersist) {
             await this.save(result.settings);
         }
@@ -69,12 +81,29 @@ export class SettingsRepository {
         return this.warnings.map((warning) => ({ ...warning }));
     }
 
+    getSetupState(): PersistedSetupStateV1 {
+        return cloneSetupState(this.setupState);
+    }
+
+    async setSetupState(settings: VaultCoachSettings, state: PersistedSetupStateV1): Promise<void> {
+        if (this.preservedFutureSetupState !== null) throw new FutureSetupStateSchemaError();
+        const previousState = this.setupState;
+        this.setupState = cloneSetupState(state);
+        try {
+            await this.save(settings);
+        } catch (error: unknown) {
+            this.setupState = previousState;
+            throw error;
+        }
+    }
+
     private serialize(settings: VaultCoachSettings): Record<string, unknown> {
         return {
             ...this.passthrough,
             ...settings,
             settingsSchemaVersion: CURRENT_SETTINGS_SCHEMA_VERSION,
             uiPreferences: { ...this.uiPreferences },
+            setupState: this.preservedFutureSetupState ?? cloneSetupState(this.setupState),
         };
     }
 }
