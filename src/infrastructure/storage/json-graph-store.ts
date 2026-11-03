@@ -40,11 +40,11 @@ export class JsonGraphStore implements GraphStore {
         return this.readSnapshotAtPath(GRAPH_SNAPSHOT_PATH);
     }
 
-    async save(snapshot: GraphSnapshotV1): Promise<void> {
+    async save(snapshot: GraphSnapshotV1, beforeActivate?: () => void | Promise<void>): Promise<void> {
         await this.ensureDirectories();
         await this.recoverStagedSnapshot();
         this.assertSnapshot(snapshot, GRAPH_SNAPSHOT_PATH);
-        await this.writeSnapshotAtomically(snapshot);
+        await this.writeSnapshotAtomically(snapshot, beforeActivate);
     }
 
     async clear(): Promise<void> {
@@ -54,13 +54,14 @@ export class JsonGraphStore implements GraphStore {
         await this.removeIfPresent(this.getBackupPath());
     }
 
-    private async writeSnapshotAtomically(snapshot: GraphSnapshotV1): Promise<void> {
+    private async writeSnapshotAtomically(snapshot: GraphSnapshotV1, beforeActivate?: () => void | Promise<void>): Promise<void> {
         const temporaryPath = this.getTemporaryPath();
         const backupPath = this.getBackupPath();
         const serialized = JSON.stringify(snapshot, null, 2);
 
         await this.adapter.write(temporaryPath, serialized);
         await this.readSnapshotAtPath(temporaryPath);
+        await beforeActivate?.();
 
         if (!(await this.adapter.exists(GRAPH_SNAPSHOT_PATH))) {
             await this.adapter.rename(temporaryPath, GRAPH_SNAPSHOT_PATH);
@@ -156,6 +157,8 @@ export class JsonGraphStore implements GraphStore {
             || value.schemaVersion !== GRAPH_SNAPSHOT_SCHEMA_VERSION
             || !Array.isArray(value.nodes)
             || !Array.isArray(value.edges)
+            || (value.sourceCoreGenerationId !== undefined && (typeof value.sourceCoreGenerationId !== "string" || !value.sourceCoreGenerationId))
+            || (value.graphPolicyId !== undefined && (typeof value.graphPolicyId !== "string" || !value.graphPolicyId))
             || !this.isRecord(value.stats)
             || !this.isNonNegativeInteger(value.stats.documentCount)
             || !this.isNonNegativeInteger(value.stats.sectionCount)

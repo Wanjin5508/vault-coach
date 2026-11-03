@@ -61,6 +61,9 @@ import { ObsidianRuntimeAssetDownloader } from "../infrastructure/local-ai/obsid
 import { BUILTIN_ORT_RUNTIME_POLICY } from "./local-ai/runtime-registry";
 import { VectorBuildCoordinator } from "./index/vector-build-coordinator";
 import { JsonVectorBuildJobStore } from "../infrastructure/storage/json-vector-build-job-store";
+import { GraphBuildCoordinator } from "./graph/graph-build-coordinator";
+import { JsonGraphBuildJobStore } from "../infrastructure/storage/json-graph-build-job-store";
+import { IndexLifecycleTrace } from "./observability/index-lifecycle-trace";
 
 /** 将应用服务接入 Obsidian 插件生命周期所需的最小宿主回调。 */
 export interface ApplicationContainerDependencies {
@@ -111,6 +114,8 @@ export interface ApplicationContainerServices {
     adaptiveExamPlanner: AdaptiveExamPlanner;
     localAIRuntime: LocalAIRuntime;
     vectorBuildCoordinator: VectorBuildCoordinator;
+    graphBuildCoordinator: GraphBuildCoordinator;
+    indexLifecycleTrace: IndexLifecycleTrace;
 }
 
 /**
@@ -145,7 +150,8 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         new CacheStorageRuntimeBinaryCache(BUILTIN_ORT_RUNTIME_POLICY.cacheName),
         new ObsidianRuntimeAssetDownloader(),
     );
-    const localAIRuntime = new LocalAIRuntime(runtimeAssetStore);
+    const indexLifecycleTrace = new IndexLifecycleTrace();
+    const localAIRuntime = new LocalAIRuntime(runtimeAssetStore, undefined, indexLifecycleTrace);
     const embeddingProvider = new EmbeddingProviderRouter(
         () => dependencies.getSettings(),
         [
@@ -181,6 +187,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         getActiveCoreGenerationId: () => dependencies.getActiveCoreGenerationId(),
         getEmbeddingPolicyId: () => ragEngine.getEmbeddingPolicyId(),
         onStateChanged: () => application?.notifyIndexStateChanged(),
+        trace: indexLifecycleTrace,
     });
     const memoryService = new LongTermMemoryService(
         () => dependencies.getSettings(),
@@ -216,6 +223,16 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         getSettings: () => dependencies.getSettings(),
         getVectorIndexStats: () => ragEngine.getVectorIndexStats(),
         onStateChanged: () => application?.notifySemanticGraphStateChanged(),
+        trace: indexLifecycleTrace,
+    });
+    const graphBuildCoordinator = new GraphBuildCoordinator({
+        structural: knowledgeGraphService,
+        semantic: semanticGraphService,
+        store: new JsonGraphBuildJobStore(persistentStore),
+        getActiveCoreGenerationId: () => dependencies.getActiveCoreGenerationId(),
+        getGraphPolicyId: () => createGraphPolicyId(dependencies.getSettings()),
+        onStateChanged: () => application?.notifyIndexStateChanged(),
+        trace: indexLifecycleTrace,
     });
     const learningGraphQueryService = new LearningGraphQueryService(
         new ServiceLearningGraphSource(knowledgeGraphService, semanticGraphService),
@@ -297,6 +314,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
         getNoEligibleChunksMessage: () => dependencies.getNoEligibleChunksMessage(),
         getExamEvaluationMetadata: () => createExamEvaluationMetadata(dependencies.getSettings()),
         getIndexState: () => dependencies.getIndexState(),
+        getIndexTraceEvents: () => indexLifecycleTrace.getEvents(),
         rebuildIndex: (signal) => dependencies.rebuildIndex(signal),
         clearIndex: () => dependencies.clearIndex(),
         abortIndex: () => dependencies.abortIndex(),
@@ -338,11 +356,14 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             adaptiveExamPlanner,
             localAIRuntime,
             vectorBuildCoordinator,
+            graphBuildCoordinator,
+            indexLifecycleTrace,
         },
         async dispose(): Promise<void> {
             await applicationInstance.dispose();
             indexCoordinator.dispose();
             vectorBuildCoordinator.dispose();
+            graphBuildCoordinator.dispose();
             await localAIRuntime.dispose();
         },
     };
@@ -377,4 +398,18 @@ function createExamEvaluationMetadata(settings: VaultCoachSettings): ExamEvaluat
         promptVersion: EXAM_EVALUATION_PROMPT_VERSION,
         evaluatedAt: Date.now(),
     };
+}
+
+function createGraphPolicyId(settings: VaultCoachSettings): string {
+    return [
+        "deterministic-graph/v1",
+        settings.enableSemanticGraph ? "semantic-enabled" : "semantic-disabled",
+        settings.enableSemanticGraphAutoSync ? "auto-sync" : "manual-sync",
+        settings.modelProvider,
+        settings.modelProvider === "openai-compatible" ? settings.cloudChatModel.trim() : settings.chatModel.trim(),
+        settings.semanticGraphMaxSectionCharacters,
+        settings.semanticGraphMaxSectionsPerRun,
+        settings.semanticGraphSimilarityThreshold,
+        settings.semanticGraphSimilarityTopK,
+    ].join("\u0000");
 }

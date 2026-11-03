@@ -35,6 +35,21 @@ describe("LocalAiScheduler", () => {
         expect(started).toBe(false);
         scheduler.dispose();
     });
+
+    it("rejects every queued task on hard cancellation without disposing future scheduling", async () => {
+        const scheduler = new LocalAiScheduler();
+        const active = createDeferred<void>();
+        const running = scheduler.schedule("explicit-vector", () => active.promise);
+        const queued = scheduler.schedule("background-graph", async () => undefined);
+
+        scheduler.cancelPending();
+
+        await expect(queued).rejects.toMatchObject({ name: "AbortError" });
+        active.resolve();
+        await running;
+        await expect(scheduler.schedule("foreground-query", async () => "ready")).resolves.toBe("ready");
+        scheduler.dispose();
+    });
 });
 
 function createDeferred<T>(): { promise: Promise<T>; resolve(value?: T): void } {

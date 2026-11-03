@@ -412,6 +412,15 @@ export default class VaultCoach extends Plugin implements LegacyPluginApiHost {
             },
         });
         this.addCommand({
+            id: "force-stop-builtin-ai-worker",
+            name: this.t("command.forceStopBuiltinAi"),
+            callback: () => {
+                this.runtime.forceStopBuiltinAi();
+                new Notice(this.t("notice.localAiForceStopped"));
+                this.refreshAllViews();
+            },
+        });
+        this.addCommand({
             id: "clear-builtin-embedding-cache",
             name: this.t("command.clearBuiltinEmbedding"),
             callback: () => {

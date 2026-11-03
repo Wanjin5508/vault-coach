@@ -1,4 +1,5 @@
 import type { SettingsUiPreferences, VaultCoachSettings } from "./settings-types";
+import type { PersistedSetupStateV1 } from "../setup/setup-state";
 
 export const CURRENT_SETTINGS_SCHEMA_VERSION = 1 as const;
 
@@ -20,6 +21,8 @@ export interface ReadySettingsLoadResult {
     source: SettingsLoadSource;
     settings: VaultCoachSettings;
     uiPreferences: SettingsUiPreferences;
+    setupState: PersistedSetupStateV1;
+    preservedFutureSetupState: unknown;
     warnings: SettingsMigrationWarning[];
     passthrough: Record<string, unknown>;
     shouldPersist: boolean;

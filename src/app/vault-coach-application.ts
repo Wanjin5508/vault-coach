@@ -55,6 +55,7 @@ export interface VaultCoachApplicationDependencies {
     getNoEligibleChunksMessage(): string;
     getExamEvaluationMetadata(): ExamEvaluationMetadata;
     getIndexState(): KnowledgeIndexViewState;
+    getIndexTraceEvents(): import("./observability/index-lifecycle-trace").IndexLifecycleTraceEvent[];
     rebuildIndex(signal?: AbortSignal): Promise<void>;
     clearIndex(): Promise<void>;
     abortIndex(): void;
@@ -115,6 +116,7 @@ export class VaultCoachApplication implements VaultCoachApplicationApi {
                 this.emit({ type: "index-state-changed" });
             },
             getState: () => dependencies.getIndexState(),
+            getTraceEvents: () => dependencies.getIndexTraceEvents(),
             getStorageFootprint: () => dependencies.getStorageFootprint(),
         };
         this.graph = this.createGraphApi();

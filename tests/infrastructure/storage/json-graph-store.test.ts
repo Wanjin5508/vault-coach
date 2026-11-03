@@ -78,6 +78,19 @@ describe("JsonGraphStore", () => {
         expect(adapter.files.has(`${GRAPH_SNAPSHOT_PATH}.bak`)).toBe(false);
     });
 
+    it("retains the active snapshot when the generation becomes stale before activation", async () => {
+        const adapter = new InMemoryGraphStorageAdapter();
+        const store = new JsonGraphStore(adapter);
+        const original = readSnapshotFixture();
+        const updated = withUpdatedOverviewHash(original, "stale-replacement");
+        await store.save(original);
+
+        await expect(store.save(updated, () => { throw new Error("stale graph generation"); }))
+            .rejects.toThrow("stale graph generation");
+
+        expect(JSON.parse(adapter.files.get(GRAPH_SNAPSHOT_PATH) ?? "")).toEqual(original);
+    });
+
     it("recovers a valid backup after an interrupted replacement and preserves the prior snapshot", async () => {
         const adapter = new InMemoryGraphStorageAdapter();
         const store = new JsonGraphStore(adapter);

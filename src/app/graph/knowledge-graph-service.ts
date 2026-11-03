@@ -57,6 +57,13 @@ export interface GraphSnapshotBuilder {
     };
 }
 
+export interface GraphBuildHooks {
+    sourceCoreGenerationId: string;
+    graphPolicyId: string;
+    beforeActivate(): void;
+    onPhase?(phase: "snapshotting" | "structural" | "validating"): void | Promise<void>;
+}
+
 /** 知识图服务的可观察状态；构建失败时仍可同时保留最后一个有效快照。 */
 export interface KnowledgeGraphState {
     dirty: boolean;
@@ -106,15 +113,26 @@ export class KnowledgeGraphService {
         }
     }
 
-    async rebuildAll(signal?: AbortSignal): Promise<GraphSnapshotV1> {
+    async rebuildAll(signal?: AbortSignal, hooks?: GraphBuildHooks): Promise<GraphSnapshotV1> {
         try {
             signal?.throwIfAborted();
+            await hooks?.onPhase?.("snapshotting");
             const sourceResult = this.sourceReader.readAll();
             signal?.throwIfAborted();
-            const snapshot = this.builder.build(sourceResult.documents);
+            await hooks?.onPhase?.("structural");
+            const built = this.builder.build(sourceResult.documents);
+            const snapshot: GraphSnapshotV1 = hooks ? {
+                ...built,
+                sourceCoreGenerationId: hooks.sourceCoreGenerationId,
+                graphPolicyId: hooks.graphPolicyId,
+            } : built;
+            await hooks?.onPhase?.("validating");
             this.assertIntegrity(snapshot);
             signal?.throwIfAborted();
-            await this.store.save(snapshot);
+            await this.store.save(snapshot, () => {
+                signal?.throwIfAborted();
+                hooks?.beforeActivate();
+            });
             signal?.throwIfAborted();
 
             this.snapshot = cloneGraphSnapshot(snapshot);
@@ -139,8 +157,9 @@ export class KnowledgeGraphService {
         syncResult: Pick<KnowledgeBaseSyncResult, "affectedFiles">,
         renames: readonly GraphRename[] = [],
         signal?: AbortSignal,
+        hooks?: GraphBuildHooks,
     ): Promise<GraphSnapshotV1> {
-        if (!this.snapshot) return this.rebuildAll(signal);
+        if (!this.snapshot) return this.rebuildAll(signal, hooks);
 
         const normalizedAffectedPaths = normalizePaths(syncResult.affectedFiles);
         const normalizedRenames = normalizeRenames(renames);
@@ -150,6 +169,7 @@ export class KnowledgeGraphService {
 
         try {
             signal?.throwIfAborted();
+            await hooks?.onPhase?.("snapshotting");
             const pathsToRead = normalizePaths([
                 ...normalizedAffectedPaths,
                 ...normalizedRenames.map((rename) => rename.newPath),
@@ -197,14 +217,24 @@ export class KnowledgeGraphService {
                 .filter((edge): edge is KnowledgeGraphEdge => edge !== null)
                 .filter((edge) => !removedDocumentIds.has(edge.targetNodeId));
             const mergedEdges = mergeEdges(migratedEdges, fragment.edges);
-            const snapshot = createSnapshot(
+            await hooks?.onPhase?.("structural");
+            const built = createSnapshot(
                 pruneOrphanedTagNodes(mergedNodes, mergedEdges),
                 mergedEdges,
             );
+            const snapshot: GraphSnapshotV1 = hooks ? {
+                ...built,
+                sourceCoreGenerationId: hooks.sourceCoreGenerationId,
+                graphPolicyId: hooks.graphPolicyId,
+            } : built;
+            await hooks?.onPhase?.("validating");
             this.assertIntegrity(snapshot);
 
             signal?.throwIfAborted();
-            await this.store.save(snapshot);
+            await this.store.save(snapshot, () => {
+                signal?.throwIfAborted();
+                hooks?.beforeActivate();
+            });
             signal?.throwIfAborted();
             this.snapshot = cloneGraphSnapshot(snapshot);
             this.diagnostics = cloneDiagnostics(sourceResult.diagnostics);

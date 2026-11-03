@@ -60,6 +60,64 @@ describe("VectorBuildCoordinator", () => {
         await expect(coordinator.waitFor(queued.jobId)).resolves.toMatchObject({ phase: "stale", errorCode: "identity-changed" });
         coordinator.dispose();
     });
+
+    it("settles a replaced vector job as superseded instead of returning the replacement state", async () => {
+        let calls = 0;
+        const coordinator = new VectorBuildCoordinator({
+            runner: {
+                rebuildVectorIndex: async (signal) => {
+                    calls += 1;
+                    if (calls === 1) await waitUntilAborted(signal);
+                    return { ready: true, vectorCount: 2, dimension: 384, lastBuiltAt: 1 };
+                },
+            },
+            store: createStore([]),
+            getActiveCoreGenerationId: () => "core-1",
+            getEmbeddingPolicyId: () => "policy-1",
+            onStateChanged: () => undefined,
+        });
+
+        const first = await coordinator.enqueue("core-1");
+        const firstCompletion = coordinator.waitFor(first.jobId);
+        const replacement = await coordinator.enqueue("core-1");
+
+        await expect(firstCompletion).resolves.toMatchObject({
+            jobId: first.jobId,
+            phase: "superseded",
+            errorCode: "new-core-generation",
+        });
+        await expect(coordinator.waitFor(replacement.jobId)).resolves.toMatchObject({
+            jobId: replacement.jobId,
+            phase: "rag-ready",
+        });
+        coordinator.dispose();
+    });
+
+    it("keeps a shutdown-suspended job nonterminal so restart can requeue it", async () => {
+        const saved: VectorBuildJob[] = [];
+        const coordinator = new VectorBuildCoordinator({
+            runner: {
+                rebuildVectorIndex: async (signal) => {
+                    await waitUntilAborted(signal);
+                    return { ready: true, vectorCount: 2, dimension: 384, lastBuiltAt: 1 };
+                },
+            },
+            store: createStore(saved),
+            getActiveCoreGenerationId: () => "core-1",
+            getEmbeddingPolicyId: () => "policy-1",
+            onStateChanged: () => undefined,
+        });
+
+        const queued = await coordinator.enqueue("core-1");
+        const completion = coordinator.waitFor(queued.jobId);
+        await waitFor(() => coordinator.getState()?.phase === "preparing-model");
+        coordinator.suspend();
+
+        await expect(completion).resolves.toMatchObject({ jobId: queued.jobId, phase: "preparing-model" });
+        expect(saved.at(-1)?.phase).toBe("preparing-model");
+        expect(saved.at(-1)?.errorCode).toBeNull();
+        coordinator.dispose();
+    });
 });
 
 function createStore(saved: VectorBuildJob[]) {
@@ -88,4 +146,14 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         await Promise.resolve();
     }
     throw new Error("Timed out waiting for coordinator state.");
+}
+
+async function waitUntilAborted(signal: AbortSignal | undefined): Promise<void> {
+    if (!signal) throw new Error("Expected an abort signal.");
+    if (signal.aborted) signal.throwIfAborted();
+    await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(
+            signal.reason instanceof Error ? signal.reason : new DOMException("Aborted.", "AbortError"),
+        ), { once: true });
+    });
 }

@@ -14,6 +14,7 @@ import {
     type LocalAiWorkerOperation,
     type LocalAiWorkerRequest,
 } from "../../infrastructure/local-ai/local-ai-worker-protocol";
+import { createIndexTraceRef, type IndexLifecycleTrace } from "../observability/index-lifecycle-trace";
 
 declare const __VAULT_COACH_LOCAL_AI_WORKER_SOURCE__: string;
 
@@ -42,6 +43,7 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     private readonly scheduler = new LocalAiScheduler();
     private readonly listeners = new Set<(status: LocalAiStatus) => void>();
     private prepareTask: Promise<void> | null = null;
+    private disposed = false;
     private status: LocalAiStatus = {
         role: "embedding", phase: "not-installed", progress: null, message: null, cached: false, backend: "wasm",
     };
@@ -49,17 +51,23 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     constructor(
         private readonly runtimeAssets: RuntimeAssetStore,
         private readonly createWorker: LocalAiWorkerFactory = createEmbeddedWorker,
+        private readonly trace?: IndexLifecycleTrace,
     ) {}
 
     getStatus(): LocalAiStatus { return { ...this.status }; }
 
     subscribe(listener: (status: LocalAiStatus) => void): () => void {
+        if (this.disposed) {
+            listener(this.getStatus());
+            return () => undefined;
+        }
         this.listeners.add(listener);
         listener(this.getStatus());
         return () => this.listeners.delete(listener);
     }
 
     async prepare(allowDownload: boolean): Promise<void> {
+        this.assertActive();
         if (this.status.phase === "ready") return;
         if (this.prepareTask) return await this.prepareTask;
         const task = this.prepareOnce(allowDownload);
@@ -101,6 +109,7 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     }
 
     async embed(request: LocalAiEmbeddingRequest): Promise<LocalAiEmbeddingResult> {
+        this.assertActive();
         if (request.signal?.aborted) throw new DOMException("Embedding request aborted.", "AbortError");
         if (this.status.phase !== "ready") {
             try { await this.prepare(false); } catch {
@@ -110,15 +119,28 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         const priority: LocalAiPriority = request.purpose === "query"
             ? "foreground-query"
             : request.purpose === "graph" ? "background-graph" : "explicit-vector";
-        const result = await this.scheduler.schedule(
-            priority,
-            () => this.request("embed", { texts: [...request.texts], purpose: request.purpose }, request.signal),
-            request.signal,
-        );
-        return decodeEmbeddingResult(result);
+        const span = this.trace?.begin("embedding.batch", {
+            policyRef: createIndexTraceRef("policy", BUILTIN_EMBEDDING_POLICY.id),
+            role: "embedding",
+            counts: { total: request.texts.length, queued: request.texts.length },
+        });
+        try {
+            const result = await this.scheduler.schedule(
+                priority,
+                () => this.request("embed", { texts: [...request.texts], purpose: request.purpose }, request.signal),
+                request.signal,
+            );
+            const decoded = decodeEmbeddingResult(result);
+            span?.finish("completed", null, { total: request.texts.length, processed: decoded.vectors.length, queued: 0 });
+            return decoded;
+        } catch (error: unknown) {
+            span?.finish(isAbortError(error) ? "cancelled" : "failed", getTraceErrorCode(error));
+            throw error;
+        }
     }
 
     async clear(): Promise<void> {
+        this.assertActive();
         this.update({ phase: "clearing", progress: null, message: null });
         try {
             await this.request("clear", {});
@@ -131,17 +153,25 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     }
 
     async dispose(): Promise<void> {
+        if (this.disposed) return;
+        this.disposed = true;
         this.scheduler.dispose();
-        if (this.worker) {
-            this.worker.terminate();
-        }
+        this.terminateWorker();
         this.rejectPending(new Error("Local AI runtime disposed."));
-        this.worker = null;
-        if (this.workerUrl) URL.revokeObjectURL(this.workerUrl);
-        this.workerUrl = null;
+        this.listeners.clear();
+    }
+
+    hardCancel(): void {
+        if (this.disposed) return;
+        const error = new DOMException("Local AI worker was force-stopped.", "AbortError");
+        this.scheduler.cancelPending(error);
+        this.terminateWorker();
+        this.rejectPending(error);
+        this.update({ phase: "error", progress: null, message: "Local AI worker was force-stopped." });
     }
 
     private ensureWorker(): Worker {
+        this.assertActive();
         if (this.worker) return this.worker;
         const handle = this.createWorker();
         this.workerEpoch += 1;
@@ -245,12 +275,24 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     }
 
     private handleWorkerFailure(error: Error): void {
-        this.worker?.terminate();
+        this.terminateWorker();
+        this.rejectPending(error);
+        this.update({ phase: "error", progress: null, message: error.message });
+    }
+
+    private terminateWorker(): void {
+        if (this.worker) {
+            this.worker.onmessage = null;
+            this.worker.onerror = null;
+            this.worker.terminate();
+        }
         this.worker = null;
         if (this.workerUrl) URL.revokeObjectURL(this.workerUrl);
         this.workerUrl = null;
-        this.rejectPending(error);
-        this.update({ phase: "error", progress: null, message: error.message });
+    }
+
+    private assertActive(): void {
+        if (this.disposed) throw new Error("Local AI runtime disposed.");
     }
 }
 
@@ -261,6 +303,15 @@ function createEmbeddedWorker(): LocalAiWorkerHandle {
 
 function getErrorMessage(error: unknown): string {
     return error instanceof Error && error.message ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === "AbortError";
+}
+
+function getTraceErrorCode(error: unknown): string {
+    if (isAbortError(error)) return "aborted";
+    return error instanceof EmbeddingError ? error.code : "embedding-failed";
 }
 
 function decodeEmbeddingResult(value: unknown): LocalAiEmbeddingResult {

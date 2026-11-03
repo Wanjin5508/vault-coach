@@ -8,8 +8,9 @@ import {
     type SettingsMigrationWarning,
 } from "./settings-schema";
 import type { SettingsUiPreferences, VaultCoachSettings } from "./settings-types";
+import { SETUP_STATE_SCHEMA_VERSION, createInitialSetupState, getSetupStateSchemaVersion, parseSetupState } from "../setup/setup-state";
 
-const RESERVED_KEYS = new Set(["settingsSchemaVersion", "uiPreferences"]);
+const RESERVED_KEYS = new Set(["settingsSchemaVersion", "uiPreferences", "setupState"]);
 
 /**
  * 将磁盘中的未知数据迁移并规范化为当前设置。
@@ -54,7 +55,20 @@ export function migrateSettings(raw: unknown): SettingsLoadResult {
         ? defaults.defaultRetrievalMode
         : settings.retrievalPreference;
 
+    const currentVersion = version === CURRENT_SETTINGS_SCHEMA_VERSION;
     const uiPreferences = normalizeUiPreferences(record.uiPreferences, warnings);
+    const source = isNewInstall ? "new-install" : currentVersion ? "current" : "legacy";
+    const parsedSetupState = parseSetupState(record.setupState);
+    const setupStateVersion = getSetupStateSchemaVersion(record.setupState);
+    const preservedFutureSetupState = setupStateVersion !== null && setupStateVersion > SETUP_STATE_SCHEMA_VERSION
+        ? record.setupState
+        : null;
+    const setupState = parsedSetupState ?? createInitialSetupState(source);
+    if (preservedFutureSetupState) {
+        warnings.push({ code: "invalid-schema-version", field: "setupState.schemaVersion", message: "首次引导状态来自较新版本，当前版本将原样保留且不修改。" });
+    } else if (record.setupState !== undefined && !parsedSetupState) {
+        warnings.push({ code: "invalid-value", field: "setupState", message: "首次引导状态无效，已按安装来源安全恢复。" });
+    }
     const settingKeys = new Set(Object.keys(defaults));
     const passthrough: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) {
@@ -63,15 +77,17 @@ export function migrateSettings(raw: unknown): SettingsLoadResult {
         }
     }
 
-    const currentVersion = version === CURRENT_SETTINGS_SCHEMA_VERSION;
     return {
         status: "ready",
-        source: isNewInstall ? "new-install" : currentVersion ? "current" : "legacy",
+        source,
         settings,
         uiPreferences,
+        setupState,
+        preservedFutureSetupState,
         warnings,
         passthrough,
-        shouldPersist: !currentVersion || warnings.length > 0 || !isSettingsRecord(record.uiPreferences),
+        shouldPersist: !currentVersion || warnings.length > 0 || !isSettingsRecord(record.uiPreferences)
+            || (!parsedSetupState && !preservedFutureSetupState),
     };
 }
 

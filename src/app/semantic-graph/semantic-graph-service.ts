@@ -41,6 +41,7 @@ import type { GraphCapacityAssessment, GraphCapacityInput } from "../../domain/g
 import type { VectorIndexStats } from "../../domain/retrieval/retrieval-types";
 import type { EmbeddingProvider } from "../../domain/embedding/embedding-provider";
 import { getEmbeddingFingerprintDisplayId, isFingerprintCompatibleWithDescriptor } from "../../domain/embedding/embedding-fingerprint";
+import type { IndexLifecycleTrace } from "../observability/index-lifecycle-trace";
 
 /** 语义图协调器使用的领域端口、设置读取器和状态通知回调。 */
 export interface SemanticGraphServiceDependencies {
@@ -55,6 +56,12 @@ export interface SemanticGraphServiceDependencies {
     getVectorIndexStats?(): Pick<VectorIndexStats, "vectorCount" | "dimension">;
     /** 发布内存中的执行进度，但不让应用服务依赖 Obsidian UI。 */
     onStateChanged?(): void;
+    trace?: IndexLifecycleTrace;
+}
+
+export interface SemanticGraphBuildHooks {
+    onPhase?(phase: "extracting" | "concept-embedding" | "candidate-building" | "validating"): void | Promise<void>;
+    onCheckpoint?(progress: SemanticGraphBuildProgress): void | Promise<void>;
 }
 
 /** Lite 模式默认值。即使用户允许处理大文件，仍必须遵守全局容量门禁。 */
@@ -106,17 +113,21 @@ export class SemanticGraphService {
         }
     }
 
-    async rebuildAll(signal?: AbortSignal): Promise<void> {
-        await this.run(undefined, signal, "manual");
+    async rebuildAll(signal?: AbortSignal, hooks?: SemanticGraphBuildHooks): Promise<void> {
+        await this.run(undefined, signal, "manual", hooks);
     }
 
-    async syncChangedFiles(syncResult: Pick<KnowledgeBaseSyncResult, "affectedFiles">, signal?: AbortSignal): Promise<void> {
+    async syncChangedFiles(
+        syncResult: Pick<KnowledgeBaseSyncResult, "affectedFiles">,
+        signal?: AbortSignal,
+        hooks?: SemanticGraphBuildHooks,
+    ): Promise<void> {
         const settings = this.dependencies.getSettings();
         if (!settings.enableSemanticGraph || !settings.enableSemanticGraphAutoSync) return;
         const affected = new Set(syncResult.affectedFiles);
         if (affected.size === 0) return;
         if (!this.getCapacityAssessment().allowAutomaticSemanticSync) return;
-        await this.run(affected, signal, "automatic");
+        await this.run(affected, signal, "automatic", hooks);
     }
 
     /**
@@ -501,6 +512,7 @@ export class SemanticGraphService {
         affectedDocumentPaths: ReadonlySet<string> | undefined,
         providedSignal: AbortSignal | undefined,
         mode: "manual" | "automatic",
+        hooks?: SemanticGraphBuildHooks,
     ): Promise<void> {
         const settings = this.dependencies.getSettings();
         if (!settings.enableSemanticGraph) {
@@ -533,21 +545,64 @@ export class SemanticGraphService {
             );
             const model = this.getModelMetadata();
             const previousConcepts = this.state.concepts;
-            const result = await this.refreshExtractions(inputs, targetPaths, model, signal, mode === "manual", async (extractions, progress) => {
-                await this.persistExtractionCheckpoint(extractions);
-                this.coordinator.setProgress(progress);
-                this.notifyStateChanged();
-            }, (progress) => {
-                this.coordinator.setProgress(progress);
-                this.notifyStateChanged();
+            await hooks?.onPhase?.("extracting");
+            const extractionSpan = this.dependencies.trace?.begin("concept.extract", {
+                role: "graph",
+                counts: { total: inputs.length, queued: inputs.length },
             });
+            let result: Awaited<ReturnType<SemanticGraphService["refreshExtractions"]>>;
+            try {
+                result = await this.refreshExtractions(inputs, targetPaths, model, signal, mode === "manual", async (extractions, progress) => {
+                    signal.throwIfAborted();
+                    await this.persistExtractionCheckpoint(extractions);
+                    signal.throwIfAborted();
+                    this.coordinator.setProgress(progress);
+                    extractionSpan?.checkpoint({
+                        total: progress.totalSections,
+                        processed: progress.processedSections,
+                        failed: progress.failedSections,
+                        queued: progress.queuedSections,
+                    });
+                    await hooks?.onCheckpoint?.(progress);
+                    this.notifyStateChanged();
+                }, (progress) => {
+                    this.coordinator.setProgress(progress);
+                    this.notifyStateChanged();
+                });
+                extractionSpan?.finish("completed", null, {
+                    total: result.progress.totalSections,
+                    processed: result.progress.processedSections,
+                    failed: result.progress.failedSections,
+                    queued: result.progress.queuedSections,
+                });
+            } catch (error: unknown) {
+                extractionSpan?.finish(isAbortError(error) ? "cancelled" : "failed", isAbortError(error) ? "aborted" : "concept-extraction-failed");
+                throw error;
+            }
             this.coordinator.setProgress(result.progress);
             this.notifyStateChanged();
             const changedConceptIds = getChangedConceptIds(previousConcepts, this.state.concepts);
-            await this.refreshEmbeddings(changedConceptIds, signal);
+            await hooks?.onPhase?.("concept-embedding");
+            const embeddingSpan = this.dependencies.trace?.begin("concept.embed", {
+                role: "graph",
+                counts: { total: changedConceptIds.size, queued: changedConceptIds.size },
+            });
+            try {
+                await this.refreshEmbeddings(changedConceptIds, signal);
+                embeddingSpan?.finish("completed", null, {
+                    total: changedConceptIds.size,
+                    processed: changedConceptIds.size,
+                    queued: 0,
+                });
+            } catch (error: unknown) {
+                embeddingSpan?.finish(isAbortError(error) ? "cancelled" : "failed", isAbortError(error) ? "aborted" : "concept-embedding-failed");
+                throw error;
+            }
+            await hooks?.onPhase?.("candidate-building");
             await this.refreshSimilarityCandidates(changedConceptIds, model, signal);
             this.refreshRuleCandidates(changedConceptIds, model);
             this.state.updatedAt = this.now();
+            await hooks?.onPhase?.("validating");
             this.assertIntegrity(this.state);
             await this.dependencies.store.save(this.state);
             signal.throwIfAborted();
@@ -707,11 +762,14 @@ export class SemanticGraphService {
                     for (const input of sectionInputs) {
                         signal.throwIfAborted();
                         const cached = existing.find((record) => record.inputHash === input.inputHash && record.extractorSignature === signature && !record.lastError);
-                        extracted.push(cached ?? await this.dependencies.extractionService.extract(input, model, signal));
+                        const record = cached ?? await this.dependencies.extractionService.extract(input, model, signal);
+                        signal.throwIfAborted();
+                        extracted.push(record);
                     }
                     recordsBySection.set(sectionId, extracted);
                     processedSections += 1;
                 } catch (error: unknown) {
+                    if (isAbortError(error)) throw error;
                     failedSections += 1;
                     console.warn("[VaultCoach] Section 概念抽取失败，保留上一次有效结果。", sectionId, error);
                     recordsBySection.set(sectionId, existing.map((record) => ({ ...record, lastError: describeError(error) })));
@@ -719,6 +777,7 @@ export class SemanticGraphService {
                 attemptedSections += 1;
                 onProgress(buildProgress());
             }
+            signal.throwIfAborted();
             await onCheckpoint(buildExtractions(), buildProgress());
         }
         return {
@@ -1224,6 +1283,10 @@ function isSemanticRelationType(value: string): value is SemanticRelationType {
 
 function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === "AbortError";
 }
 
 function emptySourceScope(): SemanticGraphSourceScope {

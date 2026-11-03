@@ -5,6 +5,7 @@ import type {
     RuntimeAssetStore,
 } from "../../../src/domain/local-ai/local-ai-runtime-assets";
 import { LOCAL_AI_WORKER_PROTOCOL_VERSION } from "../../../src/infrastructure/local-ai/local-ai-worker-protocol";
+import { IndexLifecycleTrace } from "../../../src/app/observability/index-lifecycle-trace";
 
 interface WorkerRequest {
     requestId: string;
@@ -107,6 +108,27 @@ describe("LocalAIRuntime", () => {
         expect(worker.terminated).toBe(true);
     });
 
+    it("records an embedding batch without request text or raw policy identity", async () => {
+        const worker = new FakeLocalAiWorker();
+        const trace = new IndexLifecycleTrace(10, createClock());
+        const runtime = new LocalAIRuntime(
+            new FakeRuntimeAssetStore(),
+            () => ({ worker: worker as unknown as Worker, objectUrl: null }),
+            trace,
+        );
+        await runtime.prepare(true);
+
+        await runtime.embed({ texts: ["private query"], purpose: "query" });
+
+        const events = trace.getEvents();
+        expect(events).toEqual([
+            expect.objectContaining({ operation: "embedding.batch", status: "started", counts: { total: 1, queued: 1 } }),
+            expect.objectContaining({ operation: "embedding.batch", status: "completed", counts: { total: 1, processed: 1, queued: 0 } }),
+        ]);
+        expect(JSON.stringify(events)).not.toContain("private query");
+        await runtime.dispose();
+    });
+
     it("rejects an aborted embedding request without posting it to the worker", async () => {
         const { runtime, worker } = createHarness();
         await runtime.prepare(true);
@@ -196,6 +218,49 @@ describe("LocalAIRuntime", () => {
         expect(worker.terminated).toBe(true);
         await runtime.dispose();
     });
+
+    it("hard-cancels active and queued work, terminates the worker, and lazily recreates it", async () => {
+        const firstWorker = new FakeLocalAiWorker();
+        firstWorker.postMessage = (value: unknown, transfer: Transferable[] = []) => {
+            const request = value as WorkerRequest;
+            firstWorker.requests.push(request);
+            firstWorker.transfers.push(transfer);
+            if (request.operation === "prepare") {
+                queueMicrotask(() => firstWorker.emit(createResponse(request, { ready: true })));
+            }
+        };
+        const secondWorker = new FakeLocalAiWorker();
+        const workers = [firstWorker, secondWorker];
+        const runtime = new LocalAIRuntime(
+            new FakeRuntimeAssetStore(),
+            () => {
+                const worker = workers.shift();
+                if (!worker) throw new Error("Unexpected worker recreation.");
+                return { worker: worker as unknown as Worker, objectUrl: null };
+            },
+        );
+        await runtime.prepare(true);
+        const active = runtime.embed({ texts: ["active"], purpose: "document" });
+        const queued = runtime.embed({ texts: ["queued"], purpose: "graph" });
+        const outcomes = Promise.allSettled([active, queued]);
+        await waitFor(() => firstWorker.requests.some((request) => request.operation === "embed"));
+
+        runtime.hardCancel();
+
+        const [activeResult, queuedResult] = await outcomes;
+        expect(activeResult).toMatchObject({ status: "rejected", reason: { name: "AbortError" } });
+        expect(queuedResult).toMatchObject({ status: "rejected", reason: { name: "AbortError" } });
+        expect(firstWorker.terminated).toBe(true);
+        expect(runtime.getStatus()).toMatchObject({ phase: "error", cached: true });
+
+        await runtime.prepare(false);
+        expect(runtime.getStatus().phase).toBe("ready");
+        expect(secondWorker.requests.map((request) => request.operation)).toEqual(["prepare"]);
+        await runtime.dispose();
+        await runtime.dispose();
+        expect(secondWorker.terminated).toBe(true);
+        await expect(runtime.prepare(false)).rejects.toThrow("disposed");
+    });
 });
 
 function createResponse(request: WorkerRequest, result: unknown, workerEpoch: number = request.workerEpoch): unknown {
@@ -218,4 +283,9 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         await Promise.resolve();
     }
     throw new Error("Timed out waiting for worker request.");
+}
+
+function createClock(): () => number {
+    let value = 0;
+    return () => ++value;
 }

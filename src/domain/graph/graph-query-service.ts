@@ -47,6 +47,8 @@ export class GraphQueryService {
 export function cloneGraphSnapshot(snapshot: GraphSnapshotV1): GraphSnapshotV1 {
     return {
         schemaVersion: snapshot.schemaVersion,
+        ...(snapshot.sourceCoreGenerationId ? { sourceCoreGenerationId: snapshot.sourceCoreGenerationId } : {}),
+        ...(snapshot.graphPolicyId ? { graphPolicyId: snapshot.graphPolicyId } : {}),
         nodes: snapshot.nodes.map(cloneKnowledgeGraphNode),
         edges: snapshot.edges.map(cloneKnowledgeGraphEdge),
         stats: { ...snapshot.stats },

@@ -1,7 +1,7 @@
 ---
 tags: [VaultCoach, v1.5, SetupWizard, 开发规划]
-status: planned
-updated: 2026-11-01
+status: in-progress
+updated: 2026-11-03
 ---
 # 里程碑 7：首次引导与首个成功动作
 
@@ -41,6 +41,19 @@ M7 接受 M6、M6.1、M6.2、M6.3 的不同交付状态。增量 A 只展示已�
 分别记录 setup schema version、用户是否完成/跳过引导；模型是否真的可用必须实时查询 runtime。持久化的 completed 不能证明缓存仍存在。页面状态建议为：范围选择 → 准备说明 → 准备中 → 可索引 → 索引中 → 可搜索 → 可选主 LLM → 完成。
 
 **依赖/交付：** M5/M6 状态契约；先写状态转移表和 fake service，覆盖关闭重开、失败重试、已准备模型。
+
+#### Step 1 实施记录（2026-11-03）
+
+已完成状态与编排基础，不包含下载或 Setup UI：
+
+1. 新增独立版本化 `PersistedSetupStateV1`，记录 disposition、entry reason、最后稳定步骤和更新时间。新安装默认 `pending/scope`；旧用户缺少 setup 元数据时迁移为 `grandfathered/complete`，不会被强制清空配置或重新走向导。
+2. Setup 状态由 `SettingsRepository` 与现有 `data.json` 原子保存，设置快速写入继续复用串行队列；写失败回滚内存进度。未来更高 setup schema 会原样往返，并阻止当前版本覆盖。
+3. `SetupService` 实现 scope → preparation → preparing → ready-to-index → indexing → searchable → optional-main-llm → complete 的受控转换，以及 skip、手动 reopen、关闭重开和 Runtime 事实对齐。
+4. `completed` 只代表用户流程选择，不能证明模型缓存仍存在。准备状态每次从 Local AI phase、Core ready、VectorJob、GraphJob 和主 LLM 配置实时派生。
+5. 能力矩阵仅把已通过平台 Gate 的内置 Embedding 标为 available/ready；未验证平台为 `blocked-unverified`。Reranker、Utility 与 GraphRAG 当前保持 `not-delivered`，不能为了向导布局提前显示可准备按钮。
+6. 首个搜索成功必须同时满足已提交 Core generation 和至少一个可核对来源；GraphJob 仍运行或失败不阻止进入 searchable。
+
+自动化测试覆盖新安装、旧用户升级、主动重开、准备/索引恢复、未验证能力跳过、无来源禁止假完成、设置写失败回滚和未来 schema 保留；74 个测试文件、316 项测试、lint、TypeScript、生产构建和 release asset 校验通过。下一步接入现有范围选择与显式下载授权；当前实现不会在 onload 或状态迁移时发起网络请求。
 
 ### Step 2：接入范围选择与下载授权
 
@@ -102,6 +115,6 @@ CoreIndex 成功必须来自已提交 generation；取消或部分失败不能�
 
 ## 5. 开发记录
 
-状态：规划，未实现。建议 PR 为状态与编排 → 模型卡片 → 索引与首次搜索 → 主 LLM/失败 UX。完成后补充截图、设备、范围、授权证据、取消/恢复结果、commit 和未解决问题。
+状态：进行中。Step 1 状态与编排已实现；Step 2–6、截图和真机验收仍待完成。建议 PR 为状态与编排 → 模型卡片 → 索引与首次搜索 → 主 LLM/失败 UX。完成后补充截图、设备、范围、授权证据、取消/恢复结果、commit 和未解决问题。
 
 原版详见 [[历史规划-2026-10-23调整前/原M7]]；本文件为当前实施依据。
