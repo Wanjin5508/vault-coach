@@ -334,3 +334,24 @@ function decodeEmbeddingResult(value: unknown): LocalAiEmbeddingResult {
     }
     return { vectors, latencyMs: result.latencyMs };
 }
+
+function decodeEmbeddingResult(value: unknown): LocalAiEmbeddingResult {
+    if (typeof value !== "object" || value === null) throw new Error("Local AI worker returned an invalid embedding result.");
+    const result = value as { count?: unknown; dimension?: unknown; buffer?: unknown; latencyMs?: unknown };
+    if (!Number.isSafeInteger(result.count) || !Number.isSafeInteger(result.dimension)
+        || (result.count as number) < 1 || (result.dimension as number) < 1
+        || !(result.buffer instanceof ArrayBuffer)
+        || result.buffer.byteLength !== (result.count as number) * (result.dimension as number) * Float32Array.BYTES_PER_ELEMENT
+        || typeof result.latencyMs !== "number" || !Number.isFinite(result.latencyMs)) {
+        throw new Error("Local AI worker returned a malformed embedding buffer.");
+    }
+    const count = result.count as number;
+    const dimension = result.dimension as number;
+    const values = new Float32Array(result.buffer);
+    if (values.some((entry) => !Number.isFinite(entry))) throw new Error("Local AI worker returned non-finite embeddings.");
+    const vectors: number[][] = [];
+    for (let index = 0; index < count; index += 1) {
+        vectors.push(Array.from(values.slice(index * dimension, (index + 1) * dimension)));
+    }
+    return { vectors, latencyMs: result.latencyMs };
+}

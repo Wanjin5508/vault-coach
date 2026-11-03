@@ -827,6 +827,28 @@ export class VaultCoachRuntime {
         if (job.phase === "failed") {
             console.error("[VaultCoachRuntime] 后台向量索引建立失败，将继续使用关键词检索。", job.errorCode);
         }
+        await this.persistKnowledgeBaseSnapshot();
+    }
+
+    private applyVectorJobTerminal(job: VectorBuildJob): void {
+        const ready = job.phase === "rag-ready";
+        this.vectorIndexDirty = this.settings.enableVectorRetrieval && !ready;
+        if (ready) {
+            this.showOllamaEmbeddingCpuFallbackNoticeIfNeeded();
+            return;
+        }
+        this.markActiveVectorIndexStale();
+        if (job.phase === "failed") {
+            console.error("[VaultCoachRuntime] 后台向量索引建立失败，将继续使用关键词检索。", job.errorCode);
+        }
+    }
+
+    private getActiveCoreGenerationId(): string | null {
+        if (!this.services.knowledgeBase.isReady()) return null;
+        return createCoreGenerationId(
+            this.services.knowledgeBase.getSettingsSignature(),
+            this.services.knowledgeBase.getSourceInventory(),
+        );
     }
 
     private getActiveCoreGenerationId(): string | null {
