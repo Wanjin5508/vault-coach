@@ -15,6 +15,7 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && node scripts/verify-release-assets.mjs",
 		"m4:validate": "node scripts/spikes/local-ai/validate-local-ai-assets.mjs",
 		"m4:smoke:embedding": "node scripts/spikes/local-ai/embedding-smoke.mjs",
+		"m6.1:smoke:reranker": "node scripts/spikes/local-ai/reranker-smoke.mjs",
 		"m4:smoke:browser-runtime": "node scripts/spikes/local-ai/browser-runtime-smoke.mjs",
 		"m4:benchmark": "node scripts/run-local-ai-benchmark.mjs",
 		"m4:build:obsidian-smoke": "node scripts/spikes/local-ai/build-obsidian-smoke.mjs",

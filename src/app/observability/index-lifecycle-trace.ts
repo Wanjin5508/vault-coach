@@ -5,6 +5,7 @@ export type IndexTraceOperation =
     | "core.activate"
     | "vector-job.run"
     | "embedding.batch"
+    | "rerank.batch"
     | "vector.activate"
     | "graph-job.run"
     | "graph.snapshot"
@@ -27,7 +28,7 @@ export interface IndexTraceContext {
     jobRef?: string;
     generationRef?: string;
     policyRef?: string;
-    role?: "core" | "vector" | "graph" | "embedding" | "utility";
+    role?: "core" | "vector" | "graph" | "embedding" | "reranker" | "utility";
     counts?: IndexTraceCounts;
     metrics?: {
         usedHeapBytes?: number;

@@ -44,6 +44,26 @@
     "warmLoadMsDesktopMaximum": 5000,
     "peakMemoryMbDesktopMaximum": 1024
   },
+  "reranker": {
+    "status": "pending-owner-approval",
+    "candidatePoolSizes": [8, 16, 32],
+    "metrics": ["ndcg@5", "ndcg@10", "mrr@10", "recall@10"],
+    "slices": ["zh", "en", "de", "mixed", "long-document", "near-synonym"],
+    "proposedThresholds": {
+      "ndcgAt10ImprovementMinimum": 0.03,
+      "mrrAt10RegressionMaximumByLanguage": 0.01,
+      "rerankP95MsDesktopMaximumAt16": 800,
+      "coldLoadMsDesktopMaximum": 5000,
+      "peakMemoryMbDesktopMaximum": 1024,
+      "modelDownloadBytesMaximum": 157286400
+    },
+    "decisionRules": {
+      "smokeDoesNotImplyGo": true,
+      "fixedRecallCandidatesRequired": true,
+      "allLanguageSlicesRequired": true,
+      "workerAndTargetDeviceEvidenceRequired": true
+    }
+  },
   "decisionRules": {
     "goRequiresApprovedProtocol": true,
     "goRequiresAllAcceptanceThresholds": true,

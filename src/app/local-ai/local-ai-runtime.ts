@@ -2,11 +2,15 @@ import { EmbeddingError } from "../../domain/embedding/embedding-error";
 import type {
     LocalAiEmbeddingRequest,
     LocalAiEmbeddingResult,
+    LocalAiRerankRequest,
+    LocalAiRerankResult,
+    LocalAiRole,
     LocalAiStatus,
+    LocalAIRerankerRuntimePort,
     LocalAIRuntimePort,
 } from "../../domain/local-ai/local-ai-types";
 import type { RuntimeAssetStore } from "../../domain/local-ai/local-ai-runtime-assets";
-import { BUILTIN_EMBEDDING_POLICY } from "./model-registry";
+import { BUILTIN_EMBEDDING_POLICY, BUILTIN_RERANK_POLICY } from "./model-registry";
 import { LocalAiScheduler, type LocalAiPriority } from "./local-ai-scheduler";
 import {
     LOCAL_AI_WORKER_PROTOCOL_VERSION,
@@ -21,6 +25,8 @@ declare const __VAULT_COACH_LOCAL_AI_WORKER_SOURCE__: string;
 interface PendingRequest {
     jobId: string;
     workerEpoch: number;
+    role: LocalAiRole;
+    policyId: string;
     resolve(value: unknown): void;
     reject(reason: unknown): void;
     cleanup(): void;
@@ -34,7 +40,7 @@ export interface LocalAiWorkerHandle {
 export type LocalAiWorkerFactory = () => LocalAiWorkerHandle;
 
 /** 一个插件生命周期只创建一个 Worker；所有模型状态和请求通过该边界串行化。 */
-export class LocalAIRuntime implements LocalAIRuntimePort {
+export class LocalAIRuntime implements LocalAIRuntimePort, LocalAIRerankerRuntimePort {
     private worker: Worker | null = null;
     private workerUrl: string | null = null;
     private workerEpoch = 0;
@@ -43,9 +49,14 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     private readonly scheduler = new LocalAiScheduler();
     private readonly listeners = new Set<(status: LocalAiStatus) => void>();
     private prepareTask: Promise<void> | null = null;
+    private rerankerPrepareTask: Promise<void> | null = null;
+    private activeRole: LocalAiRole | null = null;
     private disposed = false;
     private status: LocalAiStatus = {
         role: "embedding", phase: "not-installed", progress: null, message: null, cached: false, backend: "wasm",
+    };
+    private rerankerStatus: LocalAiStatus = {
+        role: "reranker", phase: "not-installed", progress: null, message: null, cached: false, backend: "wasm",
     };
 
     constructor(
@@ -55,6 +66,8 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     ) {}
 
     getStatus(): LocalAiStatus { return { ...this.status }; }
+
+    getRerankerStatus(): LocalAiStatus { return { ...this.rerankerStatus }; }
 
     subscribe(listener: (status: LocalAiStatus) => void): () => void {
         if (this.disposed) {
@@ -67,10 +80,8 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     }
 
     async prepare(allowDownload: boolean): Promise<void> {
-        this.assertActive();
-        if (this.status.phase === "ready") return;
         if (this.prepareTask) return await this.prepareTask;
-        const task = this.prepareOnce(allowDownload);
+        const task = this.prepareRole("embedding", allowDownload);
         this.prepareTask = task;
         try {
             await task;
@@ -79,31 +90,58 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         }
     }
 
-    private async prepareOnce(allowDownload: boolean): Promise<void> {
-        this.update({ phase: allowDownload ? "downloading" : "loading", progress: 0, message: null });
+    async prepareReranker(allowDownload: boolean): Promise<void> {
+        if (this.rerankerPrepareTask) return await this.rerankerPrepareTask;
+        const task = this.prepareRole("reranker", allowDownload);
+        this.rerankerPrepareTask = task;
+        try {
+            await task;
+        } finally {
+            if (this.rerankerPrepareTask === task) this.rerankerPrepareTask = null;
+        }
+    }
+
+    private async prepareRole(role: LocalAiRole, allowDownload: boolean): Promise<void> {
+        this.assertActive();
+        const current = this.getRoleStatus(role);
+        if (current.phase === "ready" && this.activeRole === role) return;
+        this.updateRole(role, { phase: allowDownload ? "downloading" : "loading", progress: 0, message: null });
         try {
             const assets = await this.runtimeAssets.prepare({
                 allowDownload,
                 onProgress: ({ loadedBytes, totalBytes }) => {
                     const runtimeProgress = totalBytes > 0 ? loadedBytes / totalBytes : 0;
-                    this.update({ progress: runtimeProgress * 0.1 });
+                    this.updateRole(role, { progress: runtimeProgress * 0.1 });
                 },
             });
-            await this.request(
-                "prepare",
-                {
-                    allowDownload,
-                    runtime: {
-                        policyId: assets.policyId,
-                        wasmBinary: assets.wasmBinary,
+            const policyId = getPolicyId(role);
+            await this.scheduler.schedule(
+                "foreground-query",
+                () => this.request(
+                    "prepare",
+                    {
+                        allowDownload,
+                        runtime: {
+                            policyId: assets.policyId,
+                            wasmBinary: assets.wasmBinary,
+                        },
                     },
-                },
-                undefined,
-                [assets.wasmBinary],
+                    undefined,
+                    [assets.wasmBinary],
+                    "interactive",
+                    role,
+                    policyId,
+                ),
             );
-            this.update({ phase: "ready", progress: 1, cached: true, message: null });
+            this.activeRole = role;
+            const otherRole: LocalAiRole = role === "embedding" ? "reranker" : "embedding";
+            if (this.getRoleStatus(otherRole).phase === "ready") this.updateRole(otherRole, { phase: "evicted" });
+            this.updateRole(role, { phase: "ready", progress: 1, cached: true, message: null });
         } catch (error) {
-            this.update({ phase: "error", progress: null, message: getErrorMessage(error) });
+            this.activeRole = null;
+            const otherRole: LocalAiRole = role === "embedding" ? "reranker" : "embedding";
+            if (this.getRoleStatus(otherRole).phase === "ready") this.updateRole(otherRole, { phase: "evicted" });
+            this.updateRole(role, { phase: "error", progress: null, message: getErrorMessage(error) });
             throw error;
         }
     }
@@ -111,7 +149,7 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     async embed(request: LocalAiEmbeddingRequest): Promise<LocalAiEmbeddingResult> {
         this.assertActive();
         if (request.signal?.aborted) throw new DOMException("Embedding request aborted.", "AbortError");
-        if (this.status.phase !== "ready") {
+        if (this.status.phase !== "ready" || this.activeRole !== "embedding") {
             try { await this.prepare(false); } catch {
                 throw new EmbeddingError("not-ready", "builtin", "Built-in embedding is not prepared. Run the prepare command first.");
             }
@@ -127,7 +165,15 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         try {
             const result = await this.scheduler.schedule(
                 priority,
-                () => this.request("embed", { texts: [...request.texts], purpose: request.purpose }, request.signal),
+                () => this.request(
+                    "embed",
+                    { texts: [...request.texts], purpose: request.purpose },
+                    request.signal,
+                    [],
+                    "interactive",
+                    "embedding",
+                    BUILTIN_EMBEDDING_POLICY.id,
+                ),
                 request.signal,
             );
             const decoded = decodeEmbeddingResult(result);
@@ -139,15 +185,70 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         }
     }
 
+    async rerank(request: LocalAiRerankRequest): Promise<LocalAiRerankResult> {
+        this.assertActive();
+        if (request.signal?.aborted) throw new DOMException("Rerank request aborted.", "AbortError");
+        if (request.candidates.length === 0) return { scores: [], latencyMs: 0, truncatedCandidateCount: 0 };
+        if (this.rerankerStatus.phase !== "ready" || this.activeRole !== "reranker") {
+            try { await this.prepareReranker(false); } catch {
+                throw new Error("Built-in reranker is not prepared. Run the prepare action first.");
+            }
+        }
+        const span = this.trace?.begin("rerank.batch", {
+            policyRef: createIndexTraceRef("policy", BUILTIN_RERANK_POLICY.id),
+            role: "reranker",
+            counts: { total: request.candidates.length, queued: request.candidates.length },
+        });
+        try {
+            const result = await this.scheduler.schedule(
+                "foreground-query",
+                () => this.request(
+                    "rerank",
+                    {
+                        query: request.query,
+                        candidates: request.candidates.map((candidate) => ({ ...candidate })),
+                    },
+                    request.signal,
+                    [],
+                    "interactive",
+                    "reranker",
+                    BUILTIN_RERANK_POLICY.id,
+                ),
+                request.signal,
+            );
+            const decoded = decodeRerankResult(result, request.candidates.map((candidate) => candidate.id));
+            span?.finish("completed", null, { total: request.candidates.length, processed: decoded.scores.length, queued: 0 });
+            return decoded;
+        } catch (error: unknown) {
+            span?.finish(isAbortError(error) ? "cancelled" : "failed", isAbortError(error) ? "aborted" : "rerank-failed");
+            throw error;
+        }
+    }
+
     async clear(): Promise<void> {
         this.assertActive();
         this.update({ phase: "clearing", progress: null, message: null });
         try {
-            await this.request("clear", {});
-            await this.runtimeAssets.clear();
+            await this.request("clear", {}, undefined, [], "interactive", "embedding", BUILTIN_EMBEDDING_POLICY.id);
+            if (!this.rerankerStatus.cached) await this.runtimeAssets.clear();
+            if (this.activeRole === "embedding") this.activeRole = null;
             this.update({ phase: "not-installed", progress: null, cached: false, message: null });
         } catch (error) {
             this.update({ phase: "error", progress: null, message: getErrorMessage(error) });
+            throw error;
+        }
+    }
+
+    async clearReranker(): Promise<void> {
+        this.assertActive();
+        this.updateRole("reranker", { phase: "clearing", progress: null, message: null });
+        try {
+            await this.request("clear", {}, undefined, [], "interactive", "reranker", BUILTIN_RERANK_POLICY.id);
+            if (!this.status.cached) await this.runtimeAssets.clear();
+            if (this.activeRole === "reranker") this.activeRole = null;
+            this.updateRole("reranker", { phase: "not-installed", progress: null, cached: false, message: null });
+        } catch (error) {
+            this.updateRole("reranker", { phase: "error", progress: null, message: getErrorMessage(error) });
             throw error;
         }
     }
@@ -166,8 +267,10 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         const error = new DOMException("Local AI worker was force-stopped.", "AbortError");
         this.scheduler.cancelPending(error);
         this.terminateWorker();
+        this.activeRole = null;
         this.rejectPending(error);
         this.update({ phase: "error", progress: null, message: "Local AI worker was force-stopped." });
+        this.updateRole("reranker", { phase: "error", progress: null, message: "Local AI worker was force-stopped." });
     }
 
     private ensureWorker(): Worker {
@@ -190,6 +293,8 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         signal?: AbortSignal,
         transfer: Transferable[] = [],
         jobId: string = "interactive",
+        role: LocalAiRole = "embedding",
+        policyId: string = BUILTIN_EMBEDDING_POLICY.id,
     ): Promise<unknown> {
         if (signal?.aborted) return Promise.reject(new DOMException("Embedding request aborted.", "AbortError"));
         const requestId = `local-ai-${++this.requestSequence}`;
@@ -201,7 +306,7 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
                 if (!pending) return;
                 this.pending.delete(requestId);
                 pending.cleanup();
-                this.postCancellation(worker, requestId, jobId, workerEpoch);
+                this.postCancellation(worker, requestId, jobId, workerEpoch, pending.role, pending.policyId);
                 reject(new DOMException("Embedding request aborted.", "AbortError"));
             };
             const timeoutId = globalThis.setTimeout(() => {
@@ -215,15 +320,15 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
                 globalThis.clearTimeout(timeoutId);
                 signal?.removeEventListener("abort", abort);
             };
-            this.pending.set(requestId, { jobId, workerEpoch, resolve, reject, cleanup });
+            this.pending.set(requestId, { jobId, workerEpoch, role, policyId, resolve, reject, cleanup });
             signal?.addEventListener("abort", abort, { once: true });
             const request: LocalAiWorkerRequest = {
                 v: LOCAL_AI_WORKER_PROTOCOL_VERSION,
                 requestId,
                 jobId,
                 workerEpoch,
-                role: "embedding",
-                policyId: BUILTIN_EMBEDDING_POLICY.id,
+                role,
+                policyId,
                 operation,
                 payload,
             };
@@ -233,14 +338,15 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
 
     private onMessage(value: unknown): void {
         const message = parseLocalAiWorkerMessage(value);
-        if (!message || message.workerEpoch !== this.workerEpoch || message.policyId !== BUILTIN_EMBEDDING_POLICY.id) return;
+        if (!message || message.workerEpoch !== this.workerEpoch) return;
+        const pending = this.pending.get(message.requestId);
+        if (!pending || pending.workerEpoch !== message.workerEpoch || pending.jobId !== message.jobId
+            || pending.role !== message.role || pending.policyId !== message.policyId) return;
         if (message.type === "progress") {
             const modelProgress = message.progress;
-            this.update({ progress: modelProgress === null ? null : 0.1 + modelProgress * 0.9 });
+            this.updateRole(message.role, { progress: modelProgress === null ? null : 0.1 + modelProgress * 0.9 });
             return;
         }
-        const pending = this.pending.get(message.requestId);
-        if (!pending || pending.workerEpoch !== message.workerEpoch || pending.jobId !== message.jobId) return;
         this.pending.delete(message.requestId);
         pending.cleanup();
         if (message.ok) pending.resolve(message.result);
@@ -248,8 +354,20 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
     }
 
     private update(patch: Partial<LocalAiStatus>): void {
-        this.status = { ...this.status, ...patch };
+        this.updateRole("embedding", patch);
+    }
+
+    private updateRole(role: LocalAiRole, patch: Partial<LocalAiStatus>): void {
+        if (role === "reranker") {
+            this.rerankerStatus = { ...this.rerankerStatus, ...patch, role };
+            return;
+        }
+        this.status = { ...this.status, ...patch, role };
         for (const listener of this.listeners) listener(this.getStatus());
+    }
+
+    private getRoleStatus(role: LocalAiRole): LocalAiStatus {
+        return role === "embedding" ? this.status : this.rerankerStatus;
     }
 
     private rejectPending(error: Error): void {
@@ -260,14 +378,21 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
         this.pending.clear();
     }
 
-    private postCancellation(worker: Worker, targetRequestId: string, jobId: string, workerEpoch: number): void {
+    private postCancellation(
+        worker: Worker,
+        targetRequestId: string,
+        jobId: string,
+        workerEpoch: number,
+        role: LocalAiRole,
+        policyId: string,
+    ): void {
         const request: LocalAiWorkerRequest = {
             v: LOCAL_AI_WORKER_PROTOCOL_VERSION,
             requestId: `local-ai-${++this.requestSequence}`,
             jobId,
             workerEpoch,
-            role: "embedding",
-            policyId: BUILTIN_EMBEDDING_POLICY.id,
+            role,
+            policyId,
             operation: "cancel",
             payload: { targetRequestId },
         };
@@ -276,6 +401,7 @@ export class LocalAIRuntime implements LocalAIRuntimePort {
 
     private handleWorkerFailure(error: Error): void {
         this.terminateWorker();
+        this.activeRole = null;
         this.rejectPending(error);
         this.update({ phase: "error", progress: null, message: error.message });
     }
@@ -333,4 +459,36 @@ function decodeEmbeddingResult(value: unknown): LocalAiEmbeddingResult {
         vectors.push(Array.from(values.slice(index * dimension, (index + 1) * dimension)));
     }
     return { vectors, latencyMs: result.latencyMs };
+}
+
+function decodeRerankResult(value: unknown, expectedCandidateIds: readonly string[]): LocalAiRerankResult {
+    if (typeof value !== "object" || value === null) throw new Error("Local AI worker returned an invalid rerank result.");
+    const result = value as { scores?: unknown; latencyMs?: unknown; truncatedCandidateCount?: unknown };
+    if (!Array.isArray(result.scores)
+        || typeof result.latencyMs !== "number" || !Number.isFinite(result.latencyMs)
+        || !Number.isSafeInteger(result.truncatedCandidateCount) || (result.truncatedCandidateCount as number) < 0) {
+        throw new Error("Local AI worker returned malformed rerank diagnostics.");
+    }
+    const expectedIds = new Set(expectedCandidateIds);
+    const seenIds = new Set<string>();
+    const scores = result.scores.map((entry) => {
+        if (typeof entry !== "object" || entry === null) throw new Error("Local AI worker returned a malformed rerank score.");
+        const candidate = entry as { candidateId?: unknown; score?: unknown };
+        if (typeof candidate.candidateId !== "string" || !expectedIds.has(candidate.candidateId)
+            || seenIds.has(candidate.candidateId) || typeof candidate.score !== "number" || !Number.isFinite(candidate.score)) {
+            throw new Error("Local AI worker returned an invalid or duplicate rerank score.");
+        }
+        seenIds.add(candidate.candidateId);
+        return { candidateId: candidate.candidateId, score: candidate.score };
+    });
+    if (seenIds.size !== expectedIds.size) throw new Error("Local AI worker did not score every rerank candidate.");
+    return {
+        scores,
+        latencyMs: result.latencyMs,
+        truncatedCandidateCount: result.truncatedCandidateCount as number,
+    };
+}
+
+function getPolicyId(role: LocalAiRole): string {
+    return role === "embedding" ? BUILTIN_EMBEDDING_POLICY.id : BUILTIN_RERANK_POLICY.id;
 }

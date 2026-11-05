@@ -1,4 +1,9 @@
-import type { RerankProvider, RerankRequest, RerankScore } from "../../domain/rerank/rerank-provider";
+import {
+    assertValidRerankRequest,
+    type RerankProvider,
+    type RerankRequest,
+    type RerankScore,
+} from "../../domain/rerank/rerank-provider";
 import type { RerankResultItem } from "../../domain/retrieval/retrieval-types";
 
 export interface LegacyRerankClient {
@@ -11,6 +16,8 @@ export class LegacyRerankAdapter implements RerankProvider {
 
     async rerank(request: RerankRequest): Promise<readonly RerankScore[]> {
         request.signal?.throwIfAborted();
+        assertValidRerankRequest(request);
+        if (request.candidates.length === 0) return [];
         const results = await this.client.rerankDocuments(request.query, request.candidates.map((candidate) => candidate.text));
         request.signal?.throwIfAborted();
         const seen = new Set<number>();

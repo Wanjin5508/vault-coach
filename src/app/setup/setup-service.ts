@@ -92,7 +92,7 @@ export class SetupService {
         if (runtime.builtinEmbeddingGate !== "verified") {
             throw new Error("Built-in embedding is not verified for this platform.");
         }
-        await this.persist(runtime.localAiPhase === "ready" ? "ready-to-index" : "preparing", "pending");
+        await this.persist(isPreparedPhase(runtime.localAiPhase) ? "ready-to-index" : "preparing", "pending");
         return this.getState();
     }
 
@@ -157,7 +157,7 @@ export class SetupService {
 }
 
 function deriveStep(step: SetupStep, runtime: SetupRuntimeSnapshot): SetupStep {
-    if (step === "preparing" && runtime.localAiPhase === "ready") return "ready-to-index";
+    if (step === "preparing" && isPreparedPhase(runtime.localAiPhase)) return "ready-to-index";
     if ((step === "indexing" || step === "ready-to-index") && runtime.coreReady) return "searchable";
     return step;
 }
@@ -166,7 +166,7 @@ function createCapabilityMatrix(runtime: SetupRuntimeSnapshot): SetupCapabilityM
     let embedding: SetupCapabilityStatus;
     if (runtime.builtinEmbeddingGate === "unsupported") embedding = "unsupported";
     else if (runtime.builtinEmbeddingGate === "unverified") embedding = "blocked-unverified";
-    else if (runtime.localAiPhase === "ready") embedding = "ready";
+    else if (isPreparedPhase(runtime.localAiPhase)) embedding = "ready";
     else if (runtime.localAiPhase === "downloading" || runtime.localAiPhase === "loading" || runtime.localAiPhase === "clearing") embedding = "preparing";
     else embedding = "available";
     return {
@@ -175,4 +175,8 @@ function createCapabilityMatrix(runtime: SetupRuntimeSnapshot): SetupCapabilityM
         utility: "not-delivered",
         graphRag: "not-delivered",
     };
+}
+
+function isPreparedPhase(phase: LocalAiPhase): boolean {
+    return phase === "ready" || phase === "evicted";
 }

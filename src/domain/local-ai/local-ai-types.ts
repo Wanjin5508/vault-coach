@@ -1,5 +1,5 @@
-export type LocalAiRole = "embedding";
-export type LocalAiPhase = "not-installed" | "downloading" | "loading" | "ready" | "error" | "clearing";
+export type LocalAiRole = "embedding" | "reranker";
+export type LocalAiPhase = "not-installed" | "downloading" | "loading" | "ready" | "evicted" | "error" | "clearing";
 
 export interface LocalAiStatus {
     role: LocalAiRole;
@@ -21,6 +21,23 @@ export interface LocalAiEmbeddingResult {
     latencyMs: number;
 }
 
+export interface LocalAiRerankCandidate {
+    id: string;
+    text: string;
+}
+
+export interface LocalAiRerankRequest {
+    query: string;
+    candidates: readonly LocalAiRerankCandidate[];
+    signal?: AbortSignal;
+}
+
+export interface LocalAiRerankResult {
+    scores: Array<{ candidateId: string; score: number }>;
+    latencyMs: number;
+    truncatedCandidateCount: number;
+}
+
 export interface LocalAIRuntimePort {
     getStatus(): LocalAiStatus;
     subscribe(listener: (status: LocalAiStatus) => void): () => void;
@@ -29,4 +46,12 @@ export interface LocalAIRuntimePort {
     hardCancel(): void;
     clear(): Promise<void>;
     dispose(): Promise<void>;
+}
+
+/** M6.1 使用的窄运行时端口；与 Embedding 共享 Worker、资产运行时和调度器。 */
+export interface LocalAIRerankerRuntimePort {
+    getRerankerStatus(): LocalAiStatus;
+    prepareReranker(allowDownload: boolean): Promise<void>;
+    rerank(request: LocalAiRerankRequest): Promise<LocalAiRerankResult>;
+    clearReranker(): Promise<void>;
 }

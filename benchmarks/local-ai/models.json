@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-24",
+  "updatedAt": "2026-11-05",
   "candidates": [
     {
       "id": "multilingual-e5-small-uint8",
@@ -59,6 +59,41 @@
       "notes": [
         "仅作为英文性能对照，不得用它的英文结果推断中文或德文质量。",
         "正式运行前必须把 revision 从 main 改为不可变 commit。"
+      ]
+    },
+    {
+      "id": "mmarco-minilm-l12-q8-reranker",
+      "role": "reranker",
+      "status": "experimental-candidate",
+      "repository": "SugoLabs/mmarco-mMiniLMv2-L12-H384-v1",
+      "revision": "6772eee1ea62dc82e1fcaaf3ed90c269fdcb1fcf",
+      "task": "text-ranking",
+      "dtype": "q8",
+      "modelFile": "onnx/model_quantized.onnx",
+      "modelFileSha256": "6e57207c62deb625b5751a376f32ac66109281b0d199a2aec09f2671e066acf5",
+      "modelFileBytes": 118235028,
+      "assetSha256": {
+        "config.json": "35fc9fdd37b8efb3e444640841d83484649519e414bda5f0eedd0e54c95d8267",
+        "tokenizer.json": "3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20",
+        "tokenizer_config.json": "185f40a89596c504fd7dc7d91515b95844aab2994e778560df9215e0d1164264",
+        "special_tokens_map.json": "66715ae6a0dd4aff4fe228bcaaccac6e52c83fd0ba80992c2be7d0e43b362307",
+        "onnx/model_quantized.onnx": "6e57207c62deb625b5751a376f32ac66109281b0d199a2aec09f2671e066acf5"
+      },
+      "license": {
+        "declared": "apache-2.0",
+        "status": "declared-by-model-card",
+        "upstream": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+      },
+      "maxTokens": 256,
+      "maxQueryTokens": 64,
+      "batchSize": 8,
+      "scoreTransform": "identity",
+      "languages": ["zh", "en", "de"],
+      "allowedDevices": ["cpu", "wasm"],
+      "notes": [
+        "固定 revision、量化权重和全部运行资产 SHA-256 已于 2026-11-05 核对。",
+        "配置声明单 logit 和 Identity 激活；原始 logit 只用于本次候选内排序。",
+        "Node CPU 三文档 smoke 已通过；Obsidian Worker、正式多语言质量和目标设备 Gate 尚未执行。"
       ]
     }
   ]

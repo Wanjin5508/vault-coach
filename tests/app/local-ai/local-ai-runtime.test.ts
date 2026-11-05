@@ -12,6 +12,7 @@ interface WorkerRequest {
     jobId: string;
     workerEpoch: number;
     policyId: string;
+    role: "embedding" | "reranker";
     operation: string;
     payload: Record<string, unknown>;
 }
@@ -33,6 +34,13 @@ class FakeLocalAiWorker {
                 this.respond(request, { ready: true });
             } else if (request.operation === "embed") {
                 this.respond(request, { count: 1, dimension: 2, buffer: new Float32Array([1, 0]).buffer, latencyMs: 8 });
+            } else if (request.operation === "rerank") {
+                const candidates = request.payload.candidates as Array<{ id: string }>;
+                this.respond(request, {
+                    scores: candidates.map((candidate, index) => ({ candidateId: candidate.id, score: candidates.length - index })),
+                    latencyMs: 12,
+                    truncatedCandidateCount: 0,
+                });
             } else {
                 this.respond(request, { ok: true });
             }
@@ -51,7 +59,7 @@ class FakeLocalAiWorker {
             requestId: request.requestId,
             jobId: request.jobId,
             workerEpoch: request.workerEpoch,
-            role: "embedding",
+            role: request.role,
             policyId: request.policyId,
             ...message,
         });
@@ -126,6 +134,146 @@ describe("LocalAIRuntime", () => {
             expect.objectContaining({ operation: "embedding.batch", status: "completed", counts: { total: 1, processed: 1, queued: 0 } }),
         ]);
         expect(JSON.stringify(events)).not.toContain("private query");
+        await runtime.dispose();
+    });
+
+    it("shares one worker across embedding and reranker roles and reloads an evicted role offline", async () => {
+        const { runtime, worker, assets } = createHarness();
+        await runtime.prepare(true);
+
+        await runtime.prepareReranker(true);
+        const result = await runtime.rerank({
+            query: "private query",
+            candidates: [{ id: "first", text: "private document" }, { id: "second", text: "other" }],
+        });
+
+        expect(runtime.getStatus().phase).toBe("evicted");
+        expect(runtime.getRerankerStatus().phase).toBe("ready");
+        expect(result).toEqual({
+            scores: [{ candidateId: "first", score: 2 }, { candidateId: "second", score: 1 }],
+            latencyMs: 12,
+            truncatedCandidateCount: 0,
+        });
+
+        await runtime.embed({ texts: ["query"], purpose: "query" });
+        expect(runtime.getStatus().phase).toBe("ready");
+        expect(runtime.getRerankerStatus().phase).toBe("evicted");
+        expect(worker.requests.map((request) => `${request.role}:${request.operation}`)).toEqual([
+            "embedding:prepare",
+            "reranker:prepare",
+            "reranker:rerank",
+            "embedding:prepare",
+            "embedding:embed",
+        ]);
+        expect(assets.prepareCalls.map((call) => call.allowDownload)).toEqual([true, true, false]);
+        await runtime.dispose();
+    });
+
+    it("invalidates the previous active role when a model switch fails, then reloads it offline", async () => {
+        const worker = new FakeLocalAiWorker();
+        worker.postMessage = (value: unknown) => {
+            const request = value as WorkerRequest;
+            worker.requests.push(request);
+            queueMicrotask(() => {
+                if (request.operation === "prepare" && request.role === "reranker") {
+                    worker.emit({
+                        v: LOCAL_AI_WORKER_PROTOCOL_VERSION,
+                        type: "response",
+                        requestId: request.requestId,
+                        jobId: request.jobId,
+                        workerEpoch: request.workerEpoch,
+                        role: request.role,
+                        policyId: request.policyId,
+                        ok: false,
+                        error: { code: "model-load-failed", recoverable: true, safeMessage: "reranker load failed" },
+                    });
+                } else if (request.operation === "prepare") worker.emit(createResponse(request, { ready: true }));
+                else if (request.operation === "embed") worker.emit(createResponse(request, {
+                    count: 1,
+                    dimension: 2,
+                    buffer: new Float32Array([1, 0]).buffer,
+                    latencyMs: 8,
+                }));
+            });
+        };
+        const assets = new FakeRuntimeAssetStore();
+        const runtime = new LocalAIRuntime(assets, () => ({ worker: worker as unknown as Worker, objectUrl: null }));
+        await runtime.prepare(true);
+
+        await expect(runtime.prepareReranker(false)).rejects.toThrow("reranker load failed");
+        expect(runtime.getStatus().phase).toBe("evicted");
+        expect(runtime.getRerankerStatus().phase).toBe("error");
+
+        await expect(runtime.embed({ texts: ["query"], purpose: "query" })).resolves.toEqual({
+            vectors: [[1, 0]],
+            latencyMs: 8,
+        });
+        expect(worker.requests.map((request) => `${request.role}:${request.operation}`)).toEqual([
+            "embedding:prepare",
+            "reranker:prepare",
+            "embedding:prepare",
+            "embedding:embed",
+        ]);
+        expect(assets.prepareCalls.map((call) => call.allowDownload)).toEqual([true, false, false]);
+        await runtime.dispose();
+    });
+
+    it("keeps the shared runtime asset until both model caches are cleared", async () => {
+        const { runtime, assets } = createHarness();
+        await runtime.prepare(true);
+        await runtime.prepareReranker(true);
+
+        await runtime.clearReranker();
+        expect(assets.clearCalls).toBe(0);
+
+        await runtime.clear();
+        expect(assets.clearCalls).toBe(1);
+        await runtime.dispose();
+    });
+
+    it("rejects partial or duplicate reranker output instead of misaligning sources", async () => {
+        const worker = new FakeLocalAiWorker();
+        worker.postMessage = (value: unknown) => {
+            const request = value as WorkerRequest;
+            worker.requests.push(request);
+            queueMicrotask(() => {
+                if (request.operation === "prepare") worker.emit(createResponse(request, { ready: true }));
+                else if (request.operation === "rerank") worker.emit(createResponse(request, {
+                    scores: [{ candidateId: "first", score: 1 }, { candidateId: "first", score: 0 }],
+                    latencyMs: 1,
+                    truncatedCandidateCount: 0,
+                }));
+            });
+        };
+        const runtime = new LocalAIRuntime(
+            new FakeRuntimeAssetStore(),
+            () => ({ worker: worker as unknown as Worker, objectUrl: null }),
+        );
+        await runtime.prepareReranker(true);
+
+        await expect(runtime.rerank({
+            query: "query",
+            candidates: [{ id: "first", text: "A" }, { id: "second", text: "B" }],
+        })).rejects.toThrow("invalid or duplicate rerank score");
+        await runtime.dispose();
+    });
+
+    it("traces rerank counts without query or document text", async () => {
+        const worker = new FakeLocalAiWorker();
+        const trace = new IndexLifecycleTrace(10, createClock());
+        const runtime = new LocalAIRuntime(
+            new FakeRuntimeAssetStore(),
+            () => ({ worker: worker as unknown as Worker, objectUrl: null }),
+            trace,
+        );
+        await runtime.prepareReranker(true);
+        await runtime.rerank({ query: "private query", candidates: [{ id: "first", text: "private document" }] });
+
+        expect(trace.getEvents()).toEqual([
+            expect.objectContaining({ operation: "rerank.batch", status: "started", counts: { total: 1, queued: 1 } }),
+            expect.objectContaining({ operation: "rerank.batch", status: "completed", counts: { total: 1, processed: 1, queued: 0 } }),
+        ]);
+        expect(JSON.stringify(trace.getEvents())).not.toContain("private");
         await runtime.dispose();
     });
 
@@ -270,7 +418,7 @@ function createResponse(request: WorkerRequest, result: unknown, workerEpoch: nu
         requestId: request.requestId,
         jobId: request.jobId,
         workerEpoch,
-        role: "embedding",
+        role: request.role,
         policyId: request.policyId,
         ok: true,
         result,

@@ -24,3 +24,33 @@ export const BUILTIN_EMBEDDING_POLICY = {
     modelSha256: "ee13574a23e4384619a172d4c0c8c6b825528fde30258c56130d5e3efcc9c8f1",
     prefixes: { query: "query: ", document: "passage: ", graph: "passage: " },
 } as const;
+
+/** M6.1 实验候选；正式质量与设备 Gate 通过前不得自动成为用户默认路由。 */
+export const BUILTIN_RERANK_POLICY = {
+    id: "mmarco-minilm-l12-q8-reranker-v1",
+    role: "reranker",
+    repository: "SugoLabs/mmarco-mMiniLMv2-L12-H384-v1",
+    revision: "6772eee1ea62dc82e1fcaaf3ed90c269fdcb1fcf",
+    dtype: "q8",
+    modelBytes: 118_235_028,
+    license: "Apache-2.0",
+    maxTokens: 256,
+    maxQueryTokens: 64,
+    batchSize: 8,
+    scoreTransform: "identity",
+    taskPolicyVersion: 1,
+    files: {
+        config: "config.json",
+        tokenizer: "tokenizer.json",
+        tokenizerConfig: "tokenizer_config.json",
+        specialTokens: "special_tokens_map.json",
+        model: "onnx/model_quantized.onnx",
+    },
+    assetSha256: {
+        "config.json": "35fc9fdd37b8efb3e444640841d83484649519e414bda5f0eedd0e54c95d8267",
+        "tokenizer.json": "3a56def25aa40facc030ea8b0b87f3688e4b3c39eb8b45d5702b3a1300fe2a20",
+        "tokenizer_config.json": "185f40a89596c504fd7dc7d91515b95844aab2994e778560df9215e0d1164264",
+        "special_tokens_map.json": "66715ae6a0dd4aff4fe228bcaaccac6e52c83fd0ba80992c2be7d0e43b362307",
+        "onnx/model_quantized.onnx": "6e57207c62deb625b5751a376f32ac66109281b0d199a2aec09f2671e066acf5",
+    },
+} as const;

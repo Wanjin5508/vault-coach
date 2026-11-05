@@ -68,6 +68,53 @@ export async function loadFeatureExtractor(runtime, candidate, device, allowDown
     });
 }
 
+export async function loadSequenceClassifier(
+    runtime,
+    candidate,
+    device,
+    allowDownload,
+    progressCallback,
+    modelPath = "",
+) {
+    const cachedRevisionPath = path.join(runtime.env.cacheDir, candidate.repository, candidate.revision);
+    const modelSource = modelPath || (allowDownload ? candidate.repository : cachedRevisionPath);
+    const pretrainedOptions = {
+        revision: allowDownload && !modelPath ? candidate.revision : "main",
+        dtype: candidate.dtype,
+        device,
+        cache_dir: runtime.env.cacheDir,
+        local_files_only: Boolean(modelPath) || !allowDownload,
+        progress_callback: progressCallback,
+    };
+    return await Promise.all([
+        runtime.AutoTokenizer.from_pretrained(modelSource, pretrainedOptions),
+        runtime.AutoModelForSequenceClassification.from_pretrained(modelSource, pretrainedOptions),
+    ]).then(([tokenizer, model]) => ({ tokenizer, model }));
+}
+
+export async function scoreTextPairs(tokenizer, model, candidate, query, documents) {
+    if (!Array.isArray(documents) || documents.length === 0) return [];
+    const inputs = tokenizer(documents.map(() => query), {
+        text_pair: documents,
+        padding: true,
+        truncation: true,
+        max_length: candidate.maxTokens,
+    });
+    const output = await model(inputs);
+    const logits = output.logits?.tolist?.();
+    output.logits?.dispose?.();
+    if (!Array.isArray(logits) || logits.length !== documents.length) {
+        throw new Error(`Reranker 输出数量不匹配：${logits?.length ?? "unknown"} != ${documents.length}`);
+    }
+    return logits.map((row, index) => {
+        const score = Array.isArray(row) ? row[0] : undefined;
+        if (typeof score !== "number" || !Number.isFinite(score)) {
+            throw new Error(`Reranker 第 ${index} 项不是有限的单 logit。`);
+        }
+        return score;
+    });
+}
+
 export async function embedTexts(extractor, candidate, purpose, texts) {
     const prefix = candidate.prefixes[purpose];
     if (typeof prefix !== "string") throw new Error(`候选模型未定义 ${purpose} 前缀。`);
