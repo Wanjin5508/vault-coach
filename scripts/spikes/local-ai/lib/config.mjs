@@ -31,6 +31,10 @@ export async function loadModelLedger() {
     return readJson("benchmarks/local-ai/models.json");
 }
 
+export async function loadUtilityCandidateScreening() {
+    return readJson("benchmarks/local-ai/utility-candidate-screening.json");
+}
+
 export async function loadCandidate(candidateId) {
     const ledger = await loadModelLedger();
     const candidate = ledger.candidates.find((item) => item.id === candidateId);

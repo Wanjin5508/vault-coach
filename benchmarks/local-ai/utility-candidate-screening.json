@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "screenedAt": "2026-11-05",
+  "status": "conditional-shortlist-pending-owner-license-decision",
+  "requirements": {
+    "requiredLanguages": ["zh", "en", "de"],
+    "modelDownloadBytesMaximum": 629145600,
+    "wasmEvidenceRequiredBeforeWorker": true,
+    "pinnedTransformersJsVersion": "4.3.1",
+    "immutableRevisionRequired": true,
+    "licenseDecisionRequiredBeforeDownload": true
+  },
+  "previouslyRejected": [
+    {
+      "candidateId": "qwen2.5-0.5b-instruct-q8-utility",
+      "reasonCodes": ["semantic-no-go", "memory-false-write", "rss-over-budget"]
+    },
+    {
+      "candidateId": "qwen2.5-0.5b-instruct-q4-utility",
+      "reasonCodes": ["download-over-budget", "contract-no-go", "semantic-no-go", "rss-over-budget"]
+    }
+  ],
+  "candidates": [
+    {
+      "id": "lfm2.5-350m-q4-utility-screening",
+      "repository": "onnx-community/LFM2.5-350M-ONNX",
+      "revision": "7dd4999565b0342c381ba90a3d8fc467d6df19c4",
+      "parametersMillions": 350,
+      "languages": ["en", "ar", "zh", "fr", "de", "ja", "ko", "pt", "es"],
+      "architecture": "lfm2",
+      "pinnedRuntimeArchitectureRegistered": true,
+      "transformersJsModelCard": true,
+      "assetProfile": {
+        "dtype": "q4",
+        "format": "onnx-external-data",
+        "estimatedRequiredBytes": 297119144,
+        "files": [
+          {
+            "path": "onnx/model_q4.onnx",
+            "bytes": 183442,
+            "remoteSha256": "d1a705712e93aafaba1346b32245fa59e7857a46e2272003c0e8c524977e0de8"
+          },
+          {
+            "path": "onnx/model_q4.onnx_data",
+            "bytes": 293629952,
+            "remoteSha256": "71ec6ad38a4c463dcb3dba671d06a1d9861be3a23e51290d818b95c0b7d2a5db"
+          },
+          { "path": "chat_template.jinja", "bytes": 2553 },
+          { "path": "config.json", "bytes": 1443 },
+          { "path": "generation_config.json", "bytes": 136 },
+          { "path": "tokenizer.json", "bytes": 3297793 },
+          { "path": "tokenizer_config.json", "bytes": 3825 }
+        ]
+      },
+      "license": {
+        "id": "lfm1.0",
+        "status": "pending-owner-acceptance-and-distribution-review",
+        "commercialRevenueThresholdUsd": 10000000,
+        "source": "https://www.liquid.ai/lfm-license"
+      },
+      "decision": "conditional-shortlist",
+      "reasonCodes": [
+        "required-languages-declared",
+        "under-download-budget",
+        "pinned-runtime-architecture-registered",
+        "structured-output-positioning",
+        "license-owner-decision-required",
+        "external-data-smoke-required",
+        "wasm-unverified"
+      ]
+    },
+    {
+      "id": "gemma-3-270m-it-q4-utility-screening",
+      "repository": "onnx-community/gemma-3-270m-it-ONNX",
+      "revision": "2dbbfdb1b59bd034eb959428c6a7da9dd7ea27f0",
+      "parametersMillions": 270,
+      "languages": ["140+-declared-including-required-set"],
+      "architecture": "gemma3_text",
+      "pinnedRuntimeArchitectureRegistered": true,
+      "transformersJsModelCard": true,
+      "assetProfile": {
+        "dtype": "q4",
+        "format": "onnx-external-data",
+        "estimatedRequiredBytes": 348194253,
+        "files": [
+          {
+            "path": "onnx/model_q4.onnx",
+            "bytes": 242522,
+            "remoteSha256": "cb3615746a988839308507933d4e0501ff695e747a0a0ce15c0ef53083f8ec54"
+          },
+          {
+            "path": "onnx/model_q4.onnx_data",
+            "bytes": 322933248,
+            "remoteSha256": "25c4a14af32fc1011a90504076024b0e1f65f915e9690b44a5484200d2e20851"
+          },
+          { "path": "added_tokens.json", "bytes": 35 },
+          { "path": "chat_template.jinja", "bytes": 1532 },
+          { "path": "config.json", "bytes": 1652 },
+          { "path": "generation_config.json", "bytes": 202 },
+          { "path": "special_tokens_map.json", "bytes": 662 },
+          { "path": "tokenizer.json", "bytes": 20323013 },
+          { "path": "tokenizer.model", "bytes": 4689074 },
+          { "path": "tokenizer_config.json", "bytes": 2313 }
+        ]
+      },
+      "license": {
+        "id": "gemma",
+        "status": "deferred-owner-acceptance-notice-and-use-policy-review",
+        "upstreamAccessRequiresTermsAcceptance": true,
+        "distributionNoticeRequired": true,
+        "source": "https://ai.google.dev/gemma/terms"
+      },
+      "decision": "deferred-license-alternative",
+      "reasonCodes": [
+        "required-languages-declared",
+        "under-download-budget",
+        "pinned-runtime-architecture-registered",
+        "license-owner-decision-required",
+        "distribution-ux-required",
+        "external-data-smoke-required",
+        "wasm-unverified"
+      ]
+    },
+    {
+      "id": "smollm2-360m-instruct-q8-control-screening",
+      "repository": "onnx-community/SmolLM2-360M-Instruct-ONNX",
+      "revision": "fe7c7db4c8921c9e3fa1c65cfd296fb3b1b1a8f9",
+      "parametersMillions": 360,
+      "languages": ["en"],
+      "architecture": "llama",
+      "pinnedRuntimeArchitectureRegistered": true,
+      "transformersJsModelCard": false,
+      "assetProfile": {
+        "dtype": "q8",
+        "format": "onnx-single-file",
+        "estimatedRequiredBytes": 367910712,
+        "files": [
+          {
+            "path": "onnx/model_quantized.onnx",
+            "bytes": 363115149,
+            "remoteSha256": "5ee6c8dc6791050d8779687a16c8167643a234e00ea41e06a92e05f88003dbb3"
+          },
+          { "path": "config.json", "bytes": 961 },
+          { "path": "generation_config.json", "bytes": 132 },
+          { "path": "merges.txt", "bytes": 466391 },
+          { "path": "quantize_config.json", "bytes": 312 },
+          { "path": "special_tokens_map.json", "bytes": 655 },
+          { "path": "tokenizer.json", "bytes": 3522656 },
+          { "path": "tokenizer_config.json", "bytes": 3794 },
+          { "path": "vocab.json", "bytes": 800662 }
+        ]
+      },
+      "license": {
+        "id": "apache-2.0",
+        "status": "declared-by-upstream-model-card",
+        "source": "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct"
+      },
+      "decision": "english-control-only",
+      "reasonCodes": [
+        "under-download-budget",
+        "upstream-declares-primarily-english",
+        "missing-required-languages",
+        "not-primary-candidate"
+      ]
+    }
+  ],
+  "decision": {
+    "recommendedCandidateId": "lfm2.5-350m-q4-utility-screening",
+    "status": "blocked-on-owner-license-decision",
+    "downloadAuthorized": false,
+    "workerPhaseAllowed": false,
+    "nextAction": "owner-decides-whether-lfm1.0-commercial-threshold-and-redistribution-terms-are-acceptable"
+  }
+}

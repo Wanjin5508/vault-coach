@@ -1,4 +1,10 @@
-import { readJson, loadModelLedger, loadProtocol, loadRetrievalDataset } from "./lib/config.mjs";
+import {
+    readJson,
+    loadModelLedger,
+    loadProtocol,
+    loadRetrievalDataset,
+    loadUtilityCandidateScreening,
+} from "./lib/config.mjs";
 import { evaluateRankings, rankByCosine } from "./lib/metrics.mjs";
 
 const errors = [];
@@ -6,6 +12,7 @@ const warnings = [];
 const protocol = await loadProtocol();
 const ledger = await loadModelLedger();
 const packageJson = await readJson("package.json");
+const utilityScreening = await loadUtilityCandidateScreening();
 const { corpus, queries } = await loadRetrievalDataset(protocol);
 
 check(protocol.schemaVersion === 1, "protocol schemaVersion 必须为 1。");
@@ -44,6 +51,8 @@ for (const candidate of ledger.candidates) {
     if (candidate.role === "utility") validateUtilityCandidate(candidate);
 }
 
+validateUtilityScreening(utilityScreening, protocol, packageJson);
+
 const chunkIds = new Set();
 for (const chunk of corpus) {
     check(typeof chunk.id === "string" && chunk.id.length > 0, "corpus 存在空 chunk ID。");
@@ -76,7 +85,7 @@ if (errors.length > 0) {
     for (const error of errors) console.error(`[M4 error] ${error}`);
     process.exitCode = 1;
 } else {
-    console.log(`[M4] 资产校验通过：${corpus.length} chunks，${queries.length} queries，${ledger.candidates.length} candidates。`);
+    console.log(`[M4] 资产校验通过：${corpus.length} chunks，${queries.length} queries，${ledger.candidates.length} candidates，${utilityScreening.candidates.length} utility screening candidates。`);
 }
 
 function check(condition, message) {
@@ -103,6 +112,46 @@ function validateUtilityCandidate(candidate) {
         check(Number.isSafeInteger(budget?.maxNewTokens) && budget.maxNewTokens > 0,
             `${candidate.id} 的 ${task} maxNewTokens 无效。`);
     }
+}
+
+function validateUtilityScreening(screening, currentProtocol, currentPackage) {
+    check(screening.schemaVersion === 1, "utility candidate screening schemaVersion 必须为 1。");
+    check(screening.requirements?.modelDownloadBytesMaximum
+        === currentProtocol.utility?.proposedThresholds?.modelDownloadBytesMaximum,
+    "utility candidate screening 的下载门槛与 protocol 不一致。");
+    check(screening.requirements?.pinnedTransformersJsVersion
+        === currentPackage.devDependencies?.["@huggingface/transformers"],
+    "utility candidate screening 的 Transformers.js 版本与 package.json 不一致。");
+    const ids = new Set();
+    for (const candidate of screening.candidates ?? []) {
+        check(typeof candidate.id === "string" && candidate.id.length > 0, "utility screening 存在空 candidate ID。");
+        check(!ids.has(candidate.id), `utility screening candidate ID 重复：${candidate.id}`);
+        ids.add(candidate.id);
+        check(/^[a-f0-9]{40}$/u.test(candidate.revision ?? ""), `${candidate.id} 未锁定 40 位 revision。`);
+        check(candidate.pinnedRuntimeArchitectureRegistered === true,
+            `${candidate.id} 的架构未在锁定 Transformers.js 中注册。`);
+        const files = candidate.assetProfile?.files ?? [];
+        const totalBytes = files.reduce((total, file) => total + (Number.isSafeInteger(file.bytes) ? file.bytes : 0), 0);
+        check(files.length > 0 && files.every((file) => typeof file.path === "string" && file.path.length > 0
+            && Number.isSafeInteger(file.bytes) && file.bytes > 0), `${candidate.id} 的资产清单无效。`);
+        check(totalBytes === candidate.assetProfile?.estimatedRequiredBytes,
+            `${candidate.id} 的资产总字节数与文件清单不一致。`);
+        for (const file of files.filter((value) => value.remoteSha256 !== undefined)) {
+            check(/^[a-f0-9]{64}$/u.test(file.remoteSha256), `${candidate.id} 的 ${file.path} remote SHA-256 无效。`);
+        }
+        if (candidate.decision === "conditional-shortlist") {
+            check(totalBytes <= screening.requirements.modelDownloadBytesMaximum,
+                `${candidate.id} 超过 utility 下载门槛。`);
+            check(screening.requirements.requiredLanguages.every((language) => candidate.languages.includes(language)),
+                `${candidate.id} 缺少必要语言。`);
+        }
+        if (candidate.license?.status?.includes("owner")) {
+            warnings.push(`${candidate.id} 的许可证需要负责人决定；screening 不授权下载或集成。`);
+        }
+    }
+    check(ids.has(screening.decision?.recommendedCandidateId), "utility screening 推荐了不存在的 candidate。");
+    check(screening.decision?.downloadAuthorized === false && screening.decision?.workerPhaseAllowed === false,
+        "utility screening 在许可证决定前不得授权下载或 Worker 阶段。");
 }
 
 function runMetricSelfCheck() {
