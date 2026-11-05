@@ -92,6 +92,34 @@ export async function loadSequenceClassifier(
     ]).then(([tokenizer, model]) => ({ tokenizer, model }));
 }
 
+export async function loadCausalLanguageModel(
+    runtime,
+    candidate,
+    device,
+    allowDownload,
+    progressCallback,
+    modelPath = "",
+) {
+    const cachedRevisionPath = path.join(runtime.env.cacheDir, candidate.repository, candidate.revision);
+    const modelSource = modelPath || (allowDownload ? candidate.repository : cachedRevisionPath);
+    const pretrainedOptions = {
+        revision: allowDownload && !modelPath ? candidate.revision : "main",
+        dtype: candidate.dtype,
+        device,
+        cache_dir: runtime.env.cacheDir,
+        local_files_only: Boolean(modelPath) || !allowDownload,
+        progress_callback: progressCallback,
+    };
+    return await Promise.all([
+        runtime.AutoTokenizer.from_pretrained(modelSource, pretrainedOptions),
+        runtime.AutoModelForCausalLM.from_pretrained(modelSource, pretrainedOptions),
+    ]).then(([tokenizer, model]) => ({
+        tokenizer,
+        model,
+        generator: new runtime.TextGenerationPipeline({ task: candidate.task, model, tokenizer }),
+    }));
+}
+
 export async function scoreTextPairs(tokenizer, model, candidate, query, documents) {
     if (!Array.isArray(documents) || documents.length === 0) return [];
     const inputs = tokenizer(documents.map(() => query), {

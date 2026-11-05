@@ -23,6 +23,25 @@ for (const candidate of ledger.candidates) {
         if (candidate.status === "candidate") errors.push(message); else warnings.push(message);
     }
     if (candidate.license?.status?.startsWith("pending")) warnings.push(`${candidate.id} 的许可证仍需人工核对。`);
+    if (candidate.assetSha256) {
+        for (const [assetPath, sha256] of Object.entries(candidate.assetSha256)) {
+            check(/^[a-f0-9]{64}$/u.test(sha256), `${candidate.id} 的 ${assetPath} SHA-256 无效。`);
+        }
+    }
+    if (candidate.assetBytes) {
+        check(candidate.assetSha256 !== undefined, `${candidate.id} 有 assetBytes 但没有 assetSha256。`);
+        check(sameKeys(candidate.assetBytes, candidate.assetSha256 ?? {}), `${candidate.id} 的 assetBytes 与 assetSha256 文件集合不一致。`);
+        for (const [assetPath, bytes] of Object.entries(candidate.assetBytes)) {
+            check(Number.isSafeInteger(bytes) && bytes > 0, `${candidate.id} 的 ${assetPath} 字节数无效。`);
+        }
+    }
+    if (candidate.modelFile && candidate.assetSha256) {
+        check(candidate.assetSha256?.[candidate.modelFile] === candidate.modelFileSha256,
+            `${candidate.id} 的模型文件哈希与资产清单不一致。`);
+        check(candidate.assetBytes === undefined || candidate.assetBytes[candidate.modelFile] === candidate.modelFileBytes,
+            `${candidate.id} 的模型文件字节数与资产清单不一致。`);
+    }
+    if (candidate.role === "utility") validateUtilityCandidate(candidate);
 }
 
 const chunkIds = new Set();
@@ -62,6 +81,28 @@ if (errors.length > 0) {
 
 function check(condition, message) {
     if (!condition) errors.push(message);
+}
+
+function sameKeys(left, right) {
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index]);
+}
+
+function validateUtilityCandidate(candidate) {
+    check(candidate.task === "text-generation", `${candidate.id} 的 utility task 必须为 text-generation。`);
+    check(candidate.assetSha256 !== undefined && candidate.assetBytes !== undefined,
+        `${candidate.id} 缺少完整的 utility 资产哈希或字节清单。`);
+    check(/^[a-f0-9]{64}$/u.test(candidate.chatTemplateSha256 ?? ""), `${candidate.id} 缺少有效 chat template SHA-256。`);
+    check(Number.isSafeInteger(candidate.utilityTaskPolicyVersion) && candidate.utilityTaskPolicyVersion > 0,
+        `${candidate.id} 缺少有效 utilityTaskPolicyVersion。`);
+    for (const task of ["query-rewrite", "memory-extraction"]) {
+        const budget = candidate.tasks?.[task];
+        check(Number.isSafeInteger(budget?.maxPromptTokens) && budget.maxPromptTokens > 0,
+            `${candidate.id} 的 ${task} maxPromptTokens 无效。`);
+        check(Number.isSafeInteger(budget?.maxNewTokens) && budget.maxNewTokens > 0,
+            `${candidate.id} 的 ${task} maxNewTokens 无效。`);
+    }
 }
 
 function runMetricSelfCheck() {
