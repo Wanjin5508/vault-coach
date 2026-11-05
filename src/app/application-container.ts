@@ -51,6 +51,7 @@ import { OpenAiCompatibleEmbeddingProvider } from "../infrastructure/embedding/o
 import { EmbeddingProviderRouter } from "./embedding/embedding-provider-router";
 import { LegacyRerankAdapter } from "../infrastructure/rerank/legacy-rerank-adapter";
 import { LegacyChatUtilityAdapter } from "../infrastructure/utility/legacy-chat-utility-adapter";
+import { GuardedUtilityProvider } from "./utility/guarded-utility-provider";
 import { LocalAIRuntime } from "./local-ai/local-ai-runtime";
 import { BuiltinEmbeddingProvider } from "../infrastructure/embedding/builtin-embedding-provider";
 import {
@@ -167,6 +168,7 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
     let application: VaultCoachApplication | null = null;
     const indexCoordinator = new KnowledgeIndexCoordinator(() => application?.notifyIndexStateChanged());
     const utilityAdapter = new LegacyChatUtilityAdapter(modelClient);
+    const utilityProvider = new GuardedUtilityProvider(utilityAdapter, utilityAdapter);
     const ragEngine = new AdvancedRagEngine(
         knowledgeBase,
         vectorStore,
@@ -176,8 +178,8 @@ export function createApplicationContainer(dependencies: ApplicationContainerDep
             chatProvider: modelClient,
             embeddingProvider,
             rerankProvider: new LegacyRerankAdapter(modelClient),
-            queryRewrite: utilityAdapter,
-            memoryExtraction: utilityAdapter,
+            queryRewrite: utilityProvider,
+            memoryExtraction: utilityProvider,
             onVectorIncompatible: () => indexCoordinator.setVectorDirty(true),
         },
     );

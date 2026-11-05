@@ -4,6 +4,7 @@ export interface QueryRewriteRequest {
     originalQuery: string;
     conversationContext: string;
     scopeDescription: string;
+    signal?: AbortSignal;
 }
 
 export interface QueryRewritePort {

@@ -64,6 +64,26 @@
       "workerAndTargetDeviceEvidenceRequired": true
     }
   },
+  "utility": {
+    "status": "contract-only-pending-owner-approval",
+    "tasks": ["query-rewrite", "memory-extraction"],
+    "outputContract": {
+      "strictJsonObjectOnly": true,
+      "rawJsonCharactersMaximum": 8192,
+      "rewrittenQueryCharactersMaximum": 512,
+      "memoryStatementsMaximum": 5,
+      "memoryStatementCharactersMaximum": 500,
+      "unexpectedFieldsAllowed": false,
+      "duplicateMemoryStatementsAllowed": false
+    },
+    "requiredSlices": ["zh", "en", "mixed", "coreference", "negation", "temporal", "prompt-injection"],
+    "decisionRules": {
+      "schemaSuccessDoesNotImplySemanticGo": true,
+      "rewriteAndMemoryRequireSeparateDecisions": true,
+      "providerFailureMustNotTriggerExternalFallback": true,
+      "workerAndTargetDeviceEvidenceRequired": true
+    }
+  },
   "decisionRules": {
     "goRequiresApprovedProtocol": true,
     "goRequiresAllAcceptanceThresholds": true,
