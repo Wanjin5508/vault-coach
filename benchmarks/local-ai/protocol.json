@@ -77,6 +77,21 @@
       "duplicateMemoryStatementsAllowed": false
     },
     "requiredSlices": ["zh", "en", "mixed", "coreference", "negation", "temporal", "prompt-injection"],
+    "proposedThresholds": {
+      "strictSchemaSuccessRateMinimumByTask": 0.98,
+      "rewriteConstraintRetentionRateMinimum": 0.98,
+      "rewriteUnsupportedAdditionRateMaximum": 0.01,
+      "rewriteNdcgAt10ImprovementMinimum": 0.02,
+      "rewriteNdcgAt10RegressionMaximumByLanguage": 0.01,
+      "memoryPrecisionMinimum": 0.98,
+      "memoryRecallMinimum": 0.7,
+      "memoryFalseWriteRateMaximum": 0,
+      "rewriteP95MsDesktopWasmMaximum": 8000,
+      "memoryP95MsDesktopWasmMaximum": 12000,
+      "warmRoleRestoreP95MsMaximum": 5000,
+      "peakMemoryMbDesktopMaximum": 1024,
+      "modelDownloadBytesMaximum": 629145600
+    },
     "decisionRules": {
       "schemaSuccessDoesNotImplySemanticGo": true,
       "rewriteAndMemoryRequireSeparateDecisions": true,
