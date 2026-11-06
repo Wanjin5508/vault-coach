@@ -1,26 +1,21 @@
 ---
-tags:
-  - KnowledgeEngine
-  - 架构
-  - 需求
-  - VaultCoach
-status: active-design
-updated: 2026-07-26
+status: archived-entrypoint
+updated: 2026-11-06
 ---
 
-# Knowledge Engine 开发文档
+# Knowledge Engine 知识库已迁移
 
-本目录用于独立的 **Knowledge Engine Local** 开发。它既可以作为用户通过 Docker 在本机启动的知识训练工作台，也可以作为 Vault Coach 与 AI Career Agent 的可选协同服务；三者均可独立运行。
+新版 KE 的知识库、需求分析与初步实现规划统一维护于当前 KE 项目的 `doc/`，技术方向为 **Python + FastAPI + LangChain/LangGraph**，前端采用 **Next.js**。核心范围为大规模本地知识检索、多路召回/知识图谱及模拟面试多 Agent 与语音交互。
 
-阅读顺序：
+- [新版知识库入口](/Users/wanjinli/code/knowledge_engine/doc/README.md)
+- [新版需求分析](/Users/wanjinli/code/knowledge_engine/doc/01-新版需求分析.md)
+- [新版实现规划](/Users/wanjinli/code/knowledge_engine/doc/08-初步实现规划.md)
+- [旧版内容提炼与现状审计](/Users/wanjinli/code/knowledge_engine/doc/00-旧版审计与内容提炼.md)
+- [本目录旧版原文归档](archive/2026-11-06-legacy/README.md)
+- [KE 内旧版快照与哈希清单](/Users/wanjinli/code/knowledge_engine/doc/archive/2026-11-06/README.md)
 
-1. [开发者能力地图](./00-开发者能力地图.md)：说明项目对开发者的能力要求、学习路线和可展示产物；
-2. [需求规格](./01-需求规格.md)：说明用户价值、边界、功能、隐私和验收标准；
-3. [架构设计](./02-架构设计.md)：说明协议、数据、存储、索引、任务、性能和部署实现；
-4. [Elasticsearch 检索加速层](./03-Elasticsearch检索加速层.md)：说明 ES 作为 PostgreSQL 之后的全文、向量和混合检索投影；
-5. [独立工作台、知识训练与 Agent 设计](./04-独立工作台、知识训练与Agent设计.md)：说明 GUI、独立/Connector 工作区、RAG、考试、受控 Agent 与可验证性；
-6. [语言、客户端与桌面发行策略](./05-语言、客户端与桌面发行策略.md)：冻结 TypeScript/React/Electron、Docker、直装 macOS 与 Mac App Store 后置策略；
-7. [开发教程](./开发教程/README.md)：按能力树分层讲解完成 Engine 所需的后端、数据、检索、图谱、可靠性、Workbench 与 Agent 技术；
-8. [Knowledge Engine Local 路线图](../v1.3.4后续开发日志/开发规划与过程记录/KnowledgeEngine-Local-后续开发路线图.md)：按 KE-0 至 KE-9 推进独立平台与 Connector；KE-10 仅作条件性发行形态评估。
+旧版 40 个文件完整移动到 `archive/2026-11-06-legacy/`，并有 KE 内逐字节副本。归档中的 `active`、TS/Fastify、旧阶段计划与已完成状态均为历史描述，不约束新版；归档仅供查阅，不继续双向维护。部分指向本目录以外的旧 Obsidian 链接保留原样。
 
-当前 Vault Coach 只实现版本化的 **Lite Engine seam**。默认模式仍是完全本地、无网络、无 Docker 依赖的 Lite；服务不存在、停止或协议不兼容时，Ask、Exam、Learning Map、Mastery 和 Recommendation 必须继续可用。Engine 的 GUI 是服务自身的第一个客户端，不依赖 Obsidian；它也不授权 Career Agent 读取整个 Vault，跨项目只通过用户明确授权的版本化 DTO 协同。
+当前仅完成文档重构与归档；Python 服务、检索/图数据库集成与面试语音链路仍按新版规划待实现。此次不修改 Vault Coach 插件代码或用户知识内容。
+
+旧主文档 00–05 的原路径保留迁移说明，供既有引用跳转；原文只在归档中维护历史快照。
